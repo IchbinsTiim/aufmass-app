@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fassaden‑Aufmaß‑App</title>
+  <!--
+    Diese Web‑App dient zur Aufnahme von Fassadenmaßen eines Gebäudes.
+    Sie unterstützt beliebig viele Wände mit jeweils Länge und Höhe sowie
+    beliebig viele Öffnungen (z. B. Fenster oder Türen) pro Wand. Im Sinne
+    der Gerüststellung wird die gesamte Fassadenfläche berücksichtigt, es findet
+    keine Abzugsregel für Fenster und Türen statt. Die Gesamtsummen
+    werden in einer Zusammenfassung dargestellt.
+  -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Fassaden‑Aufmaß</h1>
+    <p>
+      Erfassen Sie die Außenmaße Ihres Gebäudes. Geben Sie die Länge und
+      Höhe jeder Wand ein. Öffnungen wie Fenster oder Türen können
+      optional erfasst werden, beeinflussen aber nicht die Flächenberechnung,
+      da für die Gerüststellung die gesamte Fassadenfläche maßgeblich ist.
+    </p>
+  </header>
+
+  <main>
+    <section id="projectInfo" class="card">
+      <h2>Projekt</h2>
+      <label for="projectName">Projektname:</label>
+      <input type="text" id="projectName" placeholder="z. B. Haus Meier" />
+    </section>
+
+    <section id="wallsSection" class="card">
+      <div class="section-header">
+        <h2>Wände</h2>
+        <button id="addWallBtn" class="primary">Wand hinzufügen</button>
+      </div>
+      <p>
+        Jede Wand kann mehrere Längen und Höhen enthalten (z.&nbsp;B. für
+        Balkone, Giebel oder umlaufende Terrassen). Öffnungen können
+        optional hinzugefügt werden. Zusätzlich lassen sich pro Wand
+        verschiedene Gerüst‑Extras festlegen, etwa ein Treppenturm mit
+        Käfig, ein Staubschutznetz, die Anzahl der Lampen, ein
+        Parkplatz/Genehmigung oder ein Tunnelrahmen. Diese Optionen
+        berücksichtigen automatisch die erfassten Maße, können bei
+        Bedarf aber manuell angepasst werden.
+      </p>
+      <div id="wallsContainer"></div>
+    </section>
+
+    <section id="summarySection" class="card">
+      <h2>Zusammenfassung</h2>
+      <div id="summary">
+        <p>Noch keine Wände erfasst.</p>
+      </div>
+      <!-- Schaltflächen zum Speichern/Laden und PDF-Erstellung -->
+      <div class="summary-buttons">
+        <button id="saveProjectBtn" class="primary" type="button">Projekt&nbsp;speichern</button>
+        <button id="loadProjectBtn" class="primary" type="button">Projekt&nbsp;laden</button>
+        <button id="pdfBtn" class="primary" type="button">PDF&nbsp;erstellen</button>
+      </div>
+      <!-- verstecktes Datei-Input für das Laden von JSON-Dateien -->
+      <input type="file" id="loadFileInput" accept="application/json" style="display:none;" />
+    </section>
+  </main>
+
+  <footer>
+    <p class="footnote">
+      Hinweis: Für die Gerüststellung wird die gesamte Fassadenfläche betrachtet.
+      Öffnungen wie Fenster und Türen werden nicht von der Fläche abgezogen,
+      da das Gerüst vor der gesamten Wand steht.
+    </p>
+  </footer>
+
+  <!-- jsPDF Bibliothek für die PDF‑Erstellung -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

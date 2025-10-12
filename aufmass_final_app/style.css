@@ -1,0 +1,421 @@
+/*
+ * Stylesheet für die Fassaden‑Aufmaß‑App.
+ * Ein schlichtes, responsives Layout, das auf mobilen Geräten (z. B. iPhones)
+ * gut bedienbar ist. Für größere Displays passt sich das Layout automatisch an.
+ */
+
+html {
+  box-sizing: border-box;
+}
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  background: #f7f7f7;
+  color: #333;
+  line-height: 1.6;
+  padding: 0 1rem;
+}
+
+header {
+  padding: 1.5rem 0;
+  text-align: center;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.8rem;
+}
+
+main {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* Kartenstil zur optischen Abgrenzung der Abschnitte */
+/* Kartenstil modern und dezent (Apple‑Look) */
+.card {
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Primäre Buttons – dezent blau wie bei Apple */
+/*
+ * Primäre Buttons – dezent blau wie bei Apple.
+ * Wir vergrößern die Buttons weiter, damit sie auf Mobilgeräten leichter
+ * zu treffen sind. Eine größere Schriftgröße und mehr Innenabstand
+ * erhöhen die Bedienbarkeit erheblich. Der Radius bleibt rund, um
+ * dem Apple‑Look zu entsprechen.
+ */
+.primary {
+  background: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 1.3rem 1.6rem;
+  cursor: pointer;
+  font-size: 1.35rem;
+  line-height: 1.2;
+  transition: background 0.2s ease;
+}
+
+.primary:hover {
+  background: #005bb5;
+}
+
+/* Sekundäre Buttons (z. B. für "Konsole hinzufügen") */
+/* Sekundäre Buttons (z. B. für "Konsole hinzufügen") in größerer Ausführung */
+.secondary {
+  background: #e6e6e6;
+  color: #333;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 1.1rem 1.4rem;
+  cursor: pointer;
+  font-size: 1.25rem;
+  transition: background 0.2s ease;
+}
+.secondary:hover {
+  background: #d0d0d0;
+}
+
+label {
+  display: block;
+  margin: 0.5rem 0 0.25rem;
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="number"] {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+/* Wandcontainer im Apple‑Look: feiner Rand und weißer Hintergrund */
+.wall {
+  border: 1px solid #eee;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #fff;
+}
+
+.wall-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.wall-header h3 {
+  margin: 0;
+}
+
+/* Layout für die Zeile mit Seite und Typ: sie sollen nebeneinander stehen. */
+/*
+ * Layout für die Zeile mit der Auswahl von Seite und Typ.
+ * Beide Felder sollen in einer Reihe nebeneinander erscheinen und den
+ * verfügbaren Platz teilen. Durch `align-items: flex-end` richten sich
+ * die Labels und Selectfelder am unteren Rand aus, was optisch ruhiger
+ * wirkt. `flex-wrap: wrap` erlaubt bei sehr schmalen Bildschirmen
+ * einen Umbruch, so dass die Felder untereinander angeordnet werden.
+ */
+/*
+ * Layout für die Zeile mit der Auswahl von Seite und Typ. Statt einer
+ * flexbox verwenden wir ein zweispaltiges Grid, das die beiden Blöcke
+ * (Seite und Typ) zuverlässig nebeneinander anordnet. Die Spalten
+ * verteilen den verfügbaren Platz gleichmäßig. Wenn der Bildschirm
+ * schmaler wird als 380px pro Spalte, bricht das Grid automatisch
+ * um und zeigt die Felder untereinander.
+ */
+.side-type-row {
+  display: grid;
+  /* Erhöhe die Mindestbreite der Spalten, damit Seite und Typ nicht zu schmal wirken. */
+  /* Breitere Spalten, sodass die Auswahlelemente genügend Platz haben */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+/* Stellt sicher, dass in jedem Block (Seite/Typ) Label und Select vertikal
+ * ausgerichtet bleiben, aber der Block selbst den gesamten Grid‑Zellenbereich
+ * ausnutzt. */
+.side-type-row > div {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Größere Auswahlfelder für Seite und Typ sowie Konsolen‑ und Innengeländer‑Typen */
+.wall-side,
+.wall-type,
+.console-type {
+  /* Größere Auswahlelemente für bessere Bedienbarkeit */
+  padding: 0.75rem;
+  font-size: 1.2rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  min-width: 12rem;
+}
+
+/*
+ * Die Eingabefelder innerhalb jeder Wand werden jetzt in einer vertikalen
+ * Reihenfolge angeordnet. Dies vermeidet, dass Elemente wie der
+ * "Höhe hinzufügen"‑Button andere Bereiche unnötig vergrößern. Durch
+ * die Verwendung einer Flexbox anstelle eines Grids können die
+ * Komponenten fließend in ihrer eigenen Höhe wachsen, was den
+ * Gesamteindruck luftiger und moderner macht.
+ */
+.wall-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+/* Bezeichnung (Name) der Wand */
+.wall-name {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+/* Scaffolding‑Optionen */
+/* Gerüstlängenfeld: keine Box, nur Text */
+.scaffolding {
+  /* Kein eigener Kasten mehr, lediglich etwas Abstand nach oben.  */
+  padding: 0.2rem 0;
+  display: block;
+}
+
+.scaffolding label {
+  font-weight: normal;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.scaff-length {
+  font-size: 0.9rem;
+  color: #444;
+  font-weight: 500;
+}
+
+/* Container für zusätzliche Optionen (TT, Netze, Lampen, Parkplatz, Tunnel) */
+/* Zusätzliche Optionen: feine durchgehende Linie */
+.wall-options {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.option-row input[type="number"] {
+  width: 5rem;
+  padding: 0.3rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.option-row label {
+  font-weight: normal;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Die Konsolen- und Innengeländer-Container sollen ihre Einträge in einer
+   Spalte darstellen (eine Zeile pro Eintrag und darunter der Hinzufügen-Button). */
+.cons-container,
+.inner-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Öffnungen: feine Linie */
+.openings {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee;
+}
+
+.opening-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.opening-row input[type="number"] {
+  flex: 1 1 50%;
+}
+
+/* Container für Längen und Höhen */
+/* Höhen und Längen: dezente Trennlinie */
+.heights,
+.lengths {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee;
+}
+
+/* Zeile für einzelne Längen- oder Höhenwerte */
+.dimension-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.dimension-row input[type="number"] {
+  /* Eingabefelder für Längen und Höhen sollen kürzer sein */
+  /* Länge- und Höhenfelder im Apple‑Look schmaler gestalten. Dadurch wirken
+     die Eingaben dezenter und passen besser neben die Zuschlagsfelder. */
+  flex: 0 1 auto;
+  /* Etwas breiter, damit die Eingaben nicht zu schmal wirken */
+  width: 9rem;
+}
+
+/* Spezifische Anpassung für Längenzeilen: Eingabe breiter als Zuschlagsauswahl */
+.length-row input[type="number"] {
+  flex: 0 1 auto;
+  /* Längeingabe etwas breiter gestalten */
+  width: 10rem;
+}
+.length-row .length-extra {
+  flex: 0 0 40%;
+}
+
+/* Auswahlfeld für Längenzuschläge */
+.length-extra {
+  width: 5rem;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+  flex: 0 0 auto;
+}
+
+/* Mittelwert-Checkbox (Giebel) */
+.mean-wrapper {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.remove-btn {
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+.remove-btn:hover {
+  background: #c82333;
+}
+
+/*
+ * Konsolen‑ und Innengeländerzeilen: Die Einträge innerhalb der jeweiligen
+ * Option (Typ, Länge, Auto‑Checkbox, Lagen, Remove‑Button) sollen in
+ * einer Zeile angeordnet sein. Durch flexbox und einen kleinen Abstand
+ * zwischen den Elementen bleibt die Darstellung übersichtlich. Bei sehr
+ * schmalen Bildschirmen dürfen die Elemente umbrechen.
+ */
+.console-row,
+.inner-row {
+  /* Reihen für Konsolen- und Innengeländer: horizontal angeordnet mit ausreichend Abstand,
+     bei kleinen Bildschirmen dürfen die Elemente umbrechen */
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Breitere Eingabefelder für Nummern innerhalb Konsolen‑ und Innengeländerzeilen */
+.console-row input[type="number"],
+.inner-row input[type="number"] {
+  width: 8rem;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+/* Breitere Lagen‑Eingabefelder in den Optionszeilen */
+.console-row .console-layers,
+.inner-row .inner-layers {
+  width: 5rem;
+}
+
+/* Positionierung der Auto‑Checkboxen direkt neben den zugehörigen Eingaben */
+.console-row .console-auto,
+.inner-row .inner-auto {
+  margin-left: 0.25rem;
+}
+
+.summary-item {
+  margin-bottom: 0.5rem;
+}
+
+/* Buttons für Zusammenfassung (Speichern, Laden, PDF) nebeneinander */
+.summary-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.footnote {
+  font-size: 0.8rem;
+  color: #666;
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+/*
+ * Verhindere, dass primäre Buttons in der Wandansicht die gesamte
+ * Breite ihrer Spalte einnehmen. Stattdessen sollen sie wie kleine
+ * Bedienelemente wirken. Dadurch erscheinen "Länge hinzufügen" und
+ * "Höhe hinzufügen" nicht mehr als große blaue Kästen, sondern als
+ * dezente Buttons im Apple‑Stil.
+ */
+.wall-body .primary {
+  width: auto;
+  align-self: flex-start;
+  /* Größere Abmessungen innerhalb der Wandansicht */
+  /* Übernimm die großen Maße für Schaltflächen auch innerhalb der Wand */
+  padding: 1.3rem 1.6rem;
+  border-radius: 8px;
+  display: inline-block;
+}
