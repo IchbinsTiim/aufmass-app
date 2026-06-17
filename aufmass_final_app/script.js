@@ -234,14 +234,20 @@ function collectSeiten() {
 
     const hoehen = [];
     hRows.forEach((row, i) => {
-      const v = parseNum(row.querySelector('.meas-input').value);
-      hoehen.push({ label: 'H' + (i + 1), wert: isNaN(v) ? null : v });
+      const inp = row.querySelector('.meas-input');
+      const btn = row.querySelector('.meas-extra-btn');
+      const v = parseNum(inp ? inp.value : '');
+      const extra = btn ? btn.dataset.active === '1' : false;
+      hoehen.push({ label: 'H' + (i + 1), wert: isNaN(v) ? null : v, extra });
     });
 
     const laengen = [];
     lRows.forEach((row, i) => {
-      const v = parseNum(row.querySelector('.meas-input').value);
-      laengen.push({ label: 'L' + (i + 1), wert: isNaN(v) ? null : v });
+      const inp = row.querySelector('.meas-input');
+      const btn = row.querySelector('.meas-extra-btn');
+      const v = parseNum(inp ? inp.value : '');
+      const extra = btn ? btn.dataset.active === '1' : false;
+      laengen.push({ label: 'L' + (i + 1), wert: isNaN(v) ? null : v, extra });
     });
 
     result.push({
@@ -474,8 +480,9 @@ function createMeasSection(labelText, prefix, rowsClass, initialData, addBtnText
   rowsContainer.className = 'meas-rows ' + rowsClass;
 
   initialData.forEach((item, i) => {
+    const extraDefault = item.extra !== undefined ? item.extra : false;
     rowsContainer.appendChild(
-      createMeasRow(prefix + (i + 1), item.wert, rowsContainer, prefix, onChange)
+      createMeasRow(prefix + (i + 1), item.wert, extraDefault, rowsContainer, prefix, onChange)
     );
   });
 
@@ -485,8 +492,10 @@ function createMeasSection(labelText, prefix, rowsClass, initialData, addBtnText
   addBtn.textContent = addBtnText;
   addBtn.addEventListener('click', () => {
     const count = rowsContainer.querySelectorAll('.meas-row').length;
+    const type = collectGeruesttyp();
+    const extra = type === 'fassade' || type === 'dach';
     rowsContainer.appendChild(
-      createMeasRow(prefix + (count + 1), null, rowsContainer, prefix, onChange)
+      createMeasRow(prefix + (count + 1), null, extra, rowsContainer, prefix, onChange)
     );
     onChange();
   });
@@ -502,7 +511,7 @@ function createMeasSection(labelText, prefix, rowsClass, initialData, addBtnText
 //  Einzelne Messzeile erstellen
 // ============================================================
 
-function createMeasRow(labelText, value, rowsContainer, prefix, onChange) {
+function createMeasRow(labelText, value, extraActive, rowsContainer, prefix, onChange) {
   const row = document.createElement('div');
   row.className = 'meas-row';
 
@@ -524,6 +533,19 @@ function createMeasRow(labelText, value, rowsContainer, prefix, onChange) {
   unit.className = 'meas-unit';
   unit.textContent = 'm';
 
+  const extraBtn = document.createElement('button');
+  extraBtn.type = 'button';
+  extraBtn.className = 'meas-extra-btn' + (extraActive ? ' active' : '');
+  extraBtn.textContent = '+2 m';
+  extraBtn.dataset.active = extraActive ? '1' : '0';
+  extraBtn.title = '+2 m Zuschlag ein/aus';
+  extraBtn.addEventListener('click', () => {
+    const nowActive = extraBtn.dataset.active === '1';
+    extraBtn.dataset.active = nowActive ? '0' : '1';
+    extraBtn.classList.toggle('active', !nowActive);
+    onChange();
+  });
+
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'meas-remove-btn';
@@ -539,9 +561,20 @@ function createMeasRow(labelText, value, rowsContainer, prefix, onChange) {
   row.appendChild(lbl);
   row.appendChild(input);
   row.appendChild(unit);
+  row.appendChild(extraBtn);
   row.appendChild(removeBtn);
 
   return row;
+}
+
+// Effektiven Wert einer Messzeile ermitteln (Basiswert + ggf. +2m)
+function getMeasRowValue(row) {
+  const inp = row.querySelector('.meas-input');
+  const btn = row.querySelector('.meas-extra-btn');
+  const base = parseNum(inp ? inp.value : '');
+  const extra = btn && btn.dataset.active === '1' ? 2 : 0;
+  if (isNaN(base)) return { base: null, extra, effective: null };
+  return { base, extra, effective: base + extra };
 }
 
 function renumberRowLabels(container, prefix) {
@@ -563,17 +596,17 @@ function renumberSeitenBadges() {
 // ============================================================
 
 function updateCardPreview(card, previewEl) {
-  const hInputs = card.querySelectorAll('.hoehen-rows .meas-input');
-  const lInputs = card.querySelectorAll('.laengen-rows .meas-input');
+  const hRows = card.querySelectorAll('.hoehen-rows .meas-row');
+  const lRows = card.querySelectorAll('.laengen-rows .meas-row');
 
   const parts = [];
-  hInputs.forEach((inp, i) => {
-    const v = parseNum(inp.value);
-    if (!isNaN(v) && v > 0) parts.push('H' + (i + 1) + ': ' + fmtNum(v));
+  hRows.forEach((row, i) => {
+    const { effective } = getMeasRowValue(row);
+    if (effective !== null && effective > 0) parts.push('H' + (i + 1) + ': ' + fmtNum(effective));
   });
-  lInputs.forEach((inp, i) => {
-    const v = parseNum(inp.value);
-    if (!isNaN(v) && v > 0) parts.push('L' + (i + 1) + ': ' + fmtNum(v));
+  lRows.forEach((row, i) => {
+    const { effective } = getMeasRowValue(row);
+    if (effective !== null && effective > 0) parts.push('L' + (i + 1) + ': ' + fmtNum(effective));
   });
 
   previewEl.textContent = parts.join('  ') || '';
@@ -585,12 +618,14 @@ function updateCardPreview(card, previewEl) {
 
 function addSide() {
   const container = document.getElementById('seitenContainer');
+  const type = collectGeruesttyp();
+  const autoExtra = type === 'fassade' || type === 'dach';
   const newSide = {
     id:         genId('side'),
     name:       'Strassenseite',
     manualName: '',
-    hoehen:     [{ label: 'H1', wert: null }],
-    laengen:    [{ label: 'L1', wert: null }]
+    hoehen:     [{ label: 'H1', wert: null, extra: autoExtra }],
+    laengen:    [{ label: 'L1', wert: null, extra: autoExtra }]
   };
   const el = createSeiteCard(newSide);
   container.appendChild(el);
@@ -624,38 +659,56 @@ function updateSummary() {
       ? (manual ? manual.value.trim() || 'Unbenannte Seite' : 'Unbenannte Seite')
       : (sel ? sel.value : '');
 
-    const hVals = [];
-    card.querySelectorAll('.hoehen-rows .meas-input').forEach(inp => {
-      const v = parseNum(inp.value);
-      if (!isNaN(v) && v > 0) hVals.push(v);
+    // Effektive Höhen ermitteln (Basiswert + Zuschlag)
+    const hData = [];
+    card.querySelectorAll('.hoehen-rows .meas-row').forEach((row, i) => {
+      const { base, extra, effective } = getMeasRowValue(row);
+      if (effective !== null && effective > 0) {
+        hData.push({ label: 'H' + (i + 1), base, extra, effective });
+      }
     });
 
-    const lVals = [];
-    card.querySelectorAll('.laengen-rows .meas-input').forEach(inp => {
-      const v = parseNum(inp.value);
-      if (!isNaN(v) && v > 0) lVals.push(v);
+    // Effektive Längen ermitteln
+    const lData = [];
+    card.querySelectorAll('.laengen-rows .meas-row').forEach((row, i) => {
+      const { base, extra, effective } = getMeasRowValue(row);
+      if (effective !== null && effective > 0) {
+        lData.push({ label: 'L' + (i + 1), base, extra, effective });
+      }
     });
 
-    const sumLen = lVals.reduce((a, b) => a + b, 0);
+    const sumLen = lData.reduce((a, b) => a + b.effective, 0);
     let effH = 0;
-    if (hVals.length === 1) {
-      effH = hVals[0];
-    } else if (hVals.length > 1) {
-      // Mittelwert (typisch fur Giebel)
-      effH = hVals.reduce((a, b) => a + b, 0) / hVals.length;
+    if (hData.length === 1) {
+      effH = hData[0].effective;
+    } else if (hData.length > 1) {
+      effH = hData.reduce((a, b) => a + b.effective, 0) / hData.length;
     }
 
     const area = sumLen * effH;
     totalArea   += area;
     totalLength += sumLen;
 
+    // Detailzeilen: zeige Basiswert + Zuschlag wenn aktiv
     const detailParts = [];
-    hVals.forEach((v, i) => detailParts.push('H' + (i + 1) + ': ' + fmtNum(v) + ' m'));
-    lVals.forEach((v, i) => detailParts.push('L' + (i + 1) + ': ' + fmtNum(v) + ' m'));
-    let flaeche = '';
-    if (area > 0) {
-      flaeche = fmtNum(sumLen) + ' m × ' + fmtNum(effH) + ' m = ' + fmtNum(area) + ' m²';
-    }
+    hData.forEach(h => {
+      if (h.extra > 0) {
+        detailParts.push(h.label + ': ' + fmtNum(h.base) + ' + 2 = ' + fmtNum(h.effective) + ' m');
+      } else {
+        detailParts.push(h.label + ': ' + fmtNum(h.effective) + ' m');
+      }
+    });
+    lData.forEach(l => {
+      if (l.extra > 0) {
+        detailParts.push(l.label + ': ' + fmtNum(l.base) + ' + 2 = ' + fmtNum(l.effective) + ' m');
+      } else {
+        detailParts.push(l.label + ': ' + fmtNum(l.effective) + ' m');
+      }
+    });
+
+    const flaeche = area > 0
+      ? fmtNum(sumLen) + ' m × ' + fmtNum(effH) + ' m = ' + fmtNum(area) + ' m²'
+      : '';
 
     rows.push({ name, detailParts, flaeche, area });
   });
@@ -664,13 +717,13 @@ function updateSummary() {
   let html = '<table class="summary-table">';
 
   rows.forEach(row => {
-    const detail = row.detailParts.join(' &nbsp; ');
+    const detail = row.detailParts.join('<br>');
     html += `
       <tr>
         <td>
           <span class="summary-side-name">${row.name}</span>
           ${detail ? `<span class="summary-side-detail">${detail}</span>` : ''}
-          ${row.flaeche ? `<span class="summary-side-detail">${row.flaeche}</span>` : ''}
+          ${row.flaeche ? `<span class="summary-side-detail" style="margin-top:2px">${row.flaeche}</span>` : ''}
         </td>
         <td>${row.area > 0 ? fmtNum(row.area) + ' m²' : '–'}</td>
       </tr>`;
@@ -751,22 +804,33 @@ function generatePDF() {
     doc.setFont(undefined, 'normal');
     doc.setFontSize(10);
 
-    const hVals = seite.hoehen.filter(h => h.wert !== null && !isNaN(h.wert) && h.wert > 0);
-    const lVals = seite.laengen.filter(l => l.wert !== null && !isNaN(l.wert) && l.wert > 0);
+    // Effektive Werte berechnen (Basiswert + Zuschlag)
+    const hVals = seite.hoehen
+      .filter(h => h.wert !== null && !isNaN(h.wert) && h.wert > 0)
+      .map(h => ({ ...h, effective: h.wert + (h.extra ? 2 : 0) }));
+    const lVals = seite.laengen
+      .filter(l => l.wert !== null && !isNaN(l.wert) && l.wert > 0)
+      .map(l => ({ ...l, effective: l.wert + (l.extra ? 2 : 0) }));
 
     if (hVals.length > 0) {
-      doc.text('Hohen:  ' + hVals.map((h, i) => 'H' + (i + 1) + ': ' + fmtNum(h.wert) + ' m').join('   '), LM + 4, y);
+      doc.text('Hohen:  ' + hVals.map((h, i) => {
+        const s = 'H' + (i + 1) + ': ';
+        return h.extra ? s + fmtNum(h.wert) + ' + 2 = ' + fmtNum(h.effective) + ' m' : s + fmtNum(h.effective) + ' m';
+      }).join('   '), LM + 4, y);
       y += 5;
     }
     if (lVals.length > 0) {
-      doc.text('Langen: ' + lVals.map((l, i) => 'L' + (i + 1) + ': ' + fmtNum(l.wert) + ' m').join('   '), LM + 4, y);
+      doc.text('Langen: ' + lVals.map((l, i) => {
+        const s = 'L' + (i + 1) + ': ';
+        return l.extra ? s + fmtNum(l.wert) + ' + 2 = ' + fmtNum(l.effective) + ' m' : s + fmtNum(l.effective) + ' m';
+      }).join('   '), LM + 4, y);
       y += 5;
     }
 
-    const sumLen = lVals.reduce((a, b) => a + b.wert, 0);
+    const sumLen = lVals.reduce((a, b) => a + b.effective, 0);
     let effH = 0;
-    if (hVals.length === 1) effH = hVals[0].wert;
-    else if (hVals.length > 1) effH = hVals.reduce((a, b) => a + b.wert, 0) / hVals.length;
+    if (hVals.length === 1) effH = hVals[0].effective;
+    else if (hVals.length > 1) effH = hVals.reduce((a, b) => a + b.effective, 0) / hVals.length;
 
     const area = sumLen * effH;
     totalArea += area;

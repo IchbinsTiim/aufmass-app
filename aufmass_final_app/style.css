@@ -609,6 +609,32 @@ html, body {
   flex-shrink: 0;
 }
 
+.meas-extra-btn {
+  background: var(--color-border);
+  border: 1.5px solid transparent;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  font-family: inherit;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.meas-extra-btn.active {
+  background: #dbeafe;
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.meas-extra-btn:active {
+  opacity: 0.7;
+}
+
 .meas-remove-btn {
   background: transparent;
   border: none;
