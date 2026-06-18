@@ -258,40 +258,65 @@ function collectSeiten() {
     });
 
     // Zubehor
-    const konsoleActiveBtn = card.querySelector('.konsole-btn.active');
-    const konsoleLenInp = card.querySelector('.accessory-length-input[data-acc="konsole"]');
-    const konsoleL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="konsole"]');
-    const konsoleLen = konsoleLenInp ? parseNum(konsoleLenInp.value) : NaN;
 
-    const igToggle = card.querySelector('.accessory-toggle[data-acc="ig"]');
-    const igLenInp = card.querySelector('.accessory-length-input[data-acc="ig"]');
-    const igL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="ig"]');
-    const igLen = igLenInp ? parseNum(igLenInp.value) : NaN;
+    // Konsolen (mehrere Zeilen)
+    const konsolen = [];
+    card.querySelectorAll('.acc-konsole-list .acc-multi-row').forEach(row => {
+      const activeTypBtn = row.querySelector('.konsole-btn.active');
+      if (!activeTypBtn) return;
+      const l1Btn  = row.querySelector('.accessory-l1-btn');
+      const lenInp = row.querySelector('.accessory-length-input');
+      const len    = lenInp ? parseNum(lenInp.value) : NaN;
+      konsolen.push({
+        typ:    activeTypBtn.dataset.typ,
+        laenge: isNaN(len) ? null : len,
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+      });
+    });
 
-    const dfToggle = card.querySelector('.accessory-toggle[data-acc="df"]');
-    const dfLenInp = card.querySelector('.accessory-length-input[data-acc="df"]');
-    const dfL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="df"]');
-    const dfLen = dfLenInp ? parseNum(dfLenInp.value) : NaN;
+    // Innengelaender (mehrere Zeilen)
+    const innengelaender = [];
+    card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
+      const l1Btn  = row.querySelector('.accessory-l1-btn');
+      const lenInp = row.querySelector('.accessory-length-input');
+      const len    = lenInp ? parseNum(lenInp.value) : NaN;
+      innengelaender.push({
+        laenge: isNaN(len) ? null : len,
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+      });
+    });
+
+    // Einzelne Zubehor-Elemente (Toggle + Lange)
+    function collectSingleToggle(accKey) {
+      const toggle = card.querySelector(`.accessory-toggle[data-acc="${accKey}"]`);
+      if (!toggle || !toggle.classList.contains('active')) return null;
+      const l1Btn  = card.querySelector(`.accessory-l1-btn[data-acc="${accKey}"]`);
+      const lenInp = card.querySelector(`.accessory-length-input[data-acc="${accKey}"]`);
+      const len    = lenInp ? parseNum(lenInp.value) : NaN;
+      return {
+        laenge: isNaN(len) ? null : len,
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+      };
+    }
+
+    const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
+    const ttInp    = card.querySelector('.accessory-length-input[data-acc="tt"]');
+    const ttVal    = ttInp ? parseNum(ttInp.value) : NaN;
 
     result.push({
-      id:         card.dataset.sideId,
-      name:       sel ? sel.value : '',
-      manualName: manual ? manual.value.trim() : '',
+      id:               card.dataset.sideId,
+      name:             sel ? sel.value : '',
+      manualName:       manual ? manual.value.trim() : '',
       hoehen,
       laengen,
-      konsole: konsoleActiveBtn ? {
-        typ:    konsoleActiveBtn.dataset.typ,
-        laenge: isNaN(konsoleLen) ? null : konsoleLen,
-        autoL1: konsoleL1Btn ? konsoleL1Btn.dataset.active === '1' : false
-      } : null,
-      innengelaender: (igToggle && igToggle.classList.contains('active')) ? {
-        laenge: isNaN(igLen) ? null : igLen,
-        autoL1: igL1Btn ? igL1Btn.dataset.active === '1' : false
-      } : null,
-      dachfang: (dfToggle && dfToggle.classList.contains('active')) ? {
-        laenge: isNaN(dfLen) ? null : dfLen,
-        autoL1: dfL1Btn ? dfL1Btn.dataset.active === '1' : false
-      } : null
+      konsolen,
+      innengelaender,
+      dachfang:          collectSingleToggle('df'),
+      gittertraeger:     collectSingleToggle('gt'),
+      fussgaengertunnel: collectSingleToggle('ft'),
+      treppenturm: (ttToggle && ttToggle.classList.contains('active'))
+        ? { hoehe: isNaN(ttVal) ? null : ttVal }
+        : null
     });
   });
   return result;
@@ -687,9 +712,12 @@ function addSide() {
     manualName:     '',
     hoehen:         [{ label: 'H1', wert: null, extra: autoExtra }],
     laengen:        [{ label: 'L1', wert: null, extra: autoExtra }],
-    konsole:        null,
-    innengelaender: null,
-    dachfang:       null
+    konsolen:          [],
+    innengelaender:    [],
+    dachfang:          null,
+    gittertraeger:     null,
+    fussgaengertunnel: null,
+    treppenturm:       null
   };
   const el = createSeiteCard(newSide);
   container.appendChild(el);
@@ -700,7 +728,27 @@ function addSide() {
 }
 
 // ============================================================
-//  Zubehor-Abschnitt erstellen (Konsole / IG / DF)
+//  Hilfsfunktionen fur Zubehor-Abschnitt
+// ============================================================
+
+function makeAccLabel(text) {
+  const el = document.createElement('span');
+  el.className = 'acc-entry-label';
+  el.textContent = text;
+  return el;
+}
+
+function makeAddBtn(text, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'meas-add-btn';
+  btn.textContent = text;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+// ============================================================
+//  Zubehor-Abschnitt erstellen (Konsole / IG / DF / GT / FT / TT)
 // ============================================================
 
 function createAccessoriesSection(seiteData, card, onChange) {
@@ -712,7 +760,6 @@ function createAccessoriesSection(seiteData, card, onChange) {
   title.textContent = 'Zubehor';
   section.appendChild(title);
 
-  // Aktuellen L1-Effektivwert aus dieser Karte lesen
   function getL1() {
     const firstL = card.querySelector('.laengen-rows .meas-row');
     if (!firstL) return null;
@@ -720,165 +767,243 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return effective;
   }
 
-  // Langenzeile mit [= L1]-Knopf erstellen
-  function createLengthRow(accKey, initLaenge, initAutoL1) {
+  // Inline-Langensteuerung: [= L1] [input] [Einheit]
+  // accKey: wenn gesetzt, wird data-acc auf Button und Input geschrieben
+  function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel) {
     const wrap = document.createElement('div');
-    wrap.className = 'accessory-length-wrap';
+    wrap.className = 'acc-inline-length';
 
     const l1Btn = document.createElement('button');
     l1Btn.type = 'button';
     l1Btn.className = 'accessory-l1-btn' + (initAutoL1 ? ' active' : '');
     l1Btn.dataset.active = initAutoL1 ? '1' : '0';
-    l1Btn.dataset.acc = accKey;
+    if (accKey) l1Btn.dataset.acc = accKey;
     l1Btn.textContent = '= L1';
     l1Btn.title = 'Lange von L1 ubernehmen';
 
-    const lenInp = document.createElement('input');
-    lenInp.type = 'number';
-    lenInp.className = 'accessory-length-input';
-    lenInp.dataset.acc = accKey;
-    lenInp.step = '0.01';
-    lenInp.min = '0';
-    lenInp.inputMode = 'decimal';
-    lenInp.placeholder = '0,00';
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.className = 'accessory-length-input';
+    if (accKey) inp.dataset.acc = accKey;
+    inp.step = '0.01';
+    inp.min = '0';
+    inp.inputMode = 'decimal';
+    inp.placeholder = '0,00';
     if (initLaenge !== null && initLaenge !== undefined && !isNaN(initLaenge)) {
-      lenInp.value = initLaenge;
+      inp.value = initLaenge;
     }
-    lenInp.disabled = initAutoL1;
-
+    inp.disabled = initAutoL1;
     if (initAutoL1) {
       const v = getL1();
-      if (v !== null && !isNaN(v)) lenInp.value = v;
+      if (v !== null && !isNaN(v)) inp.value = v;
     }
 
     l1Btn.addEventListener('click', () => {
       const nowActive = l1Btn.dataset.active === '1';
       l1Btn.dataset.active = nowActive ? '0' : '1';
       l1Btn.classList.toggle('active', !nowActive);
-      lenInp.disabled = !nowActive;
+      inp.disabled = !nowActive;
       if (!nowActive) {
         const v = getL1();
-        if (v !== null && !isNaN(v)) lenInp.value = v;
+        if (v !== null && !isNaN(v)) inp.value = v;
       }
       onChange();
     });
-
-    lenInp.addEventListener('input', onChange);
+    inp.addEventListener('input', onChange);
 
     const unit = document.createElement('span');
     unit.className = 'accessory-length-unit';
-    unit.textContent = 'm';
+    unit.textContent = unitLabel || 'm';
 
     wrap.appendChild(l1Btn);
-    wrap.appendChild(lenInp);
+    wrap.appendChild(inp);
     wrap.appendChild(unit);
-
-    wrap._syncL1 = function() {
-      if (l1Btn.dataset.active === '1') {
-        const v = getL1();
-        if (v !== null && !isNaN(v)) lenInp.value = v;
-      }
-    };
-
     return wrap;
   }
 
-  // ---- Konsole ----
-  const konsoleData = seiteData.konsole || null;
+  // Einzelnes Zubehor-Element mit Toggle-Button + inline Lange
+  function createSingleAcc(accKey, labelText, initData) {
+    const row = document.createElement('div');
+    row.className = 'acc-single-row';
 
-  const konsoleRow = document.createElement('div');
-  konsoleRow.className = 'accessory-row';
-  section.appendChild(konsoleRow);
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'accessory-toggle' + (initData ? ' active' : '');
+    toggleBtn.dataset.acc = accKey;
+    toggleBtn.textContent = labelText;
 
-  const konsoleLengthWrap = createLengthRow(
-    'konsole',
-    konsoleData ? konsoleData.laenge : null,
-    konsoleData ? (konsoleData.autoL1 || false) : false
-  );
-  konsoleLengthWrap.style.display = konsoleData ? '' : 'none';
-  section.appendChild(konsoleLengthWrap);
+    const lenWrap = createInlineLength(accKey, initData ? initData.laenge : null, initData ? (initData.autoL1 || false) : false);
+    lenWrap.style.display = initData ? '' : 'none';
 
-  ['0', '30', '50', '70', '109'].forEach(typ => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'konsole-btn' + (konsoleData && konsoleData.typ === typ ? ' active' : '');
-    btn.dataset.typ = typ;
-    btn.textContent = 'K ' + typ;
-    btn.addEventListener('click', () => {
-      const wasActive = btn.classList.contains('active');
-      konsoleRow.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
-      if (!wasActive) {
-        btn.classList.add('active');
-        konsoleLengthWrap.style.display = '';
-      } else {
-        konsoleLengthWrap.style.display = 'none';
-      }
+    toggleBtn.addEventListener('click', () => {
+      const wasActive = toggleBtn.classList.contains('active');
+      toggleBtn.classList.toggle('active', !wasActive);
+      lenWrap.style.display = wasActive ? 'none' : '';
       onChange();
     });
-    konsoleRow.appendChild(btn);
-  });
 
-  // ---- Innengeländer ----
-  const igData = seiteData.innengelaender || null;
+    row.appendChild(toggleBtn);
+    row.appendChild(lenWrap);
+    return row;
+  }
 
-  const igRow = document.createElement('div');
-  igRow.className = 'accessory-row';
-  const igBtn = document.createElement('button');
-  igBtn.type = 'button';
-  igBtn.className = 'accessory-toggle' + (igData ? ' active' : '');
-  igBtn.dataset.acc = 'ig';
-  igBtn.textContent = 'Innengelaender (IG)';
-  igRow.appendChild(igBtn);
-  section.appendChild(igRow);
+  // ---- Konsolen (mehrere Zeilen) ----
+  const konsoleTitleRow = document.createElement('div');
+  konsoleTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
+  const konsoleLbl = document.createElement('span');
+  konsoleLbl.className = 'accessories-title';
+  konsoleLbl.textContent = 'Konsole';
+  konsoleTitleRow.appendChild(konsoleLbl);
 
-  const igLengthWrap = createLengthRow(
-    'ig',
-    igData ? igData.laenge : null,
-    igData ? (igData.autoL1 || false) : false
-  );
-  igLengthWrap.style.display = igData ? '' : 'none';
-  section.appendChild(igLengthWrap);
+  const konsoleList = document.createElement('div');
+  konsoleList.className = 'acc-multi-list acc-konsole-list';
 
-  igBtn.addEventListener('click', () => {
-    const wasActive = igBtn.classList.contains('active');
-    igBtn.classList.toggle('active', !wasActive);
-    igLengthWrap.style.display = wasActive ? 'none' : '';
-    onChange();
-  });
+  function addKonsoleRow(data) {
+    const row = document.createElement('div');
+    row.className = 'acc-multi-row';
+
+    const typeBtns = document.createElement('div');
+    typeBtns.className = 'acc-type-btns';
+    ['0', '30', '50', '70', '109'].forEach(typ => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'konsole-btn' + (data && data.typ === typ ? ' active' : '');
+      btn.dataset.typ = typ;
+      btn.textContent = 'K ' + typ;
+      btn.addEventListener('click', () => {
+        const wasActive = btn.classList.contains('active');
+        typeBtns.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
+        if (!wasActive) btn.classList.add('active');
+        onChange();
+      });
+      typeBtns.appendChild(btn);
+    });
+
+    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 || false) : false);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'meas-remove-btn';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => { row.remove(); onChange(); });
+
+    row.appendChild(typeBtns);
+    row.appendChild(lenWrap);
+    row.appendChild(removeBtn);
+    konsoleList.appendChild(row);
+  }
+
+  const konsoleInit = Array.isArray(seiteData.konsolen)
+    ? seiteData.konsolen
+    : (seiteData.konsole ? [seiteData.konsole] : []);
+  konsoleInit.forEach(k => addKonsoleRow(k));
+
+  const addKonsoleBtn = makeAddBtn('+ Konsole', () => { addKonsoleRow(null); onChange(); });
+  konsoleTitleRow.appendChild(addKonsoleBtn);
+  section.appendChild(konsoleTitleRow);
+  section.appendChild(konsoleList);
+
+  // ---- Innengelaender (mehrere Zeilen) ----
+  const igTitleRow = document.createElement('div');
+  igTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
+  const igLbl = document.createElement('span');
+  igLbl.className = 'accessories-title';
+  igLbl.textContent = 'Innengelaender';
+  igTitleRow.appendChild(igLbl);
+
+  const igList = document.createElement('div');
+  igList.className = 'acc-multi-list acc-ig-list';
+
+  function addIgRow(data) {
+    const row = document.createElement('div');
+    row.className = 'acc-multi-row';
+    row.appendChild(makeAccLabel('IG'));
+    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 || false) : false);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'meas-remove-btn';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => { row.remove(); onChange(); });
+    row.appendChild(lenWrap);
+    row.appendChild(removeBtn);
+    igList.appendChild(row);
+  }
+
+  const igInit = Array.isArray(seiteData.innengelaender)
+    ? seiteData.innengelaender
+    : (seiteData.innengelaender ? [seiteData.innengelaender] : []);
+  igInit.forEach(ig => addIgRow(ig));
+
+  const addIgBtn = makeAddBtn('+ IG', () => { addIgRow(null); onChange(); });
+  igTitleRow.appendChild(addIgBtn);
+  section.appendChild(igTitleRow);
+  section.appendChild(igList);
 
   // ---- Dachfang ----
-  const dfData = seiteData.dachfang || null;
+  section.appendChild(createSingleAcc('df', 'Dachfang (DF)', seiteData.dachfang || null));
 
-  const dfRow = document.createElement('div');
-  dfRow.className = 'accessory-row';
-  const dfBtn = document.createElement('button');
-  dfBtn.type = 'button';
-  dfBtn.className = 'accessory-toggle' + (dfData ? ' active' : '');
-  dfBtn.dataset.acc = 'df';
-  dfBtn.textContent = 'Dachfang (DF)';
-  dfRow.appendChild(dfBtn);
-  section.appendChild(dfRow);
+  // ---- Gittertrager ----
+  section.appendChild(createSingleAcc('gt', 'Gittertrager (GT)', seiteData.gittertraeger || null));
 
-  const dfLengthWrap = createLengthRow(
-    'df',
-    dfData ? dfData.laenge : null,
-    dfData ? (dfData.autoL1 || false) : false
-  );
-  dfLengthWrap.style.display = dfData ? '' : 'none';
-  section.appendChild(dfLengthWrap);
+  // ---- Fussgangertunnel ----
+  section.appendChild(createSingleAcc('ft', 'Fussgangertunnel (FT)', seiteData.fussgaengertunnel || null));
 
-  dfBtn.addEventListener('click', () => {
-    const wasActive = dfBtn.classList.contains('active');
-    dfBtn.classList.toggle('active', !wasActive);
-    dfLengthWrap.style.display = wasActive ? 'none' : '';
+  // ---- Treppenturm (Hohe, kein = L1) ----
+  const ttData = seiteData.treppenturm || null;
+  const ttRow = document.createElement('div');
+  ttRow.className = 'acc-single-row';
+
+  const ttBtn = document.createElement('button');
+  ttBtn.type = 'button';
+  ttBtn.className = 'accessory-toggle' + (ttData ? ' active' : '');
+  ttBtn.dataset.acc = 'tt';
+  ttBtn.textContent = 'Treppenturm (TT)';
+
+  const ttWrap = document.createElement('div');
+  ttWrap.className = 'acc-inline-length';
+  ttWrap.style.display = ttData ? '' : 'none';
+
+  const ttInp = document.createElement('input');
+  ttInp.type = 'number';
+  ttInp.className = 'accessory-length-input';
+  ttInp.dataset.acc = 'tt';
+  ttInp.step = '0.01';
+  ttInp.min = '0';
+  ttInp.inputMode = 'decimal';
+  ttInp.placeholder = '0,00';
+  if (ttData && ttData.hoehe !== null && ttData.hoehe !== undefined && !isNaN(ttData.hoehe)) {
+    ttInp.value = ttData.hoehe;
+  }
+  ttInp.addEventListener('input', onChange);
+
+  const ttUnit = document.createElement('span');
+  ttUnit.className = 'accessory-length-unit';
+  ttUnit.textContent = 'm (H)';
+
+  ttWrap.appendChild(ttInp);
+  ttWrap.appendChild(ttUnit);
+
+  ttBtn.addEventListener('click', () => {
+    const wasActive = ttBtn.classList.contains('active');
+    ttBtn.classList.toggle('active', !wasActive);
+    ttWrap.style.display = wasActive ? 'none' : '';
     onChange();
   });
 
-  // L1-Sync fur alle aktiven Zubehör-Langen aufrufen
+  ttRow.appendChild(ttBtn);
+  ttRow.appendChild(ttWrap);
+  section.appendChild(ttRow);
+
+  // L1-Sync fur alle aktiven Zubehor-Langen
   section._syncL1 = function() {
-    konsoleLengthWrap._syncL1();
-    igLengthWrap._syncL1();
-    dfLengthWrap._syncL1();
+    section.querySelectorAll('.accessory-l1-btn[data-active="1"]').forEach(l1Btn => {
+      const wrap = l1Btn.closest('.acc-inline-length');
+      if (!wrap) return;
+      const inp = wrap.querySelector('.accessory-length-input');
+      if (!inp) return;
+      const v = getL1();
+      if (v !== null && !isNaN(v)) inp.value = v;
+    });
   };
 
   return section;
@@ -949,23 +1074,30 @@ function updateSummary() {
     });
 
     // Zubehor in Detailzeilen
-    const konsoleBtn = card.querySelector('.konsole-btn.active');
-    if (konsoleBtn) {
-      const lenInp = card.querySelector('.accessory-length-input[data-acc="konsole"]');
+    card.querySelectorAll('.acc-konsole-list .acc-multi-row').forEach(row => {
+      const activeTypBtn = row.querySelector('.konsole-btn.active');
+      if (!activeTypBtn) return;
+      const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('Konsole ' + konsoleBtn.dataset.typ + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
-    }
-    const igToggle = card.querySelector('.accessory-toggle[data-acc="ig"]');
-    if (igToggle && igToggle.classList.contains('active')) {
-      const lenInp = card.querySelector('.accessory-length-input[data-acc="ig"]');
+      detailParts.push('K ' + activeTypBtn.dataset.typ + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+    });
+    card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
+      const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
       detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
-    }
-    const dfToggle = card.querySelector('.accessory-toggle[data-acc="df"]');
-    if (dfToggle && dfToggle.classList.contains('active')) {
-      const lenInp = card.querySelector('.accessory-length-input[data-acc="df"]');
+    });
+    [{ acc: 'df', label: 'DF' }, { acc: 'gt', label: 'GT' }, { acc: 'ft', label: 'FT' }].forEach(({ acc, label }) => {
+      const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
+      if (!toggle || !toggle.classList.contains('active')) return;
+      const lenInp = card.querySelector('.accessory-length-input[data-acc="' + acc + '"]');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('DF' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      detailParts.push(label + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+    });
+    const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
+    if (ttToggle && ttToggle.classList.contains('active')) {
+      const hoeheInp = card.querySelector('.accessory-length-input[data-acc="tt"]');
+      const v = hoeheInp ? parseNum(hoeheInp.value) : NaN;
+      detailParts.push('TT' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m (H)' : ''));
     }
 
     const flaeche = area > 0
@@ -1119,20 +1251,33 @@ function generatePDF() {
 
     // Zubehor
     const accLines = [];
-    if (seite.konsole) {
-      const kLen = seite.konsole.laenge;
-      accLines.push('Konsole ' + seite.konsole.typ +
-        (kLen !== null && !isNaN(kLen) ? ': ' + fmtNum(kLen) + ' m' : ''));
+    if (Array.isArray(seite.konsolen)) {
+      seite.konsolen.forEach(k => {
+        const kLen = k.laenge;
+        accLines.push('K ' + k.typ + (kLen !== null && !isNaN(kLen) ? ': ' + fmtNum(kLen) + ' m' : ''));
+      });
     }
-    if (seite.innengelaender) {
-      const igLen = seite.innengelaender.laenge;
-      accLines.push('Innengelaender' +
-        (igLen !== null && !isNaN(igLen) ? ': ' + fmtNum(igLen) + ' m' : ''));
+    if (Array.isArray(seite.innengelaender)) {
+      seite.innengelaender.forEach(ig => {
+        const igLen = ig.laenge;
+        accLines.push('IG' + (igLen !== null && !isNaN(igLen) ? ': ' + fmtNum(igLen) + ' m' : ''));
+      });
     }
     if (seite.dachfang) {
       const dfLen = seite.dachfang.laenge;
-      accLines.push('Dachfang' +
-        (dfLen !== null && !isNaN(dfLen) ? ': ' + fmtNum(dfLen) + ' m' : ''));
+      accLines.push('DF' + (dfLen !== null && !isNaN(dfLen) ? ': ' + fmtNum(dfLen) + ' m' : ''));
+    }
+    if (seite.gittertraeger) {
+      const gtLen = seite.gittertraeger.laenge;
+      accLines.push('GT' + (gtLen !== null && !isNaN(gtLen) ? ': ' + fmtNum(gtLen) + ' m' : ''));
+    }
+    if (seite.fussgaengertunnel) {
+      const ftLen = seite.fussgaengertunnel.laenge;
+      accLines.push('FT' + (ftLen !== null && !isNaN(ftLen) ? ': ' + fmtNum(ftLen) + ' m' : ''));
+    }
+    if (seite.treppenturm) {
+      const ttH = seite.treppenturm.hoehe;
+      accLines.push('TT' + (ttH !== null && !isNaN(ttH) ? ': ' + fmtNum(ttH) + ' m (H)' : ''));
     }
     if (accLines.length > 0) {
       doc.text(accLines.join('   '), LM + 4, y);

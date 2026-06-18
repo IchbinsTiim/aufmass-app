@@ -947,3 +947,56 @@ html, body {
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
+
+/* ============================================================
+   Accessories – multi-row & new types
+   ============================================================ */
+.acc-multi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.acc-multi-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.acc-type-btns {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.acc-inline-length {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.acc-entry-label {
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #eff6ff;
+  color: var(--color-primary);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.acc-single-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 420px) {
+  .konsole-btn {
+    padding: 6px 7px;
+    font-size: 0.72rem;
+  }
+}
