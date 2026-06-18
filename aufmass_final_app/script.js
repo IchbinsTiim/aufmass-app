@@ -82,6 +82,13 @@ function getSeiteName(seite) {
   return seite.name || 'Unbenannte Seite';
 }
 
+// Konvertiert altes boolean-extra in numerischen Zuschlag
+function normalizeExtra(raw) {
+  if (typeof raw === 'boolean') return raw ? 2 : 0;
+  const n = parseNum(raw);
+  return isNaN(n) ? 0 : Math.max(0, n);
+}
+
 // ============================================================
 //  Toast
 // ============================================================
@@ -109,7 +116,7 @@ function showScreen(id) {
 }
 
 // ============================================================
-//  Startseite – Projektliste
+//  Startseite - Projektliste
 // ============================================================
 
 function renderProjectList() {
@@ -135,8 +142,11 @@ function renderProjectList() {
     const typ = proj.geruesttyp || 'fassade';
     const seitenAnzahl = (proj.seiten || []).length;
     const bauherr = proj.anschrift && proj.anschrift.bauherr ? proj.anschrift.bauherr : '';
+    const typeDisplay = (typ === 'sonder' && proj.geruesttypName)
+      ? proj.geruesttypName
+      : getTypeLabel(typ);
     const metaParts = [
-      getTypeLabel(typ),
+      typeDisplay,
       seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : ''),
       fmtDate(proj.geaendert)
     ];
@@ -180,10 +190,8 @@ function openProject(projectId) {
   const proj = getCurrentProject();
   if (!proj) return;
 
-  // Titel
   document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
 
-  // Anschrift
   const a = proj.anschrift || {};
   document.getElementById('fieldStrasse').value = a.strasse || '';
   document.getElementById('fieldNummer').value = a.nummer || '';
@@ -191,21 +199,15 @@ function openProject(projectId) {
   document.getElementById('fieldOrt').value = a.ort || '';
   document.getElementById('fieldBauherr').value = a.bauherr || '';
 
-  // Gerusttyp
+  const typ = proj.geruesttyp || 'fassade';
   document.querySelectorAll('.type-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.type === (proj.geruesttyp || 'fassade'));
+    btn.classList.toggle('active', btn.dataset.type === typ);
   });
-
-  // Feature 2: Sonder name row
-  document.getElementById('sonderNameRow').style.display = (proj.geruesttyp === 'sonder') ? '' : 'none';
+  document.getElementById('sonderNameRow').style.display = typ === 'sonder' ? '' : 'none';
   document.getElementById('fieldSonderName').value = proj.geruesttypName || '';
 
-  // Hausseiten
   renderSeiten(proj.seiten || []);
-
-  // Zusammenfassung
   updateSummary();
-
   showScreen('projectScreen');
 }
 
@@ -255,22 +257,21 @@ function collectSeiten() {
       laengen.push({ label: 'L' + (i + 1), wert: isNaN(v) ? null : v, extra });
     });
 
-    // Collect accessories
+    // Zubehor
     const konsoleActiveBtn = card.querySelector('.konsole-btn.active');
     const konsoleLenInp = card.querySelector('.accessory-length-input[data-acc="konsole"]');
-    const konsoleL1Btn = card.querySelector('.accessory-l1-btn[data-acc="konsole"]');
+    const konsoleL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="konsole"]');
+    const konsoleLen = konsoleLenInp ? parseNum(konsoleLenInp.value) : NaN;
 
     const igToggle = card.querySelector('.accessory-toggle[data-acc="ig"]');
     const igLenInp = card.querySelector('.accessory-length-input[data-acc="ig"]');
-    const igL1Btn = card.querySelector('.accessory-l1-btn[data-acc="ig"]');
+    const igL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="ig"]');
+    const igLen = igLenInp ? parseNum(igLenInp.value) : NaN;
 
     const dfToggle = card.querySelector('.accessory-toggle[data-acc="df"]');
     const dfLenInp = card.querySelector('.accessory-length-input[data-acc="df"]');
-    const dfL1Btn = card.querySelector('.accessory-l1-btn[data-acc="df"]');
-
-    const konsoleLen = konsoleLenInp ? parseNum(konsoleLenInp.value) : null;
-    const igLen = igLenInp ? parseNum(igLenInp.value) : null;
-    const dfLen = dfLenInp ? parseNum(dfLenInp.value) : null;
+    const dfL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="df"]');
+    const dfLen = dfLenInp ? parseNum(dfLenInp.value) : NaN;
 
     result.push({
       id:         card.dataset.sideId,
@@ -279,15 +280,15 @@ function collectSeiten() {
       hoehen,
       laengen,
       konsole: konsoleActiveBtn ? {
-        typ: konsoleActiveBtn.dataset.typ,
+        typ:    konsoleActiveBtn.dataset.typ,
         laenge: isNaN(konsoleLen) ? null : konsoleLen,
         autoL1: konsoleL1Btn ? konsoleL1Btn.dataset.active === '1' : false
       } : null,
-      innengelaender: igToggle && igToggle.classList.contains('active') ? {
+      innengelaender: (igToggle && igToggle.classList.contains('active')) ? {
         laenge: isNaN(igLen) ? null : igLen,
         autoL1: igL1Btn ? igL1Btn.dataset.active === '1' : false
       } : null,
-      dachfang: dfToggle && dfToggle.classList.contains('active') ? {
+      dachfang: (dfToggle && dfToggle.classList.contains('active')) ? {
         laenge: isNaN(dfLen) ? null : dfLen,
         autoL1: dfL1Btn ? dfL1Btn.dataset.active === '1' : false
       } : null
@@ -304,11 +305,11 @@ function saveCurrentProject() {
   const proj = getCurrentProject();
   if (!proj) return;
 
-  proj.anschrift  = collectAnschrift();
-  proj.geruesttyp = collectGeruesttyp();
+  proj.anschrift      = collectAnschrift();
+  proj.geruesttyp     = collectGeruesttyp();
   proj.geruesttypName = document.getElementById('fieldSonderName').value.trim();
-  proj.seiten     = collectSeiten();
-  proj.geaendert  = new Date().toISOString().slice(0, 10);
+  proj.seiten         = collectSeiten();
+  proj.geaendert      = new Date().toISOString().slice(0, 10);
 
   document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
   saveProjects();
@@ -384,6 +385,14 @@ function createSeiteCard(seiteData) {
   const body = document.createElement('div');
   body.className = 'seite-body';
 
+  // Gemeinsames onChange - aktualisiert Vorschau, Zusammenfassung und L1-Sync
+  let accSectionRef = null;
+  const mainOnChange = () => {
+    updateCardPreview(card, previewEl);
+    updateSummary();
+    if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
+  };
+
   // --- Name-Auswahl ---
   const nameRow = document.createElement('div');
   nameRow.className = 'seite-name-row';
@@ -406,7 +415,6 @@ function createSeiteCard(seiteData) {
     nameSelect.appendChild(o);
   });
 
-  // Wert setzen (Fallback auf ersten Eintrag wenn nicht gefunden)
   nameSelect.value = seiteData.name || 'Strassenseite';
   if (!nameSelect.value) nameSelect.value = 'Strassenseite';
 
@@ -427,26 +435,16 @@ function createSeiteCard(seiteData) {
   nameSelect.addEventListener('change', () => {
     manualInput.style.display = nameSelect.value === '__manual__' ? '' : 'none';
     updateTitle();
-    updateCardPreview(card, previewEl);
-    updateSummary();
+    mainOnChange();
   });
 
   manualInput.addEventListener('input', () => {
     updateTitle();
-    updateCardPreview(card, previewEl);
-    updateSummary();
+    mainOnChange();
   });
 
   nameRow.appendChild(nameSelect);
   nameRow.appendChild(manualInput);
-
-  // --- Shared onChange with lazy accSection reference ---
-  let accSectionRef = null;
-  const mainOnChange = () => {
-    updateCardPreview(card, previewEl);
-    updateSummary();
-    if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
-  };
 
   // --- Hohen ---
   const hoehenSection = createMeasSection(
@@ -455,7 +453,7 @@ function createSeiteCard(seiteData) {
     'hoehen-rows',
     seiteData.hoehen && seiteData.hoehen.length > 0
       ? seiteData.hoehen
-      : [{ label: 'H1', wert: null }],
+      : [{ label: 'H1', wert: null, extra: 0 }],
     '+ Hohe hinzufugen',
     mainOnChange
   );
@@ -467,12 +465,12 @@ function createSeiteCard(seiteData) {
     'laengen-rows',
     seiteData.laengen && seiteData.laengen.length > 0
       ? seiteData.laengen
-      : [{ label: 'L1', wert: null }],
+      : [{ label: 'L1', wert: null, extra: 0 }],
     '+ Lange hinzufugen',
     mainOnChange
   );
 
-  // --- Accessories section ---
+  // --- Zubehor ---
   accSectionRef = createAccessoriesSection(seiteData, card, mainOnChange);
 
   // --- Loschen ---
@@ -499,16 +497,13 @@ function createSeiteCard(seiteData) {
   card.appendChild(header);
   card.appendChild(body);
 
-  // Collapse Toggle
   header.addEventListener('click', () => {
     const isOpen = !body.classList.contains('collapsed');
     body.classList.toggle('collapsed', isOpen);
     chevron.classList.toggle('open', !isOpen);
   });
 
-  // Initiale Vorschau
   updateCardPreview(card, previewEl);
-
   return card;
 }
 
@@ -528,8 +523,7 @@ function createMeasSection(labelText, prefix, rowsClass, initialData, addBtnText
   rowsContainer.className = 'meas-rows ' + rowsClass;
 
   initialData.forEach((item, i) => {
-    // Feature 1: handle old boolean extra -> number
-    const extraDefault = typeof item.extra === 'boolean' ? (item.extra ? 2 : 0) : (item.extra ?? 0);
+    const extraDefault = normalizeExtra(item.extra);
     rowsContainer.appendChild(
       createMeasRow(prefix + (i + 1), item.wert, extraDefault, rowsContainer, prefix, onChange)
     );
@@ -582,7 +576,7 @@ function createMeasRow(labelText, value, extraValue, rowsContainer, prefix, onCh
   unit.className = 'meas-unit';
   unit.textContent = 'm';
 
-  // Feature 1: Replace toggle button with number input chip
+  // Zuschlag: editierbares Zahlenfeld (+ [Wert] m)
   const extraWrap = document.createElement('div');
   extraWrap.className = 'meas-extra-wrap';
 
@@ -590,27 +584,28 @@ function createMeasRow(labelText, value, extraValue, rowsContainer, prefix, onCh
   extraPrefix.className = 'meas-extra-prefix';
   extraPrefix.textContent = '+';
 
-  const extraInp = document.createElement('input');
-  extraInp.type = 'number';
-  extraInp.className = 'meas-extra-input' + (extraValue > 0 ? ' active' : '');
-  extraInp.step = '0.01';
-  extraInp.min = '0';
-  extraInp.inputMode = 'decimal';
-  extraInp.placeholder = '0,00';
-  if (extraValue !== null && extraValue !== undefined) extraInp.value = extraValue;
-  extraInp.addEventListener('input', () => {
-    const v = parseNum(extraInp.value);
-    extraInp.classList.toggle('active', !isNaN(v) && v > 0);
+  const extraInput = document.createElement('input');
+  extraInput.type = 'number';
+  extraInput.className = 'meas-extra-input' + (extraValue > 0 ? ' active' : '');
+  extraInput.step = '0.5';
+  extraInput.min = '0';
+  extraInput.inputMode = 'decimal';
+  extraInput.placeholder = '0';
+  extraInput.title = 'Zuschlag in Metern (0 = kein Zuschlag)';
+  if (extraValue > 0) extraInput.value = extraValue;
+  extraInput.addEventListener('input', () => {
+    const val = parseNum(extraInput.value) || 0;
+    extraInput.classList.toggle('active', val > 0);
     onChange();
   });
 
-  const extraUnit = document.createElement('span');
-  extraUnit.className = 'meas-extra-prefix';
-  extraUnit.textContent = 'm';
+  const extraSuffix = document.createElement('span');
+  extraSuffix.className = 'meas-extra-prefix';
+  extraSuffix.textContent = 'm';
 
   extraWrap.appendChild(extraPrefix);
-  extraWrap.appendChild(extraInp);
-  extraWrap.appendChild(extraUnit);
+  extraWrap.appendChild(extraInput);
+  extraWrap.appendChild(extraSuffix);
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
@@ -633,7 +628,7 @@ function createMeasRow(labelText, value, extraValue, rowsContainer, prefix, onCh
   return row;
 }
 
-// Effektiven Wert einer Messzeile ermitteln (Basiswert + variabler Zuschlag)
+// Effektiven Wert einer Messzeile ermitteln (Basiswert + Zuschlag)
 function getMeasRowValue(row) {
   const inp = row.querySelector('.meas-input');
   const extraInp = row.querySelector('.meas-extra-input');
@@ -655,187 +650,6 @@ function renumberSeitenBadges() {
     const badge = card.querySelector('.seite-number');
     if (badge) badge.textContent = i + 1;
   });
-}
-
-// ============================================================
-//  Accessories section (Feature 3)
-// ============================================================
-
-function createAccessoriesSection(seiteData, card, onChange) {
-  const section = document.createElement('div');
-  section.className = 'accessories-section';
-
-  const title = document.createElement('div');
-  title.className = 'accessories-title';
-  title.textContent = 'Zubehor';
-  section.appendChild(title);
-
-  // Helper: get current L1 effective value from this card
-  function getL1(cardEl) {
-    const firstL = cardEl.querySelector('.laengen-rows .meas-row');
-    if (!firstL) return null;
-    const { effective } = getMeasRowValue(firstL);
-    return effective;
-  }
-
-  // Helper: create a length row with [= L1] toggle and number input
-  function createLengthRow(accKey, initLaenge, initAutoL1) {
-    const wrap = document.createElement('div');
-    wrap.className = 'accessory-length-wrap';
-
-    const l1Btn = document.createElement('button');
-    l1Btn.type = 'button';
-    l1Btn.className = 'accessory-l1-btn' + (initAutoL1 ? ' active' : '');
-    l1Btn.dataset.active = initAutoL1 ? '1' : '0';
-    l1Btn.dataset.acc = accKey;
-    l1Btn.textContent = '= L1';
-
-    const lenInp = document.createElement('input');
-    lenInp.type = 'number';
-    lenInp.className = 'accessory-length-input';
-    lenInp.dataset.acc = accKey;
-    lenInp.step = '0.01';
-    lenInp.min = '0';
-    lenInp.inputMode = 'decimal';
-    lenInp.placeholder = '0,00';
-    if (initLaenge !== null && initLaenge !== undefined) lenInp.value = initLaenge;
-    lenInp.disabled = initAutoL1;
-
-    const unitSpan = document.createElement('span');
-    unitSpan.className = 'accessory-length-unit';
-    unitSpan.textContent = 'm';
-
-    // Apply L1 if autoL1 is on
-    if (initAutoL1) {
-      const v = getL1(card);
-      if (v !== null) lenInp.value = v;
-    }
-
-    l1Btn.addEventListener('click', () => {
-      const nowActive = l1Btn.dataset.active === '1';
-      l1Btn.dataset.active = nowActive ? '0' : '1';
-      l1Btn.classList.toggle('active', !nowActive);
-      lenInp.disabled = !nowActive;
-      if (!nowActive) {
-        const v = getL1(card);
-        if (v !== null) lenInp.value = v;
-      }
-      onChange();
-    });
-
-    lenInp.addEventListener('input', onChange);
-
-    wrap.appendChild(l1Btn);
-    wrap.appendChild(lenInp);
-    wrap.appendChild(unitSpan);
-    return wrap;
-  }
-
-  // --- Konsole ---
-  const konsoleData = seiteData.konsole || null;
-  const konsoleRow = document.createElement('div');
-  konsoleRow.className = 'accessory-row';
-
-  const konsoleLengthWrap = createLengthRow(
-    'konsole',
-    konsoleData ? konsoleData.laenge : null,
-    konsoleData ? konsoleData.autoL1 : false
-  );
-  konsoleLengthWrap.style.display = konsoleData ? '' : 'none';
-
-  const konsoleTypes = ['0', '30', '50', '70', '109'];
-  konsoleTypes.forEach(typ => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'konsole-btn' + (konsoleData && konsoleData.typ === typ ? ' active' : '');
-    btn.dataset.typ = typ;
-    btn.textContent = 'K ' + typ;
-    btn.addEventListener('click', () => {
-      const wasActive = btn.classList.contains('active');
-      // Deactivate all
-      konsoleRow.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
-      if (!wasActive) {
-        btn.classList.add('active');
-        konsoleLengthWrap.style.display = '';
-      } else {
-        konsoleLengthWrap.style.display = 'none';
-      }
-      onChange();
-    });
-    konsoleRow.appendChild(btn);
-  });
-  section.appendChild(konsoleRow);
-  section.appendChild(konsoleLengthWrap);
-
-  // --- Innengeländer ---
-  const igData = seiteData.innengelaender || null;
-  const igRow = document.createElement('div');
-  igRow.className = 'accessory-row';
-
-  const igBtn = document.createElement('button');
-  igBtn.type = 'button';
-  igBtn.className = 'accessory-toggle' + (igData ? ' active' : '');
-  igBtn.dataset.acc = 'ig';
-  igBtn.textContent = 'Innengeländer (IG)';
-  igRow.appendChild(igBtn);
-  section.appendChild(igRow);
-
-  const igLengthWrap = createLengthRow(
-    'ig',
-    igData ? igData.laenge : null,
-    igData ? igData.autoL1 : false
-  );
-  igLengthWrap.style.display = igData ? '' : 'none';
-  section.appendChild(igLengthWrap);
-
-  igBtn.addEventListener('click', () => {
-    const wasActive = igBtn.classList.contains('active');
-    igBtn.classList.toggle('active', !wasActive);
-    igLengthWrap.style.display = wasActive ? 'none' : '';
-    onChange();
-  });
-
-  // --- Dachfang ---
-  const dfData = seiteData.dachfang || null;
-  const dfRow = document.createElement('div');
-  dfRow.className = 'accessory-row';
-
-  const dfBtn = document.createElement('button');
-  dfBtn.type = 'button';
-  dfBtn.className = 'accessory-toggle' + (dfData ? ' active' : '');
-  dfBtn.dataset.acc = 'df';
-  dfBtn.textContent = 'Dachfang (DF)';
-  dfRow.appendChild(dfBtn);
-  section.appendChild(dfRow);
-
-  const dfLengthWrap = createLengthRow(
-    'df',
-    dfData ? dfData.laenge : null,
-    dfData ? dfData.autoL1 : false
-  );
-  dfLengthWrap.style.display = dfData ? '' : 'none';
-  section.appendChild(dfLengthWrap);
-
-  dfBtn.addEventListener('click', () => {
-    const wasActive = dfBtn.classList.contains('active');
-    dfBtn.classList.toggle('active', !wasActive);
-    dfLengthWrap.style.display = wasActive ? 'none' : '';
-    onChange();
-  });
-
-  // Auto-sync L1 when onChange fires from parent
-  section._syncL1 = function() {
-    [konsoleLengthWrap, igLengthWrap, dfLengthWrap].forEach(wrap => {
-      const l1Btn = wrap.querySelector('.accessory-l1-btn');
-      const lenInp = wrap.querySelector('.accessory-length-input');
-      if (l1Btn && l1Btn.dataset.active === '1' && lenInp) {
-        const v = getL1(card);
-        if (v !== null) lenInp.value = v;
-      }
-    });
-  };
-
-  return section;
 }
 
 // ============================================================
@@ -868,14 +682,14 @@ function addSide() {
   const type = collectGeruesttyp();
   const autoExtra = type === 'fassade' || type === 'dach' ? 2 : 0;
   const newSide = {
-    id:         genId('side'),
-    name:       'Strassenseite',
-    manualName: '',
-    hoehen:     [{ label: 'H1', wert: null, extra: autoExtra }],
-    laengen:    [{ label: 'L1', wert: null, extra: autoExtra }],
-    konsole: null,
+    id:             genId('side'),
+    name:           'Strassenseite',
+    manualName:     '',
+    hoehen:         [{ label: 'H1', wert: null, extra: autoExtra }],
+    laengen:        [{ label: 'L1', wert: null, extra: autoExtra }],
+    konsole:        null,
     innengelaender: null,
-    dachfang: null
+    dachfang:       null
   };
   const el = createSeiteCard(newSide);
   container.appendChild(el);
@@ -883,6 +697,191 @@ function addSide() {
   refreshNoSidesHint();
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   updateSummary();
+}
+
+// ============================================================
+//  Zubehor-Abschnitt erstellen (Konsole / IG / DF)
+// ============================================================
+
+function createAccessoriesSection(seiteData, card, onChange) {
+  const section = document.createElement('div');
+  section.className = 'accessories-section';
+
+  const title = document.createElement('div');
+  title.className = 'accessories-title';
+  title.textContent = 'Zubehor';
+  section.appendChild(title);
+
+  // Aktuellen L1-Effektivwert aus dieser Karte lesen
+  function getL1() {
+    const firstL = card.querySelector('.laengen-rows .meas-row');
+    if (!firstL) return null;
+    const { effective } = getMeasRowValue(firstL);
+    return effective;
+  }
+
+  // Langenzeile mit [= L1]-Knopf erstellen
+  function createLengthRow(accKey, initLaenge, initAutoL1) {
+    const wrap = document.createElement('div');
+    wrap.className = 'accessory-length-wrap';
+
+    const l1Btn = document.createElement('button');
+    l1Btn.type = 'button';
+    l1Btn.className = 'accessory-l1-btn' + (initAutoL1 ? ' active' : '');
+    l1Btn.dataset.active = initAutoL1 ? '1' : '0';
+    l1Btn.dataset.acc = accKey;
+    l1Btn.textContent = '= L1';
+    l1Btn.title = 'Lange von L1 ubernehmen';
+
+    const lenInp = document.createElement('input');
+    lenInp.type = 'number';
+    lenInp.className = 'accessory-length-input';
+    lenInp.dataset.acc = accKey;
+    lenInp.step = '0.01';
+    lenInp.min = '0';
+    lenInp.inputMode = 'decimal';
+    lenInp.placeholder = '0,00';
+    if (initLaenge !== null && initLaenge !== undefined && !isNaN(initLaenge)) {
+      lenInp.value = initLaenge;
+    }
+    lenInp.disabled = initAutoL1;
+
+    if (initAutoL1) {
+      const v = getL1();
+      if (v !== null && !isNaN(v)) lenInp.value = v;
+    }
+
+    l1Btn.addEventListener('click', () => {
+      const nowActive = l1Btn.dataset.active === '1';
+      l1Btn.dataset.active = nowActive ? '0' : '1';
+      l1Btn.classList.toggle('active', !nowActive);
+      lenInp.disabled = !nowActive;
+      if (!nowActive) {
+        const v = getL1();
+        if (v !== null && !isNaN(v)) lenInp.value = v;
+      }
+      onChange();
+    });
+
+    lenInp.addEventListener('input', onChange);
+
+    const unit = document.createElement('span');
+    unit.className = 'accessory-length-unit';
+    unit.textContent = 'm';
+
+    wrap.appendChild(l1Btn);
+    wrap.appendChild(lenInp);
+    wrap.appendChild(unit);
+
+    wrap._syncL1 = function() {
+      if (l1Btn.dataset.active === '1') {
+        const v = getL1();
+        if (v !== null && !isNaN(v)) lenInp.value = v;
+      }
+    };
+
+    return wrap;
+  }
+
+  // ---- Konsole ----
+  const konsoleData = seiteData.konsole || null;
+
+  const konsoleRow = document.createElement('div');
+  konsoleRow.className = 'accessory-row';
+  section.appendChild(konsoleRow);
+
+  const konsoleLengthWrap = createLengthRow(
+    'konsole',
+    konsoleData ? konsoleData.laenge : null,
+    konsoleData ? (konsoleData.autoL1 || false) : false
+  );
+  konsoleLengthWrap.style.display = konsoleData ? '' : 'none';
+  section.appendChild(konsoleLengthWrap);
+
+  ['0', '30', '50', '70', '109'].forEach(typ => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'konsole-btn' + (konsoleData && konsoleData.typ === typ ? ' active' : '');
+    btn.dataset.typ = typ;
+    btn.textContent = 'K ' + typ;
+    btn.addEventListener('click', () => {
+      const wasActive = btn.classList.contains('active');
+      konsoleRow.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
+      if (!wasActive) {
+        btn.classList.add('active');
+        konsoleLengthWrap.style.display = '';
+      } else {
+        konsoleLengthWrap.style.display = 'none';
+      }
+      onChange();
+    });
+    konsoleRow.appendChild(btn);
+  });
+
+  // ---- Innengeländer ----
+  const igData = seiteData.innengelaender || null;
+
+  const igRow = document.createElement('div');
+  igRow.className = 'accessory-row';
+  const igBtn = document.createElement('button');
+  igBtn.type = 'button';
+  igBtn.className = 'accessory-toggle' + (igData ? ' active' : '');
+  igBtn.dataset.acc = 'ig';
+  igBtn.textContent = 'Innengelaender (IG)';
+  igRow.appendChild(igBtn);
+  section.appendChild(igRow);
+
+  const igLengthWrap = createLengthRow(
+    'ig',
+    igData ? igData.laenge : null,
+    igData ? (igData.autoL1 || false) : false
+  );
+  igLengthWrap.style.display = igData ? '' : 'none';
+  section.appendChild(igLengthWrap);
+
+  igBtn.addEventListener('click', () => {
+    const wasActive = igBtn.classList.contains('active');
+    igBtn.classList.toggle('active', !wasActive);
+    igLengthWrap.style.display = wasActive ? 'none' : '';
+    onChange();
+  });
+
+  // ---- Dachfang ----
+  const dfData = seiteData.dachfang || null;
+
+  const dfRow = document.createElement('div');
+  dfRow.className = 'accessory-row';
+  const dfBtn = document.createElement('button');
+  dfBtn.type = 'button';
+  dfBtn.className = 'accessory-toggle' + (dfData ? ' active' : '');
+  dfBtn.dataset.acc = 'df';
+  dfBtn.textContent = 'Dachfang (DF)';
+  dfRow.appendChild(dfBtn);
+  section.appendChild(dfRow);
+
+  const dfLengthWrap = createLengthRow(
+    'df',
+    dfData ? dfData.laenge : null,
+    dfData ? (dfData.autoL1 || false) : false
+  );
+  dfLengthWrap.style.display = dfData ? '' : 'none';
+  section.appendChild(dfLengthWrap);
+
+  dfBtn.addEventListener('click', () => {
+    const wasActive = dfBtn.classList.contains('active');
+    dfBtn.classList.toggle('active', !wasActive);
+    dfLengthWrap.style.display = wasActive ? 'none' : '';
+    onChange();
+  });
+
+  // L1-Sync fur alle aktiven Zubehör-Langen aufrufen
+  section._syncL1 = function() {
+    konsoleLengthWrap._syncL1();
+    igLengthWrap._syncL1();
+    dfLengthWrap._syncL1();
+  };
+
+  return section;
 }
 
 // ============================================================
@@ -909,7 +908,6 @@ function updateSummary() {
       ? (manual ? manual.value.trim() || 'Unbenannte Seite' : 'Unbenannte Seite')
       : (sel ? sel.value : '');
 
-    // Effektive Höhen ermitteln (Basiswert + Zuschlag)
     const hData = [];
     card.querySelectorAll('.hoehen-rows .meas-row').forEach((row, i) => {
       const { base, extra, effective } = getMeasRowValue(row);
@@ -918,7 +916,6 @@ function updateSummary() {
       }
     });
 
-    // Effektive Längen ermitteln
     const lData = [];
     card.querySelectorAll('.laengen-rows .meas-row').forEach((row, i) => {
       const { base, extra, effective } = getMeasRowValue(row);
@@ -939,51 +936,45 @@ function updateSummary() {
     totalArea   += area;
     totalLength += sumLen;
 
-    // Detailzeilen: zeige Basiswert + Zuschlag wenn aktiv
     const detailParts = [];
     hData.forEach(h => {
-      if (h.extra > 0) {
-        detailParts.push(h.label + ': ' + fmtNum(h.base) + ' + ' + fmtNum(h.extra) + ' = ' + fmtNum(h.effective) + ' m');
-      } else {
-        detailParts.push(h.label + ': ' + fmtNum(h.effective) + ' m');
-      }
+      detailParts.push(h.extra > 0
+        ? h.label + ': ' + fmtNum(h.base) + ' + ' + fmtNum(h.extra) + ' = ' + fmtNum(h.effective) + ' m'
+        : h.label + ': ' + fmtNum(h.effective) + ' m');
     });
     lData.forEach(l => {
-      if (l.extra > 0) {
-        detailParts.push(l.label + ': ' + fmtNum(l.base) + ' + ' + fmtNum(l.extra) + ' = ' + fmtNum(l.effective) + ' m');
-      } else {
-        detailParts.push(l.label + ': ' + fmtNum(l.effective) + ' m');
-      }
+      detailParts.push(l.extra > 0
+        ? l.label + ': ' + fmtNum(l.base) + ' + ' + fmtNum(l.extra) + ' = ' + fmtNum(l.effective) + ' m'
+        : l.label + ': ' + fmtNum(l.effective) + ' m');
     });
 
-    const flaeche = area > 0
-      ? fmtNum(sumLen) + ' m × ' + fmtNum(effH) + ' m = ' + fmtNum(area) + ' m²'
-      : '';
-
-    // Accessories in summary
-    const accKonsole = card.querySelector('.konsole-btn.active');
-    if (accKonsole) {
+    // Zubehor in Detailzeilen
+    const konsoleBtn = card.querySelector('.konsole-btn.active');
+    if (konsoleBtn) {
       const lenInp = card.querySelector('.accessory-length-input[data-acc="konsole"]');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('Konsole ' + accKonsole.dataset.typ + (isNaN(v) ? '' : ': ' + fmtNum(v) + ' m'));
+      detailParts.push('Konsole ' + konsoleBtn.dataset.typ + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
     }
     const igToggle = card.querySelector('.accessory-toggle[data-acc="ig"]');
     if (igToggle && igToggle.classList.contains('active')) {
       const lenInp = card.querySelector('.accessory-length-input[data-acc="ig"]');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('IG' + (isNaN(v) ? '' : ': ' + fmtNum(v) + ' m'));
+      detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
     }
     const dfToggle = card.querySelector('.accessory-toggle[data-acc="df"]');
     if (dfToggle && dfToggle.classList.contains('active')) {
       const lenInp = card.querySelector('.accessory-length-input[data-acc="df"]');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('DF' + (isNaN(v) ? '' : ': ' + fmtNum(v) + ' m'));
+      detailParts.push('DF' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
     }
+
+    const flaeche = area > 0
+      ? fmtNum(sumLen) + ' m × ' + fmtNum(effH) + ' m = ' + fmtNum(area) + ' m²'
+      : '';
 
     rows.push({ name, detailParts, flaeche, area });
   });
 
-  // HTML bauen
   let html = '<table class="summary-table">';
 
   rows.forEach(row => {
@@ -1027,6 +1018,11 @@ function generatePDF() {
   const geruesttyp = collectGeruesttyp();
   const seiten     = collectSeiten();
 
+  const sonderName = document.getElementById('fieldSonderName').value.trim();
+  const geruesttypLabel = geruesttyp === 'sonder'
+    ? (sonderName || 'Sonder-Gerust')
+    : getTypeLabel(geruesttyp);
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
@@ -1034,18 +1030,15 @@ function generatePDF() {
   const PW = 182;
   let y = 16;
 
-  // Titel
   doc.setFontSize(18);
   doc.setFont(undefined, 'bold');
   doc.text('Aufmass-Bericht', LM, y);
   y += 10;
 
-  // Trennlinie
   doc.setLineWidth(0.5);
   doc.line(LM, y, LM + PW, y);
   y += 7;
 
-  // Adresse & Meta
   doc.setFontSize(11);
   doc.setFont(undefined, 'normal');
 
@@ -1056,18 +1049,13 @@ function generatePDF() {
 
   if (addrLine) { doc.text(addrLine, LM, y); y += 6; }
   if (anschrift.bauherr) { doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 6; }
-
-  // Feature 2: use geruesttypName for sonder type
-  const geruesttypDisplay = geruesttyp === 'sonder'
-    ? (getCurrentProject()?.geruesttypName || 'Sonder-Gerust')
-    : getTypeLabel(geruesttyp);
-  doc.text('Gerusttyp: ' + geruesttypDisplay, LM, y); y += 6;
+  doc.text('Gerusttyp: ' + geruesttypLabel, LM, y); y += 6;
   doc.text('Datum: ' + new Date().toLocaleDateString('de-DE'), LM, y); y += 10;
 
   let totalArea = 0;
 
   seiten.forEach((seite, idx) => {
-    if (y > 265) { doc.addPage(); y = 16; }
+    if (y > 260) { doc.addPage(); y = 16; }
 
     const name = seite.name === '__manual__' ? seite.manualName : seite.name;
 
@@ -1079,32 +1067,37 @@ function generatePDF() {
     doc.setFont(undefined, 'normal');
     doc.setFontSize(10);
 
-    // Feature 1: numeric extra values
     const hVals = seite.hoehen
       .filter(h => h.wert !== null && !isNaN(h.wert) && h.wert > 0)
       .map(h => {
-        const extra = typeof h.extra === 'boolean' ? (h.extra ? 2 : 0) : (h.extra || 0);
+        const extra = normalizeExtra(h.extra);
         return { ...h, extra, effective: h.wert + extra };
       });
     const lVals = seite.laengen
       .filter(l => l.wert !== null && !isNaN(l.wert) && l.wert > 0)
       .map(l => {
-        const extra = typeof l.extra === 'boolean' ? (l.extra ? 2 : 0) : (l.extra || 0);
+        const extra = normalizeExtra(l.extra);
         return { ...l, extra, effective: l.wert + extra };
       });
 
     if (hVals.length > 0) {
-      doc.text('Hohen:  ' + hVals.map((h, i) => {
+      const hStr = hVals.map((h, i) => {
         const s = 'H' + (i + 1) + ': ';
-        return h.extra > 0 ? s + fmtNum(h.wert) + ' + ' + fmtNum(h.extra) + ' = ' + fmtNum(h.effective) + ' m' : s + fmtNum(h.effective) + ' m';
-      }).join('   '), LM + 4, y);
+        return h.extra > 0
+          ? s + fmtNum(h.wert) + ' + ' + fmtNum(h.extra) + ' = ' + fmtNum(h.effective) + ' m'
+          : s + fmtNum(h.effective) + ' m';
+      }).join('   ');
+      doc.text('Hohen:  ' + hStr, LM + 4, y);
       y += 5;
     }
     if (lVals.length > 0) {
-      doc.text('Langen: ' + lVals.map((l, i) => {
+      const lStr = lVals.map((l, i) => {
         const s = 'L' + (i + 1) + ': ';
-        return l.extra > 0 ? s + fmtNum(l.wert) + ' + ' + fmtNum(l.extra) + ' = ' + fmtNum(l.effective) + ' m' : s + fmtNum(l.effective) + ' m';
-      }).join('   '), LM + 4, y);
+        return l.extra > 0
+          ? s + fmtNum(l.wert) + ' + ' + fmtNum(l.extra) + ' = ' + fmtNum(l.effective) + ' m'
+          : s + fmtNum(l.effective) + ' m';
+      }).join('   ');
+      doc.text('Langen: ' + lStr, LM + 4, y);
       y += 5;
     }
 
@@ -1124,22 +1117,24 @@ function generatePDF() {
       y += 5;
     }
 
-    // Feature 3: Accessories in PDF
+    // Zubehor
     const accLines = [];
     if (seite.konsole) {
       const kLen = seite.konsole.laenge;
-      accLines.push('Konsole ' + seite.konsole.typ + (kLen !== null && !isNaN(kLen) ? ': ' + fmtNum(kLen) + ' m' : ''));
+      accLines.push('Konsole ' + seite.konsole.typ +
+        (kLen !== null && !isNaN(kLen) ? ': ' + fmtNum(kLen) + ' m' : ''));
     }
     if (seite.innengelaender) {
       const igLen = seite.innengelaender.laenge;
-      accLines.push('Innengelaender' + (igLen !== null && !isNaN(igLen) ? ': ' + fmtNum(igLen) + ' m' : ''));
+      accLines.push('Innengelaender' +
+        (igLen !== null && !isNaN(igLen) ? ': ' + fmtNum(igLen) + ' m' : ''));
     }
     if (seite.dachfang) {
       const dfLen = seite.dachfang.laenge;
-      accLines.push('Dachfang' + (dfLen !== null && !isNaN(dfLen) ? ': ' + fmtNum(dfLen) + ' m' : ''));
+      accLines.push('Dachfang' +
+        (dfLen !== null && !isNaN(dfLen) ? ': ' + fmtNum(dfLen) + ' m' : ''));
     }
     if (accLines.length > 0) {
-      if (y > 265) { doc.addPage(); y = 16; }
       doc.text(accLines.join('   '), LM + 4, y);
       y += 5;
     }
@@ -1147,7 +1142,6 @@ function generatePDF() {
     y += 4;
   });
 
-  // Gesamt
   if (y > 265) { doc.addPage(); y = 16; }
   doc.setLineWidth(0.5);
   doc.line(LM, y, LM + PW, y);
@@ -1156,7 +1150,6 @@ function generatePDF() {
   doc.setFont(undefined, 'bold');
   doc.text('Gesamtflache: ' + fmtNum(totalArea) + ' m²', LM, y);
 
-  // Dateiname
   const proj = getCurrentProject();
   const base = proj ? getProjectLabel(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmass';
   doc.save((base || 'Aufmass') + '.pdf');
@@ -1170,11 +1163,11 @@ function exportJson() {
   const proj = getCurrentProject();
   if (!proj) return;
 
-  proj.anschrift  = collectAnschrift();
-  proj.geruesttyp = collectGeruesttyp();
+  proj.anschrift      = collectAnschrift();
+  proj.geruesttyp     = collectGeruesttyp();
   proj.geruesttypName = document.getElementById('fieldSonderName').value.trim();
-  proj.seiten     = collectSeiten();
-  proj.geaendert  = new Date().toISOString().slice(0, 10);
+  proj.seiten         = collectSeiten();
+  proj.geaendert      = new Date().toISOString().slice(0, 10);
   saveProjects();
 
   const blob = new Blob([JSON.stringify(proj, null, 2)], { type: 'application/json' });
@@ -1223,10 +1216,8 @@ function initApp() {
   renderProjectList();
   showScreen('homeScreen');
 
-  // --- Startseite ---
   document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
 
-  // --- Projekt-Screen ---
   document.getElementById('backBtn').addEventListener('click', () => {
     saveCurrentProject();
     renderProjectList();
@@ -1243,13 +1234,13 @@ function initApp() {
   });
   document.getElementById('importFileInput').addEventListener('change', handleImportFile);
 
-  // Gerusttyp-Toggle
+  // Gerusttyp-Toggle + Sonder-Name ein-/ausblenden
   document.querySelectorAll('.type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      // Feature 2: show/hide sonder name row
-      document.getElementById('sonderNameRow').style.display = btn.dataset.type === 'sonder' ? '' : 'none';
+      document.getElementById('sonderNameRow').style.display =
+        btn.dataset.type === 'sonder' ? '' : 'none';
     });
   });
 
