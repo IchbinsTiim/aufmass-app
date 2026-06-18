@@ -303,6 +303,9 @@ function collectSeiten() {
     const ttInp    = card.querySelector('.accessory-length-input[data-acc="tt"]');
     const ttVal    = ttInp ? parseNum(ttInp.value) : NaN;
 
+    const ksInp  = card.querySelector('.ks-input');
+    const ksVal  = ksInp ? parseNum(ksInp.value) : NaN;
+
     result.push({
       id:               card.dataset.sideId,
       name:             sel ? sel.value : '',
@@ -316,7 +319,10 @@ function collectSeiten() {
       fussgaengertunnel: collectSingleToggle('ft'),
       treppenturm: (ttToggle && ttToggle.classList.contains('active'))
         ? { hoehe: isNaN(ttVal) ? null : ttVal }
-        : null
+        : null,
+      netze:    collectSingleToggle('ne'),
+      ks:       isNaN(ksVal) ? null : ksVal,
+      ksManual: ksInp ? !!ksInp._ksManual : false
     });
   });
   return result;
@@ -412,10 +418,15 @@ function createSeiteCard(seiteData) {
 
   // Gemeinsames onChange - aktualisiert Vorschau, Zusammenfassung und L1-Sync
   let accSectionRef = null;
+  let ksInputRef = null;
   const mainOnChange = () => {
     updateCardPreview(card, previewEl);
     updateSummary();
     if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
+    if (ksInputRef && !ksInputRef._ksManual) {
+      const area = computeCardArea(card);
+      ksInputRef.value = area > 0 ? area.toFixed(2) : '';
+    }
   };
 
   // --- Name-Auswahl ---
@@ -513,9 +524,52 @@ function createSeiteCard(seiteData) {
   });
   footer.appendChild(removeBtn);
 
+  // --- KS (Fläche der Seite) ---
+  const ksRow = document.createElement('div');
+  ksRow.className = 'ks-row';
+
+  const ksLabel = document.createElement('span');
+  ksLabel.className = 'ks-label';
+  ksLabel.textContent = 'KS';
+
+  const ksInput = document.createElement('input');
+  ksInput.type = 'number';
+  ksInput.className = 'ks-input';
+  ksInput.step = '0.01';
+  ksInput.min = '0';
+  ksInput.inputMode = 'decimal';
+  ksInput.placeholder = '0,00';
+  ksInput._ksManual = !!(seiteData.ksManual);
+  if (seiteData.ks !== null && seiteData.ks !== undefined && !isNaN(seiteData.ks)) {
+    ksInput.value = seiteData.ks;
+  }
+  ksInput.addEventListener('input', () => { ksInput._ksManual = true; });
+  ksInputRef = ksInput;
+
+  const ksUnit = document.createElement('span');
+  ksUnit.className = 'ks-unit';
+  ksUnit.textContent = 'm²';
+
+  const ksResetBtn = document.createElement('button');
+  ksResetBtn.type = 'button';
+  ksResetBtn.className = 'ks-reset-btn';
+  ksResetBtn.textContent = '= Fl.';
+  ksResetBtn.title = 'Fläche automatisch berechnen';
+  ksResetBtn.addEventListener('click', () => {
+    ksInput._ksManual = false;
+    const area = computeCardArea(card);
+    ksInput.value = area > 0 ? area.toFixed(2) : '';
+  });
+
+  ksRow.appendChild(ksLabel);
+  ksRow.appendChild(ksInput);
+  ksRow.appendChild(ksUnit);
+  ksRow.appendChild(ksResetBtn);
+
   body.appendChild(nameRow);
   body.appendChild(hoehenSection);
   body.appendChild(laengenSection);
+  body.appendChild(ksRow);
   body.appendChild(accSectionRef);
   body.appendChild(footer);
 
@@ -527,6 +581,12 @@ function createSeiteCard(seiteData) {
     body.classList.toggle('collapsed', isOpen);
     chevron.classList.toggle('open', !isOpen);
   });
+
+  // Initialer KS-Sync
+  if (ksInputRef && !ksInputRef._ksManual) {
+    const area = computeCardArea(card);
+    if (area > 0) ksInputRef.value = area.toFixed(2);
+  }
 
   updateCardPreview(card, previewEl);
   return card;
@@ -678,6 +738,27 @@ function renumberSeitenBadges() {
 }
 
 // ============================================================
+//  Hilfsfunktion: Fläche einer Seite-Karte berechnen
+// ============================================================
+
+function computeCardArea(card) {
+  const hVals = [], lVals = [];
+  card.querySelectorAll('.hoehen-rows .meas-row').forEach(row => {
+    const { effective } = getMeasRowValue(row);
+    if (effective !== null && effective > 0) hVals.push(effective);
+  });
+  card.querySelectorAll('.laengen-rows .meas-row').forEach(row => {
+    const { effective } = getMeasRowValue(row);
+    if (effective !== null && effective > 0) lVals.push(effective);
+  });
+  const sumLen = lVals.reduce((a, b) => a + b, 0);
+  let effH = 0;
+  if (hVals.length === 1) effH = hVals[0];
+  else if (hVals.length > 1) effH = hVals.reduce((a, b) => a + b, 0) / hVals.length;
+  return sumLen * effH;
+}
+
+// ============================================================
 //  Vorschau-Text in der Seite-Karte
 // ============================================================
 
@@ -717,7 +798,10 @@ function addSide() {
     dachfang:          null,
     gittertraeger:     null,
     fussgaengertunnel: null,
-    treppenturm:       null
+    treppenturm:       null,
+    netze:             null,
+    ks:                null,
+    ksManual:          false
   };
   const el = createSeiteCard(newSide);
   container.appendChild(el);
@@ -869,7 +953,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
       btn.type = 'button';
       btn.className = 'konsole-btn' + (data && data.typ === typ ? ' active' : '');
       btn.dataset.typ = typ;
-      btn.textContent = 'K ' + typ;
+      btn.textContent = typ;
       btn.addEventListener('click', () => {
         const wasActive = btn.classList.contains('active');
         typeBtns.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
@@ -994,6 +1078,9 @@ function createAccessoriesSection(seiteData, card, onChange) {
   ttRow.appendChild(ttWrap);
   section.appendChild(ttRow);
 
+  // ---- Netze ----
+  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null));
+
   // L1-Sync fur alle aktiven Zubehor-Langen
   section._syncL1 = function() {
     section.querySelectorAll('.accessory-l1-btn[data-active="1"]').forEach(l1Btn => {
@@ -1086,7 +1173,7 @@ function updateSummary() {
       const v = lenInp ? parseNum(lenInp.value) : NaN;
       detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
     });
-    [{ acc: 'df', label: 'DF' }, { acc: 'gt', label: 'GT' }, { acc: 'ft', label: 'FT' }].forEach(({ acc, label }) => {
+    [{ acc: 'df', label: 'DF' }, { acc: 'gt', label: 'GT' }, { acc: 'ft', label: 'FT' }, { acc: 'ne', label: 'NE' }].forEach(({ acc, label }) => {
       const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
       if (!toggle || !toggle.classList.contains('active')) return;
       const lenInp = card.querySelector('.accessory-length-input[data-acc="' + acc + '"]');
@@ -1186,8 +1273,19 @@ function generatePDF() {
 
   let totalArea = 0;
 
+  // Zubehör-Gesamtübersicht initialisieren
+  const totals = {
+    konsolen: {},
+    ig: 0,
+    df: { count: 0, laengeSum: 0 },
+    gt: { count: 0, laengeSum: 0 },
+    ft: { count: 0, laengeSum: 0 },
+    tt: { count: 0, hoeheSum: 0 },
+    ne: { count: 0, laengeSum: 0 }
+  };
+
   seiten.forEach((seite, idx) => {
-    if (y > 260) { doc.addPage(); y = 16; }
+    if (y > 255) { doc.addPage(); y = 16; }
 
     const name = seite.name === '__manual__' ? seite.manualName : seite.name;
 
@@ -1212,27 +1310,6 @@ function generatePDF() {
         return { ...l, extra, effective: l.wert + extra };
       });
 
-    if (hVals.length > 0) {
-      const hStr = hVals.map((h, i) => {
-        const s = 'H' + (i + 1) + ': ';
-        return h.extra > 0
-          ? s + fmtNum(h.wert) + ' + ' + fmtNum(h.extra) + ' = ' + fmtNum(h.effective) + ' m'
-          : s + fmtNum(h.effective) + ' m';
-      }).join('   ');
-      doc.text('Hohen:  ' + hStr, LM + 4, y);
-      y += 5;
-    }
-    if (lVals.length > 0) {
-      const lStr = lVals.map((l, i) => {
-        const s = 'L' + (i + 1) + ': ';
-        return l.extra > 0
-          ? s + fmtNum(l.wert) + ' + ' + fmtNum(l.extra) + ' = ' + fmtNum(l.effective) + ' m'
-          : s + fmtNum(l.effective) + ' m';
-      }).join('   ');
-      doc.text('Langen: ' + lStr, LM + 4, y);
-      y += 5;
-    }
-
     const sumLen = lVals.reduce((a, b) => a + b.effective, 0);
     let effH = 0;
     if (hVals.length === 1) effH = hVals[0].effective;
@@ -1255,6 +1332,7 @@ function generatePDF() {
       seite.konsolen.forEach(k => {
         const kLen = k.laenge;
         accLines.push('K ' + k.typ + (kLen !== null && !isNaN(kLen) ? ': ' + fmtNum(kLen) + ' m' : ''));
+        totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + 1;
       });
     }
     if (Array.isArray(seite.innengelaender)) {
@@ -1262,38 +1340,135 @@ function generatePDF() {
         const igLen = ig.laenge;
         accLines.push('IG' + (igLen !== null && !isNaN(igLen) ? ': ' + fmtNum(igLen) + ' m' : ''));
       });
+      totals.ig += seite.innengelaender.length;
     }
     if (seite.dachfang) {
       const dfLen = seite.dachfang.laenge;
       accLines.push('DF' + (dfLen !== null && !isNaN(dfLen) ? ': ' + fmtNum(dfLen) + ' m' : ''));
+      totals.df.count++;
+      totals.df.laengeSum += dfLen || 0;
     }
     if (seite.gittertraeger) {
       const gtLen = seite.gittertraeger.laenge;
       accLines.push('GT' + (gtLen !== null && !isNaN(gtLen) ? ': ' + fmtNum(gtLen) + ' m' : ''));
+      totals.gt.count++;
+      totals.gt.laengeSum += gtLen || 0;
     }
     if (seite.fussgaengertunnel) {
       const ftLen = seite.fussgaengertunnel.laenge;
       accLines.push('FT' + (ftLen !== null && !isNaN(ftLen) ? ': ' + fmtNum(ftLen) + ' m' : ''));
+      totals.ft.count++;
+      totals.ft.laengeSum += ftLen || 0;
     }
     if (seite.treppenturm) {
       const ttH = seite.treppenturm.hoehe;
       accLines.push('TT' + (ttH !== null && !isNaN(ttH) ? ': ' + fmtNum(ttH) + ' m (H)' : ''));
+      totals.tt.count++;
+      totals.tt.hoeheSum += ttH || 0;
+    }
+    if (seite.netze) {
+      const neLen = seite.netze.laenge;
+      accLines.push('NE' + (neLen !== null && !isNaN(neLen) ? ': ' + fmtNum(neLen) + ' m' : ''));
+      totals.ne.count++;
+      totals.ne.laengeSum += neLen || 0;
     }
     if (accLines.length > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
       doc.text(accLines.join('   '), LM + 4, y);
       y += 5;
     }
 
+    // H/L-Werte einzeln untereinander (am Ende des Eintrags)
+    hVals.forEach((h, i) => {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const s = h.extra > 0
+        ? 'H' + (i + 1) + ': ' + fmtNum(h.wert) + ' + ' + fmtNum(h.extra) + ' = ' + fmtNum(h.effective) + ' m'
+        : 'H' + (i + 1) + ': ' + fmtNum(h.effective) + ' m';
+      doc.text(s, LM + 4, y);
+      y += 5;
+    });
+    lVals.forEach((l, i) => {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const s = l.extra > 0
+        ? 'L' + (i + 1) + ': ' + fmtNum(l.wert) + ' + ' + fmtNum(l.extra) + ' = ' + fmtNum(l.effective) + ' m'
+        : 'L' + (i + 1) + ': ' + fmtNum(l.effective) + ' m';
+      doc.text(s, LM + 4, y);
+      y += 5;
+    });
+
     y += 4;
   });
 
-  if (y > 265) { doc.addPage(); y = 16; }
+  // Gesamtflache
+  if (y > 260) { doc.addPage(); y = 16; }
   doc.setLineWidth(0.5);
   doc.line(LM, y, LM + PW, y);
   y += 7;
   doc.setFontSize(12);
   doc.setFont(undefined, 'bold');
   doc.text('Gesamtflache: ' + fmtNum(totalArea) + ' m²', LM, y);
+  y += 12;
+
+  // Zubehör-Gesamtubersicht
+  const hasAnyAcc = Object.keys(totals.konsolen).length > 0 || totals.ig > 0 ||
+    totals.df.count > 0 || totals.gt.count > 0 || totals.ft.count > 0 ||
+    totals.tt.count > 0 || totals.ne.count > 0;
+
+  if (hasAnyAcc) {
+    if (y > 240) { doc.addPage(); y = 16; }
+    doc.setLineWidth(0.3);
+    doc.line(LM, y, LM + PW, y);
+    y += 7;
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text('Zubehör-Gesamtubersicht', LM, y);
+    y += 8;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+
+    const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
+    if (kTypen.length > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const kStr = kTypen.map(t => 'K ' + t + ': ' + totals.konsolen[t] + ' Stk.').join('   ');
+      doc.text('Konsolen:  ' + kStr, LM + 4, y);
+      y += 6;
+    }
+    if (totals.ig > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      doc.text('Innengelaender:  ' + totals.ig + ' Stk.', LM + 4, y);
+      y += 6;
+    }
+    if (totals.df.count > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const len = totals.df.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.df.laengeSum) + ' m)' : '';
+      doc.text('Dachfang:  ' + totals.df.count + ' Stk.' + len, LM + 4, y);
+      y += 6;
+    }
+    if (totals.gt.count > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const len = totals.gt.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.gt.laengeSum) + ' m)' : '';
+      doc.text('Gittertrager:  ' + totals.gt.count + ' Stk.' + len, LM + 4, y);
+      y += 6;
+    }
+    if (totals.ft.count > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const len = totals.ft.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.ft.laengeSum) + ' m)' : '';
+      doc.text('Fussgangertunnel:  ' + totals.ft.count + ' Stk.' + len, LM + 4, y);
+      y += 6;
+    }
+    if (totals.tt.count > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const h = totals.tt.hoeheSum > 0 ? '  (gesamt ' + fmtNum(totals.tt.hoeheSum) + ' m H)' : '';
+      doc.text('Treppenturm:  ' + totals.tt.count + ' Stk.' + h, LM + 4, y);
+      y += 6;
+    }
+    if (totals.ne.count > 0) {
+      if (y > 258) { doc.addPage(); y = 16; }
+      const len = totals.ne.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.ne.laengeSum) + ' m)' : '';
+      doc.text('Netze:  ' + totals.ne.count + ' Stk.' + len, LM + 4, y);
+      y += 6;
+    }
+  }
 
   const proj = getCurrentProject();
   const base = proj ? getProjectLabel(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmass';

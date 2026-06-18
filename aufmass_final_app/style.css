@@ -639,7 +639,7 @@ html, body {
   background: transparent;
   border: none;
   color: var(--color-text-secondary);
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   line-height: 1;
   cursor: pointer;
   padding: 4px;
@@ -647,8 +647,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   transition: background 0.15s, color 0.15s;
   font-family: inherit;
@@ -665,12 +665,13 @@ html, body {
   border: 1.5px dashed var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-primary);
-  padding: 7px 14px;
-  font-size: 0.82rem;
+  padding: 10px 16px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
   transition: border-color 0.15s, background 0.15s;
+  min-height: 40px;
 }
 
 .meas-add-btn:active {
@@ -866,16 +867,17 @@ html, body {
   flex-wrap: wrap;
 }
 .konsole-btn {
-  padding: 7px 10px;
+  padding: 10px 12px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 600;
   background: #f9f9fb;
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
+  min-height: 40px;
 }
 .konsole-btn.active {
   border-color: var(--color-primary);
@@ -883,10 +885,10 @@ html, body {
   color: var(--color-primary);
 }
 .accessory-toggle {
-  padding: 7px 12px;
+  padding: 10px 14px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 600;
   background: #f9f9fb;
   color: var(--color-text-secondary);
@@ -894,6 +896,7 @@ html, body {
   font-family: inherit;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
   flex-shrink: 0;
+  min-height: 40px;
 }
 .accessory-toggle.active {
   border-color: var(--color-primary);
@@ -907,10 +910,10 @@ html, body {
   padding-left: 4px;
 }
 .accessory-l1-btn {
-  padding: 6px 9px;
+  padding: 9px 12px;
   border: 1.5px solid var(--color-border);
   border-radius: 6px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
   background: var(--color-border);
   color: var(--color-text-secondary);
@@ -919,6 +922,7 @@ html, body {
   flex-shrink: 0;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   white-space: nowrap;
+  min-height: 40px;
 }
 .accessory-l1-btn.active {
   background: #dbeafe;
@@ -996,7 +1000,193 @@ html, body {
 
 @media (max-width: 420px) {
   .konsole-btn {
-    padding: 6px 7px;
+    padding: 8px 8px;
     font-size: 0.72rem;
+  }
+}
+
+/* ============================================================
+   KS-Feld (Flache pro Seite)
+   ============================================================ */
+.ks-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #f0f7ff;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid #bfdbfe;
+}
+.ks-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  min-width: 28px;
+  flex-shrink: 0;
+}
+.ks-input {
+  width: 110px;
+  padding: 9px 12px;
+  border: 1.5px solid #bfdbfe;
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: #fff;
+  text-align: right;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+.ks-input::-webkit-inner-spin-button,
+.ks-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.ks-input:focus { border-color: var(--color-border-focus); }
+.ks-unit {
+  font-size: 0.88rem;
+  color: var(--color-primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.ks-reset-btn {
+  padding: 7px 12px;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #e0effe;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: auto;
+  transition: background 0.15s;
+  min-height: 36px;
+}
+.ks-reset-btn:active { background: #bfdbfe; }
+
+/* ============================================================
+   iPad / Tablet-Optimierung (min-width: 768px)
+   ============================================================ */
+@media (min-width: 768px) {
+  .screen-content {
+    max-width: 860px;
+    padding: 20px 28px;
+    gap: 18px;
+  }
+
+  .meas-input {
+    padding: 13px 14px;
+    font-size: 1.05rem;
+  }
+
+  .meas-row {
+    gap: 12px;
+  }
+
+  .meas-row-label {
+    width: 34px;
+    font-size: 0.88rem;
+  }
+
+  .meas-extra-input {
+    width: 52px;
+    padding: 8px 6px;
+  }
+
+  .konsole-btn {
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    min-height: 44px;
+  }
+
+  .accessory-toggle {
+    padding: 12px 18px;
+    font-size: 0.88rem;
+    min-height: 44px;
+  }
+
+  .accessory-l1-btn {
+    padding: 11px 14px;
+    font-size: 0.8rem;
+    min-height: 44px;
+  }
+
+  .accessory-length-input {
+    width: 110px;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+  }
+
+  .meas-add-btn {
+    padding: 12px 20px;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+
+  .meas-remove-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.4rem;
+  }
+
+  .btn {
+    padding: 13px 24px;
+    font-size: 0.95rem;
+    min-height: 44px;
+  }
+
+  .btn-sm {
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    min-height: 40px;
+  }
+
+  .type-btn {
+    padding: 14px 10px;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+
+  .seite-header {
+    padding: 14px 18px;
+  }
+
+  .seite-body {
+    padding: 18px;
+    gap: 20px;
+  }
+
+  .seite-select,
+  .seite-manual-input {
+    padding: 12px 14px;
+    font-size: 0.95rem;
+    min-height: 44px;
+  }
+
+  .ks-input {
+    width: 130px;
+    padding: 11px 14px;
+    font-size: 1.05rem;
+  }
+
+  .ks-reset-btn {
+    padding: 10px 16px;
+    font-size: 0.82rem;
+    min-height: 44px;
+  }
+
+  .card {
+    padding: 20px;
+  }
+
+  .accessories-section {
+    gap: 12px;
+  }
+
+  .app-header {
+    padding: 14px 20px;
+  }
+
+  .app-header h1 {
+    font-size: 1.15rem;
   }
 }
