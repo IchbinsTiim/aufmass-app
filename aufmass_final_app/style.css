@@ -1481,3 +1481,104 @@ html, body {
     font-size: 0.95rem;
   }
 }
+
+/* ============================================================
+   Messungen (schema v2.1)
+   ============================================================ */
+
+.messungen-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.messung-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+}
+
+.messung-laenge,
+.messung-hoehe {
+  width: 72px;
+  padding: 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+.messung-laenge::-webkit-outer-spin-button,
+.messung-laenge::-webkit-inner-spin-button,
+.messung-hoehe::-webkit-outer-spin-button,
+.messung-hoehe::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.plus2-btn {
+  padding: 8px 7px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  min-height: 36px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.plus2-btn.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+
+.messung-mul {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  min-width: 14px;
+  text-align: center;
+}
+
+.messung-calc {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  flex: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.abschnitt-total {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-align: right;
+  padding: 4px 0 2px;
+  border-top: 1px dashed var(--color-border);
+  margin-top: 4px;
+}
+
+.meas-add-btn-sm {
+  padding: 7px 12px;
+  font-size: 0.78rem;
+  min-height: 34px;
+}
+
+@media (min-width: 768px) {
+  .messung-laenge,
+  .messung-hoehe {
+    width: 90px;
+    padding: 10px;
+    font-size: 1rem;
+  }
+
+  .plus2-btn {
+    padding: 10px;
+    min-height: 44px;
+  }
+}

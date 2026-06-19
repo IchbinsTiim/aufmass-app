@@ -90,47 +90,88 @@ function getSeiteName(seite) {
   return seite.name || 'Unbenannte Seite';
 }
 
-// DIN 18451 Abschnitt-Berechnung
-function berechneAbschnitt(laenge, hoeheBisBelag, einzelfeld) {
-  const hoehe = round2((hoeheBisBelag || 0) + 2.0);
-  const lEff  = round2(einzelfeld ? Math.max(laenge || 0, 2.5) : (laenge || 0));
-  return { hoehe, laenge: lEff, flaeche: round2(lEff * hoehe) };
+// Flache eines Abschnitts (Summe aller Messpaare, optionales +2m je Wert)
+function berechneAbschnitt(abschnitt) {
+  const ef = abschnitt.einzelfeld || false;
+  let flaeche = 0;
+  for (const m of (abschnitt.messungen || [])) {
+    let l = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+    if (ef) l = Math.max(l, 2.5);
+    const h = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+    flaeche += l * h;
+  }
+  return round2(flaeche);
 }
 
 // Gesamt-Flache einer Karte (Summe aller Abschnitte)
 function computeCardFlaeche(card) {
   let total = 0;
-  card.querySelectorAll('.abschnitt-row').forEach(row => {
-    const l  = parseNum(row.querySelector('.abschnitt-laenge')?.value);
-    const h  = parseNum(row.querySelector('.abschnitt-hoehe')?.value);
-    const ef = row.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
-    if (!isNaN(l) && !isNaN(h) && l > 0) {
-      total += berechneAbschnitt(l, h, ef).flaeche;
-    }
+  card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+    const ef = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+    abRow.querySelectorAll('.messung-row').forEach(mRow => {
+      const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+      const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+      if (!isNaN(l) && !isNaN(h)) {
+        let lEff = (l || 0) + (lP2 ? 2 : 0);
+        if (ef) lEff = Math.max(lEff, 2.5);
+        const hEff = (h || 0) + (hP2 ? 2 : 0);
+        if (lEff > 0 && hEff > 0) total += lEff * hEff;
+      }
+    });
   });
-  return total;
+  return round2(total);
 }
 
-// Migration alter Projekte (hoehen/laengen → abschnitte)
+// Migration alter Projekte → Schema 2.1 (messungen je Abschnitt)
 function migrateSeite(seite) {
-  if (seite.abschnitte) return seite;
-  const hoehen = (seite.hoehen || []).filter(h => h.wert !== null && !isNaN(h.wert) && h.wert > 0);
-  let hoeheBisBelag = null;
-  if (hoehen.length > 0) {
-    const avgH = hoehen.reduce((s, h) => {
-      const ex = typeof h.extra === 'boolean' ? (h.extra ? 2 : 0) : (parseNum(h.extra) || 0);
-      return s + ((h.wert || 0) + ex);
-    }, 0) / hoehen.length;
-    hoeheBisBelag = round2(Math.max(0, avgH - 2.0));
+  // Bereits v2.1 (hat messungen)
+  if (seite.abschnitte && seite.abschnitte.length > 0 && seite.abschnitte[0].messungen) return seite;
+
+  // v2.0: abschnitte mit laenge/hoeheBisBelag, aber noch ohne messungen
+  if (seite.abschnitte && seite.abschnitte.length > 0) {
+    return {
+      ...seite,
+      abschnitte: seite.abschnitte.map(a => ({
+        id:          a.id || genId('ab'),
+        bezeichnung: a.bezeichnung || '',
+        einzelfeld:  a.einzelfeld  || false,
+        messungen: [{
+          id:          genId('m'),
+          laenge:      a.laenge      ?? null,
+          laengePlus2: false,
+          hoehe:       a.hoeheBisBelag ?? null,
+          hoehePlus2:  false
+        }]
+      }))
+    };
   }
+
+  // Altes Schema (v1.x): hoehen / laengen
+  const hoehen  = (seite.hoehen  || []).filter(h => h.wert !== null && !isNaN(h.wert) && h.wert > 0);
   const laengen = (seite.laengen || []).filter(l => l.wert !== null && !isNaN(l.wert));
+  let avgHoehe = null;
+  if (hoehen.length > 0) {
+    const sum = hoehen.reduce((s, h) => {
+      const ex = typeof h.extra === 'boolean' ? (h.extra ? 2 : 0) : (parseNum(h.extra) || 0);
+      return s + (h.wert || 0) + ex;
+    }, 0);
+    avgHoehe = round2(sum / hoehen.length);
+  }
   const abschnitte = laengen.map(l => {
     const ex  = typeof l.extra === 'boolean' ? (l.extra ? 2 : 0) : (parseNum(l.extra) || 0);
-    const eff = (l.wert || 0) + ex;
-    return { bezeichnung: '', laenge: eff > 0 ? eff : null, hoeheBisBelag, einzelfeld: false };
+    const eff = round2((l.wert || 0) + ex);
+    return {
+      id: genId('ab'), bezeichnung: '', einzelfeld: false,
+      messungen: [{ id: genId('m'), laenge: eff > 0 ? eff : null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+    };
   });
   if (abschnitte.length === 0) {
-    abschnitte.push({ bezeichnung: '', laenge: null, hoeheBisBelag, einzelfeld: false });
+    abschnitte.push({
+      id: genId('ab'), bezeichnung: '', einzelfeld: false,
+      messungen: [{ id: genId('m'), laenge: null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+    });
   }
   return { ...seite, abschnitte };
 }
@@ -216,7 +257,7 @@ function createNewProject() {
     geruesttyp: 'fassade',
     geruesttypName: '',
     seiten: [],
-    technik: {},
+    technik: { lastklasse: '3', breitenklasse: 'W06' },
     logistik: {},
     zusatzpositionen: [],
     vorhaltungWochen: null,
@@ -365,17 +406,24 @@ function collectSeiten() {
 
     // Abschnitte
     const abschnitte = [];
-    card.querySelectorAll('.abschnitt-row').forEach(row => {
-      const bez     = row.querySelector('.abschnitt-bez')?.value.trim() || '';
-      const laengeV = parseNum(row.querySelector('.abschnitt-laenge')?.value);
-      const hoeheV  = parseNum(row.querySelector('.abschnitt-hoehe')?.value);
-      const ef      = row.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
-      abschnitte.push({
-        bezeichnung:  bez,
-        laenge:       isNaN(laengeV) ? null : laengeV,
-        hoeheBisBelag: isNaN(hoeheV) ? null : hoeheV,
-        einzelfeld:   ef
+    card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+      const bez = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      const ef  = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+      const messungen = [];
+      abRow.querySelectorAll('.messung-row').forEach(mRow => {
+        const lV  = parseNum(mRow.querySelector('.messung-laenge')?.value);
+        const hV  = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        messungen.push({
+          id:          genId('m'),
+          laenge:      isNaN(lV) ? null : lV,
+          laengePlus2: lP2,
+          hoehe:       isNaN(hV) ? null : hV,
+          hoehePlus2:  hP2
+        });
       });
+      abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, messungen });
     });
 
     // Konsolen
@@ -692,7 +740,7 @@ function createAbschnittSection(seiteData, onChange) {
 
   const label = document.createElement('div');
   label.className = 'meas-section-label';
-  label.textContent = 'Abschnitte (DIN 18451)';
+  label.textContent = 'Abschnitte';
   section.appendChild(label);
 
   const rowsContainer = document.createElement('div');
@@ -700,7 +748,7 @@ function createAbschnittSection(seiteData, onChange) {
 
   const initData = (seiteData.abschnitte && seiteData.abschnitte.length > 0)
     ? seiteData.abschnitte
-    : [{ bezeichnung: '', laenge: null, hoeheBisBelag: null, einzelfeld: false }];
+    : [{ bezeichnung: '', einzelfeld: false, messungen: [] }];
 
   initData.forEach(a => rowsContainer.appendChild(createAbschnittRow(a, rowsContainer, onChange)));
 
@@ -712,7 +760,7 @@ function createAbschnittSection(seiteData, onChange) {
   addBtn.textContent = '+ Abschnitt';
   addBtn.addEventListener('click', () => {
     rowsContainer.appendChild(
-      createAbschnittRow({ bezeichnung: '', laenge: null, hoeheBisBelag: null, einzelfeld: false }, rowsContainer, onChange)
+      createAbschnittRow({ bezeichnung: '', einzelfeld: false, messungen: [] }, rowsContainer, onChange)
     );
     onChange();
   });
@@ -725,7 +773,7 @@ function createAbschnittRow(data, container, onChange) {
   const row = document.createElement('div');
   row.className = 'abschnitt-row';
 
-  // Zeile 1: Bezeichnung + Remove
+  // Zeile 1: Bezeichnung + Einzelfeld + Remove
   const topLine = document.createElement('div');
   topLine.className = 'abschnitt-top-line';
 
@@ -736,11 +784,21 @@ function createAbschnittRow(data, container, onChange) {
   bezInp.value = data.bezeichnung || '';
   bezInp.addEventListener('input', onChange);
 
-  const removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'meas-remove-btn';
-  removeBtn.innerHTML = '&times;';
-  removeBtn.addEventListener('click', () => {
+  const efBtn = document.createElement('button');
+  efBtn.type = 'button';
+  efBtn.className = 'einzelfeld-btn' + (data.einzelfeld ? ' active' : '');
+  efBtn.textContent = 'Einzelfeld';
+  efBtn.addEventListener('click', () => {
+    efBtn.classList.toggle('active');
+    refreshAbschnittCalc();
+    onChange();
+  });
+
+  const removeAbBtn = document.createElement('button');
+  removeAbBtn.type = 'button';
+  removeAbBtn.className = 'meas-remove-btn';
+  removeAbBtn.innerHTML = '&times;';
+  removeAbBtn.addEventListener('click', () => {
     if (container.querySelectorAll('.abschnitt-row').length > 1) {
       row.remove();
       onChange();
@@ -748,98 +806,140 @@ function createAbschnittRow(data, container, onChange) {
   });
 
   topLine.appendChild(bezInp);
-  topLine.appendChild(removeBtn);
+  topLine.appendChild(efBtn);
+  topLine.appendChild(removeAbBtn);
 
-  // Zeile 2: Masse
-  const midLine = document.createElement('div');
-  midLine.className = 'abschnitt-measures';
+  // Messpaare (L × H)
+  const messungenList = document.createElement('div');
+  messungenList.className = 'messungen-list';
 
-  // Lange
-  const laengeWrap = document.createElement('div');
-  laengeWrap.className = 'abschnitt-field';
-  const laengeLbl = document.createElement('span');
-  laengeLbl.className = 'abschnitt-field-label';
-  laengeLbl.textContent = 'Lange';
-  const laengeInp = document.createElement('input');
-  laengeInp.type = 'number';
-  laengeInp.className = 'abschnitt-laenge';
-  laengeInp.step = '0.01';
-  laengeInp.min = '0';
-  laengeInp.inputMode = 'decimal';
-  laengeInp.placeholder = '0,00';
-  if (data.laenge !== null && data.laenge !== undefined && !isNaN(data.laenge)) laengeInp.value = data.laenge;
-  const laengeUnit = document.createElement('span');
-  laengeUnit.className = 'abschnitt-field-unit';
-  laengeUnit.textContent = 'm';
-  laengeWrap.appendChild(laengeLbl);
-  laengeWrap.appendChild(laengeInp);
-  laengeWrap.appendChild(laengeUnit);
+  // Abschnitt-Summe
+  const abTotalLine = document.createElement('div');
+  abTotalLine.className = 'abschnitt-total';
 
-  // Hohe bis Belag
-  const hoeheWrap = document.createElement('div');
-  hoeheWrap.className = 'abschnitt-field';
-  const hoeheLbl = document.createElement('span');
-  hoeheLbl.className = 'abschnitt-field-label';
-  hoeheLbl.textContent = 'H bis Belag';
-  const hoeheInp = document.createElement('input');
-  hoeheInp.type = 'number';
-  hoeheInp.className = 'abschnitt-hoehe';
-  hoeheInp.step = '0.01';
-  hoeheInp.min = '0';
-  hoeheInp.inputMode = 'decimal';
-  hoeheInp.placeholder = '0,00';
-  if (data.hoeheBisBelag !== null && data.hoeheBisBelag !== undefined && !isNaN(data.hoeheBisBelag)) hoeheInp.value = data.hoeheBisBelag;
-  const hoeheUnit = document.createElement('span');
-  hoeheUnit.className = 'abschnitt-field-unit';
-  hoeheUnit.textContent = 'm';
-  hoeheWrap.appendChild(hoeheLbl);
-  hoeheWrap.appendChild(hoeheInp);
-  hoeheWrap.appendChild(hoeheUnit);
+  function refreshAbschnittCalc() {
+    const ef = efBtn.classList.contains('active');
+    let total = 0;
+    messungenList.querySelectorAll('.messung-row').forEach(mRow => {
+      const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+      const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+      const calcEl = mRow.querySelector('.messung-calc');
+      if (!isNaN(l) && !isNaN(h)) {
+        let lEff = (l || 0) + (lP2 ? 2 : 0);
+        if (ef) lEff = Math.max(lEff, 2.5);
+        const hEff = (h || 0) + (hP2 ? 2 : 0);
+        if (lEff > 0 && hEff > 0) {
+          const f = round2(lEff * hEff);
+          total += f;
+          if (calcEl) calcEl.textContent = '= ' + fmtNum(f) + ' m²';
+        } else {
+          if (calcEl) calcEl.textContent = '';
+        }
+      } else {
+        if (calcEl) calcEl.textContent = '';
+      }
+    });
+    total = round2(total);
+    abTotalLine.textContent = total > 0 ? 'Σ ' + fmtNum(total) + ' m²' : '';
+  }
 
-  // Einzelfeld
-  const efBtn = document.createElement('button');
-  efBtn.type = 'button';
-  efBtn.className = 'einzelfeld-btn' + (data.einzelfeld ? ' active' : '');
-  efBtn.textContent = 'Einzelfeld';
-  efBtn.addEventListener('click', () => {
-    efBtn.classList.toggle('active');
-    updateCalc();
+  function createMessungRow(mData) {
+    const mRow = document.createElement('div');
+    mRow.className = 'messung-row';
+
+    const laengeInp = document.createElement('input');
+    laengeInp.type = 'number';
+    laengeInp.className = 'messung-laenge';
+    laengeInp.step = '0.01';
+    laengeInp.min = '0';
+    laengeInp.inputMode = 'decimal';
+    laengeInp.placeholder = 'L';
+    if (mData?.laenge != null && !isNaN(mData.laenge)) laengeInp.value = mData.laenge;
+
+    const laengePlus2 = document.createElement('button');
+    laengePlus2.type = 'button';
+    laengePlus2.className = 'plus2-btn messung-laenge-plus2' + (mData?.laengePlus2 ? ' active' : '');
+    laengePlus2.textContent = '+2m';
+    laengePlus2.addEventListener('click', () => {
+      laengePlus2.classList.toggle('active');
+      refreshAbschnittCalc();
+      onChange();
+    });
+
+    const mulSign = document.createElement('span');
+    mulSign.className = 'messung-mul';
+    mulSign.textContent = '×';
+
+    const hoeheInp = document.createElement('input');
+    hoeheInp.type = 'number';
+    hoeheInp.className = 'messung-hoehe';
+    hoeheInp.step = '0.01';
+    hoeheInp.min = '0';
+    hoeheInp.inputMode = 'decimal';
+    hoeheInp.placeholder = 'H';
+    if (mData?.hoehe != null && !isNaN(mData.hoehe)) hoeheInp.value = mData.hoehe;
+
+    const hoehePlus2 = document.createElement('button');
+    hoehePlus2.type = 'button';
+    hoehePlus2.className = 'plus2-btn messung-hoehe-plus2' + (mData?.hoehePlus2 ? ' active' : '');
+    hoehePlus2.textContent = '+2m';
+    hoehePlus2.addEventListener('click', () => {
+      hoehePlus2.classList.toggle('active');
+      refreshAbschnittCalc();
+      onChange();
+    });
+
+    const calcSpan = document.createElement('span');
+    calcSpan.className = 'messung-calc';
+
+    const removeMBtn = document.createElement('button');
+    removeMBtn.type = 'button';
+    removeMBtn.className = 'meas-remove-btn';
+    removeMBtn.innerHTML = '&times;';
+    removeMBtn.addEventListener('click', () => {
+      if (messungenList.querySelectorAll('.messung-row').length > 1) {
+        mRow.remove();
+        refreshAbschnittCalc();
+        onChange();
+      }
+    });
+
+    laengeInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
+    hoeheInp.addEventListener('input',  () => { refreshAbschnittCalc(); onChange(); });
+
+    mRow.appendChild(laengeInp);
+    mRow.appendChild(laengePlus2);
+    mRow.appendChild(mulSign);
+    mRow.appendChild(hoeheInp);
+    mRow.appendChild(hoehePlus2);
+    mRow.appendChild(calcSpan);
+    mRow.appendChild(removeMBtn);
+    return mRow;
+  }
+
+  const initMessungen = (data.messungen && data.messungen.length > 0)
+    ? data.messungen
+    : [{ laenge: null, laengePlus2: false, hoehe: null, hoehePlus2: false }];
+
+  initMessungen.forEach(m => messungenList.appendChild(createMessungRow(m)));
+
+  const addMessBtn = document.createElement('button');
+  addMessBtn.type = 'button';
+  addMessBtn.className = 'meas-add-btn meas-add-btn-sm';
+  addMessBtn.textContent = '+ Maß';
+  addMessBtn.addEventListener('click', () => {
+    messungenList.appendChild(createMessungRow({}));
     onChange();
   });
 
-  midLine.appendChild(laengeWrap);
-  midLine.appendChild(hoeheWrap);
-  midLine.appendChild(efBtn);
-
-  // Zeile 3: Berechnungsergebnis
-  const calcLine = document.createElement('div');
-  calcLine.className = 'abschnitt-calc';
-
-  const calcSpan = document.createElement('span');
-  calcLine.appendChild(calcSpan);
-
-  function updateCalc() {
-    const l  = parseNum(laengeInp.value);
-    const h  = parseNum(hoeheInp.value);
-    const ef = efBtn.classList.contains('active');
-    if (!isNaN(l) && !isNaN(h) && l > 0) {
-      const c = berechneAbschnitt(l, h, ef);
-      const efHint = ef && l < 2.5 ? ' (mind. 2,50 m)' : '';
-      calcSpan.textContent = 'Eff. H: ' + fmtNum(c.hoehe) + ' m· L: ' + fmtNum(c.laenge) + ' m' + efHint + '→ ' + fmtNum(c.flaeche) + ' m²';
-    } else {
-      calcSpan.textContent = '–';
-    }
-  }
-
-  laengeInp.addEventListener('input', () => { updateCalc(); onChange(); });
-  hoeheInp.addEventListener('input',  () => { updateCalc(); onChange(); });
-
-  updateCalc();
-
   row.appendChild(topLine);
-  row.appendChild(midLine);
-  row.appendChild(calcLine);
+  row.appendChild(messungenList);
+  row.appendChild(addMessBtn);
+  row.appendChild(abTotalLine);
 
+  refreshAbschnittCalc();
   return row;
 }
 
@@ -848,13 +948,7 @@ function createAbschnittRow(data, container, onChange) {
 // ============================================================
 
 function updateCardPreview(card, previewEl) {
-  let totalFl = 0;
-  card.querySelectorAll('.abschnitt-row').forEach(row => {
-    const l  = parseNum(row.querySelector('.abschnitt-laenge')?.value);
-    const h  = parseNum(row.querySelector('.abschnitt-hoehe')?.value);
-    const ef = row.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
-    if (!isNaN(l) && !isNaN(h) && l > 0) totalFl += berechneAbschnitt(l, h, ef).flaeche;
-  });
+  const totalFl = computeCardFlaeche(card);
   previewEl.textContent = totalFl > 0 ? fmtNum(totalFl) + ' m²' : '';
 }
 
@@ -1017,12 +1111,17 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
   // Erste Abschnitt-Lange (fur "= L1")
   function getL1() {
-    const firstRow = card.querySelector('.abschnitt-row');
-    if (!firstRow) return null;
-    const l  = parseNum(firstRow.querySelector('.abschnitt-laenge')?.value);
-    const ef = firstRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+    const firstAbRow = card.querySelector('.abschnitt-row');
+    if (!firstAbRow) return null;
+    const firstMRow = firstAbRow.querySelector('.messung-row');
+    if (!firstMRow) return null;
+    const l   = parseNum(firstMRow.querySelector('.messung-laenge')?.value);
+    const lP2 = firstMRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+    const ef  = firstAbRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
     if (isNaN(l)) return null;
-    return berechneAbschnitt(l, 0, ef).laenge;
+    let lEff = (l || 0) + (lP2 ? 2 : 0);
+    if (ef) lEff = Math.max(lEff, 2.5);
+    return lEff > 0 ? round2(lEff) : null;
   }
 
   function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel) {
@@ -1291,18 +1390,28 @@ function updateSummary() {
     let seitenFlaeche = 0;
     const detailParts = [];
 
-    card.querySelectorAll('.abschnitt-row').forEach(row => {
-      const l   = parseNum(row.querySelector('.abschnitt-laenge')?.value);
-      const h   = parseNum(row.querySelector('.abschnitt-hoehe')?.value);
-      const ef  = row.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
-      const bez = row.querySelector('.abschnitt-bez')?.value.trim() || '';
-      if (!isNaN(l) && !isNaN(h) && l > 0) {
-        const c = berechneAbschnitt(l, h, ef);
-        seitenFlaeche += c.flaeche;
-        const bezStr = bez ? bez + ': ' : '';
-        const efStr  = ef && l < 2.5 ? ' (EF)' : '';
-        detailParts.push(bezStr + fmtNum(c.laenge) + ' m × ' + fmtNum(c.hoehe) + ' m' + efStr + ' = ' + fmtNum(c.flaeche) + ' m²');
-      }
+    card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+      const ef  = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+      const bez = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      let abFlaeche = 0;
+      abRow.querySelectorAll('.messung-row').forEach(mRow => {
+        const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        if (!isNaN(l) && !isNaN(h)) {
+          let lEff = (l || 0) + (lP2 ? 2 : 0);
+          if (ef) lEff = Math.max(lEff, 2.5);
+          const hEff = (h || 0) + (hP2 ? 2 : 0);
+          if (lEff > 0 && hEff > 0) {
+            const pair = round2(lEff * hEff);
+            abFlaeche += pair;
+            const efStr = ef && (l || 0) < 2.5 ? ' (EF)' : '';
+            detailParts.push((bez ? bez + ': ' : '') + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
+          }
+        }
+      });
+      seitenFlaeche += abFlaeche;
     });
 
     totalArea += seitenFlaeche;
@@ -1462,14 +1571,20 @@ function generatePDF() {
 
     let seitenFlaeche = 0;
     (seite.abschnitte || []).forEach(a => {
-      if (!a.laenge || !a.hoeheBisBelag) return;
-      const c = berechneAbschnitt(a.laenge, a.hoeheBisBelag, a.einzelfeld);
-      seitenFlaeche += c.flaeche;
-      if (y > 258) { doc.addPage(); y = 16; }
-      const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
-      const efStr  = a.einzelfeld ? ' (EF)' : '';
-      doc.text(bezStr + fmtNum(c.laenge) + ' m x ' + fmtNum(c.hoehe) + ' m' + efStr + ' = ' + fmtNum(c.flaeche) + ' m²', LM + 4, y);
-      y += 5;
+      const ef = a.einzelfeld || false;
+      (a.messungen || []).forEach(m => {
+        let lEff = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+        if (ef) lEff = Math.max(lEff, 2.5);
+        const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+        if (lEff <= 0 || hEff <= 0) return;
+        const pair = round2(lEff * hEff);
+        seitenFlaeche += pair;
+        if (y > 258) { doc.addPage(); y = 16; }
+        const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
+        const efStr  = ef ? ' (EF)' : '';
+        doc.text(bezStr + fmtNum(lEff) + ' m x ' + fmtNum(hEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²', LM + 4, y);
+        y += 5;
+      });
     });
     totalArea += seitenFlaeche;
 
