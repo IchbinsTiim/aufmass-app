@@ -282,9 +282,7 @@ function createNewProject() {
     seiten: [],
     technik: { lastklasse: '3', breitenklasse: 'W06' },
     logistik: {},
-    zusatzpositionen: [],
-    vorhaltungWochen: null,
-    ortstermin: {}
+    zusatzpositionen: []
   };
   projects.push(proj);
   saveProjects();
@@ -314,13 +312,6 @@ function openProject(projectId) {
 
   loadTechnik(proj.technik);
   loadLogistik(proj.logistik);
-  loadOrtstermin(proj.ortstermin);
-
-  if (proj.vorhaltungWochen != null) {
-    document.getElementById('fieldVorhaltungWochen').value = proj.vorhaltungWochen;
-  } else {
-    document.getElementById('fieldVorhaltungWochen').value = '';
-  }
 
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
@@ -396,18 +387,6 @@ function loadLogistik(l) {
   setLogistikToggle('toggleGenehmigung', l.genehmigungErforderlich);
 }
 
-function collectOrtstermin() {
-  return {
-    datum: document.getElementById('fieldOrtsterminDatum')?.value || '',
-    notiz: document.getElementById('fieldOrtsterminNotiz')?.value.trim() || ''
-  };
-}
-
-function loadOrtstermin(o) {
-  if (!o) return;
-  document.getElementById('fieldOrtsterminDatum').value  = o.datum || '';
-  document.getElementById('fieldOrtsterminNotiz').value  = o.notiz || '';
-}
 
 function collectZusatzpositionen() {
   const result = [];
@@ -533,11 +512,6 @@ function saveCurrentProject() {
   proj.technik          = collectTechnik();
   proj.logistik         = collectLogistik();
   proj.zusatzpositionen = collectZusatzpositionen();
-  proj.ortstermin       = collectOrtstermin();
-
-  const wochenVal = parseNum(document.getElementById('fieldVorhaltungWochen')?.value);
-  proj.vorhaltungWochen = isNaN(wochenVal) ? null : wochenVal;
-
   proj.geaendert = new Date().toISOString().slice(0, 10);
   document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
   saveProjects();
@@ -1437,21 +1411,6 @@ function createAccessoriesSection(seiteData, card, onChange) {
 }
 
 // ============================================================
-//  Vorhaltung Kalkulation aktualisieren
-// ============================================================
-
-function updateVorhaltungCalc(totalFlaeche) {
-  const calc = document.getElementById('fieldVorhaltungCalc');
-  if (!calc) return;
-  const wochen = parseNum(document.getElementById('fieldVorhaltungWochen')?.value);
-  if (!isNaN(wochen) && wochen > 0 && totalFlaeche > 0) {
-    calc.value = fmtNum(round2(totalFlaeche * wochen)) + ' m²·Wo.';
-  } else {
-    calc.value = '';
-  }
-}
-
-// ============================================================
 //  Zusammenfassung
 // ============================================================
 
@@ -1461,7 +1420,6 @@ function updateSummary() {
 
   if (cards.length === 0) {
     el.innerHTML = '<p class="summary-empty">Noch keine Seiten erfasst.</p>';
-    updateVorhaltungCalc(0);
     return;
   }
 
@@ -1594,15 +1552,8 @@ function updateSummary() {
     html += `<tr><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">Ankeranzahl</td><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">${ankerAnzahl} Stk.</td></tr>`;
   }
 
-  const wochen = parseNum(document.getElementById('fieldVorhaltungWochen')?.value);
-  if (!isNaN(wochen) && wochen > 0 && totalArea > 0) {
-    html += `<tr><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">Vorhaltung</td><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">${fmtNum(round2(totalArea * wochen))} m²·Wo.</td></tr>`;
-  }
-
   html += '</table>';
   el.innerHTML = html;
-
-  updateVorhaltungCalc(totalArea);
 }
 
 // ============================================================
@@ -1616,9 +1567,6 @@ function generatePDF() {
   const technik        = collectTechnik();
   const logistik       = collectLogistik();
   const zusatz         = collectZusatzpositionen();
-  const ortstermin     = collectOrtstermin();
-  const wochenVal      = parseNum(document.getElementById('fieldVorhaltungWochen')?.value);
-  const vorhaltWochen  = isNaN(wochenVal) ? null : wochenVal;
 
   const sonderName = document.getElementById('fieldSonderName').value.trim();
   const geruesttypLabel = geruesttyp === 'sonder'
@@ -1650,18 +1598,13 @@ function generatePDF() {
   if (anschrift.bauherr)   { doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 6; }
   doc.text('Gerusttyp: ' + geruesttypLabel, LM, y); y += 6;
   doc.text('Datum: ' + new Date().toLocaleDateString('de-DE'), LM, y); y += 6;
-  if (ortstermin.datum)    { doc.text('Ortstermin: ' + fmtDate(ortstermin.datum), LM, y); y += 6; }
   y += 4;
 
   let totalArea = 0;
 
   const totals = {
-    konsolen: {}, ig: 0,
-    df: { count: 0, laengeSum: 0 },
-    gt: { count: 0, laengeSum: 0 },
-    ft: { count: 0, laengeSum: 0 },
-    tt: { count: 0, hoeheSum:  0 },
-    ne: { count: 0, laengeSum: 0 }
+    konsolen: {},  // { typ: totalMeters }
+    ig: 0, df: 0, gt: 0, ft: 0, tt: 0, ne: 0
   };
 
   seiten.forEach((seite, idx) => {
@@ -1719,20 +1662,20 @@ function generatePDF() {
     if (Array.isArray(seite.konsolen)) {
       seite.konsolen.forEach(k => {
         accLines.push('K ' + k.typ + (k.laenge !== null && !isNaN(k.laenge) ? ': ' + fmtNum(k.laenge) + ' m' : ''));
-        totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + 1;
+        if (k.laenge !== null && !isNaN(k.laenge)) totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + k.laenge;
       });
     }
     if (Array.isArray(seite.innengelaender)) {
       seite.innengelaender.forEach(ig => {
         accLines.push('IG' + (ig.laenge !== null && !isNaN(ig.laenge) ? ': ' + fmtNum(ig.laenge) + ' m' : ''));
+        if (ig.laenge !== null && !isNaN(ig.laenge)) totals.ig += ig.laenge;
       });
-      totals.ig += seite.innengelaender.length;
     }
-    if (seite.dachfang)          { const l = seite.dachfang.laenge;          accLines.push('DF' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.df.count++; totals.df.laengeSum += l || 0; }
-    if (seite.gittertraeger)     { const l = seite.gittertraeger.laenge;     accLines.push('GT' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.gt.count++; totals.gt.laengeSum += l || 0; }
-    if (seite.fussgaengertunnel) { const l = seite.fussgaengertunnel.laenge; accLines.push('FT' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.ft.count++; totals.ft.laengeSum += l || 0; }
-    if (seite.treppenturm)       { const h = seite.treppenturm.hoehe;       accLines.push('TT' + (h !== null && !isNaN(h) ? ': ' + fmtNum(h) + ' m (H)' : '')); totals.tt.count++; totals.tt.hoeheSum += h || 0; }
-    if (seite.netze)             { const l = seite.netze.laenge;             accLines.push('NE' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.ne.count++; totals.ne.laengeSum += l || 0; }
+    if (seite.dachfang)          { const l = seite.dachfang.laenge;          accLines.push('DF' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.df += l || 0; }
+    if (seite.gittertraeger)     { const l = seite.gittertraeger.laenge;     accLines.push('GT' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.gt += l || 0; }
+    if (seite.fussgaengertunnel) { const l = seite.fussgaengertunnel.laenge; accLines.push('FT' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.ft += l || 0; }
+    if (seite.treppenturm)       { const h = seite.treppenturm.hoehe;       accLines.push('TT' + (h !== null && !isNaN(h) ? ': ' + fmtNum(h) + ' m (H)' : '')); totals.tt += h || 0; }
+    if (seite.netze)             { const l = seite.netze.laenge;             accLines.push('NE' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.ne += l || 0; }
 
     if (accLines.length > 0) {
       if (y > 258) { doc.addPage(); y = 16; }
@@ -1753,16 +1696,9 @@ function generatePDF() {
   doc.text('Gesamtflache: ' + fmtNum(totalArea) + ' m²', LM, y);
   y += 8;
 
-  if (vorhaltWochen && vorhaltWochen > 0 && totalArea > 0) {
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    doc.text('Vorhaltung: ' + fmtNum(round2(totalArea * vorhaltWochen)) + ' m²·Wo. (' + vorhaltWochen + ' Wo.)', LM, y);
-    y += 7;
-  }
-
   // Zubehor-Ubersicht
   const hasAcc = Object.keys(totals.konsolen).length > 0 || totals.ig > 0 ||
-    totals.df.count > 0 || totals.gt.count > 0 || totals.ft.count > 0 || totals.tt.count > 0 || totals.ne.count > 0;
+    totals.df > 0 || totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
 
   if (hasAcc) {
     if (y > 240) { doc.addPage(); y = 16; }
@@ -1779,14 +1715,14 @@ function generatePDF() {
     const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
     if (kTypen.length > 0) {
       if (y > 258) { doc.addPage(); y = 16; }
-      doc.text('Konsolen:  ' + kTypen.map(t => 'K ' + t + ': ' + totals.konsolen[t] + ' Stk.').join('   '), LM + 4, y); y += 6;
+      doc.text('Konsolen:  ' + kTypen.map(t => 'K ' + t + ': ' + fmtNum(round2(totals.konsolen[t])) + ' m').join('   '), LM + 4, y); y += 6;
     }
-    if (totals.ig > 0)         { if (y > 258) { doc.addPage(); y = 16; } doc.text('Innengelander:  ' + totals.ig + ' Stk.', LM + 4, y); y += 6; }
-    if (totals.df.count > 0)   { if (y > 258) { doc.addPage(); y = 16; } doc.text('Dachfang:  ' + totals.df.count + ' Stk.' + (totals.df.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.df.laengeSum) + ' m)' : ''), LM + 4, y); y += 6; }
-    if (totals.gt.count > 0)   { if (y > 258) { doc.addPage(); y = 16; } doc.text('Gittertrager:  ' + totals.gt.count + ' Stk.' + (totals.gt.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.gt.laengeSum) + ' m)' : ''), LM + 4, y); y += 6; }
-    if (totals.ft.count > 0)   { if (y > 258) { doc.addPage(); y = 16; } doc.text('Fussgangertunnel:  ' + totals.ft.count + ' Stk.' + (totals.ft.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.ft.laengeSum) + ' m)' : ''), LM + 4, y); y += 6; }
-    if (totals.tt.count > 0)   { if (y > 258) { doc.addPage(); y = 16; } doc.text('Treppenturm:  ' + totals.tt.count + ' Stk.' + (totals.tt.hoeheSum > 0 ? '  (gesamt ' + fmtNum(totals.tt.hoeheSum) + ' m H)' : ''), LM + 4, y); y += 6; }
-    if (totals.ne.count > 0)   { if (y > 258) { doc.addPage(); y = 16; } doc.text('Netze:  ' + totals.ne.count + ' Stk.' + (totals.ne.laengeSum > 0 ? '  (gesamt ' + fmtNum(totals.ne.laengeSum) + ' m)' : ''), LM + 4, y); y += 6; }
+    if (totals.ig > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Innengelander:  ' + fmtNum(round2(totals.ig)) + ' m', LM + 4, y); y += 6; }
+    if (totals.df > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Dachfang:  ' + fmtNum(round2(totals.df)) + ' m', LM + 4, y); y += 6; }
+    if (totals.gt > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Gittertrager:  ' + fmtNum(round2(totals.gt)) + ' m', LM + 4, y); y += 6; }
+    if (totals.ft > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Fussgangertunnel:  ' + fmtNum(round2(totals.ft)) + ' m', LM + 4, y); y += 6; }
+    if (totals.tt > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Treppenturm:  ' + fmtNum(round2(totals.tt)) + ' m (H)', LM + 4, y); y += 6; }
+    if (totals.ne > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Netze:  ' + fmtNum(round2(totals.ne)) + ' m', LM + 4, y); y += 6; }
   }
 
   // Zusatzpositionen
@@ -1807,32 +1743,6 @@ function generatePDF() {
       const notizStr = z.notiz ? '  – ' + z.notiz : '';
       doc.text((z.art || '–') + ':  ' + mengeStr + notizStr, LM + 4, y);
       y += 6;
-    });
-  }
-
-  // Technik
-  const techFields = [
-    technik.lastklasse        ? 'Lastklasse: ' + technik.lastklasse : '',
-    technik.breitenklasse     ? 'Breitenklasse: ' + technik.breitenklasse : '',
-    technik.verwendungszweck  ? 'Verwendungszweck: ' + technik.verwendungszweck : '',
-    technik.verankerungsgrund ? 'Verankerungsgrund: ' + technik.verankerungsgrund : '',
-    technik.ankerAnzahl       ? 'Ankeranzahl: ' + technik.ankerAnzahl + ' Stk.' : ''
-  ].filter(Boolean);
-
-  if (techFields.length > 0) {
-    if (y > 240) { doc.addPage(); y = 16; }
-    doc.setLineWidth(0.3);
-    doc.line(LM, y, LM + PW, y);
-    y += 7;
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.text('Technik (DIN 18451)', LM, y);
-    y += 8;
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    techFields.forEach(f => {
-      if (y > 258) { doc.addPage(); y = 16; }
-      doc.text(f, LM + 4, y); y += 6;
     });
   }
 
@@ -1863,18 +1773,6 @@ function generatePDF() {
     });
   }
 
-  if (ortstermin.notiz) {
-    if (y > 240) { doc.addPage(); y = 16; }
-    doc.setFont(undefined, 'bold');
-    doc.text('Ortstermin-Notiz:', LM, y); y += 6;
-    doc.setFont(undefined, 'normal');
-    const lines = doc.splitTextToSize(ortstermin.notiz, PW - 4);
-    lines.forEach(line => {
-      if (y > 258) { doc.addPage(); y = 16; }
-      doc.text(line, LM + 4, y); y += 5;
-    });
-  }
-
   const proj = getCurrentProject();
   const base = proj ? getProjectLabel(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmass';
   doc.save((base || 'Aufmass') + '.pdf');
@@ -1894,9 +1792,6 @@ function exportJson() {
   proj.technik          = collectTechnik();
   proj.logistik         = collectLogistik();
   proj.zusatzpositionen = collectZusatzpositionen();
-  proj.ortstermin       = collectOrtstermin();
-  const wV = parseNum(document.getElementById('fieldVorhaltungWochen')?.value);
-  proj.vorhaltungWochen = isNaN(wV) ? null : wV;
   proj.geaendert = new Date().toISOString().slice(0, 10);
   saveProjects();
 
@@ -1977,9 +1872,6 @@ function initApp() {
       btn.classList.toggle('active', nowActive);
     });
   });
-
-  // Vorhaltung live-Kalkulation
-  document.getElementById('fieldVorhaltungWochen')?.addEventListener('input', updateSummary);
 
   // Gerusttyp-Toggle
   document.querySelectorAll('.type-btn').forEach(btn => {
