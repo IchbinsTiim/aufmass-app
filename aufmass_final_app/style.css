@@ -1483,6 +1483,47 @@ html, body {
 }
 
 /* ============================================================
+   Giebel-Button
+   ============================================================ */
+
+.giebel-btn {
+  padding: 7px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.giebel-btn.active {
+  border-color: #e67e22;
+  background: #fff7ed;
+  color: #c0591a;
+}
+
+/* Giebel-Felder: standardmaßig versteckt */
+.abschnitt-row .giebel-part {
+  display: none;
+}
+
+/* sichtbar wenn Giebel aktiv */
+.abschnitt-row.giebel-active .giebel-part {
+  display: block;
+}
+
+.giebel-sep {
+  font-size: 0.9rem;
+  color: #e67e22;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* ============================================================
    Messungen (schema v2.1)
    ============================================================ */
 
