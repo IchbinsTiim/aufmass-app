@@ -1190,3 +1190,294 @@ html, body {
     font-size: 1.15rem;
   }
 }
+
+/* ============================================================
+   Abschnitte (DIN 18451)
+   ============================================================ */
+
+.abschnitt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.abschnitt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.abschnitt-row {
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fafafa;
+}
+
+.abschnitt-top-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.abschnitt-bez {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  background: #fff;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+}
+
+.abschnitt-bez:focus {
+  border-color: var(--color-border-focus);
+}
+
+.abschnitt-measures {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.abschnitt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.abschnitt-field-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.abschnitt-laenge,
+.abschnitt-hoehe {
+  width: 90px;
+  padding: 9px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  color: var(--color-text);
+  background: #f9f9fb;
+  text-align: right;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+
+.abschnitt-laenge::-webkit-inner-spin-button,
+.abschnitt-laenge::-webkit-outer-spin-button,
+.abschnitt-hoehe::-webkit-inner-spin-button,
+.abschnitt-hoehe::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.abschnitt-laenge:focus,
+.abschnitt-hoehe:focus {
+  border-color: var(--color-border-focus);
+  background: #fff;
+}
+
+.abschnitt-field-unit {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  align-self: flex-end;
+  padding-bottom: 10px;
+}
+
+.einzelfeld-btn {
+  padding: 9px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 40px;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  align-self: flex-end;
+  white-space: nowrap;
+}
+
+.einzelfeld-btn.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+
+.abschnitt-calc {
+  font-size: 0.8rem;
+  color: var(--color-primary);
+  background: #f0f7ff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-weight: 600;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+/* ============================================================
+   Logistik Toggle-Buttons
+   ============================================================ */
+
+.logistik-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.logistik-toggle-btn {
+  padding: 10px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  min-height: 40px;
+}
+
+.logistik-toggle-btn.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+
+/* ============================================================
+   Zusatzpositionen
+   ============================================================ */
+
+.zusatz-row {
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+
+.zusatz-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.zusatz-art {
+  flex: 2;
+  min-width: 130px;
+  padding: 9px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  background: #f9f9fb;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.zusatz-einheit {
+  width: 72px;
+  padding: 9px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  background: #f9f9fb;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.zusatz-menge {
+  width: 88px;
+  padding: 9px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  color: var(--color-text);
+  background: #f9f9fb;
+  text-align: right;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+
+.zusatz-menge::-webkit-inner-spin-button,
+.zusatz-menge::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.zusatz-menge:focus {
+  border-color: var(--color-border-focus);
+  background: #fff;
+}
+
+.zusatz-notiz-row {
+  display: flex;
+}
+
+.zusatz-notiz {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  color: var(--color-text);
+  background: #f9f9fb;
+  outline: none;
+  font-family: inherit;
+}
+
+.zusatz-notiz:focus {
+  border-color: var(--color-border-focus);
+  background: #fff;
+}
+
+/* iPad tweaks for new elements */
+@media (min-width: 768px) {
+  .einzelfeld-btn {
+    padding: 11px 16px;
+    font-size: 0.85rem;
+    min-height: 44px;
+  }
+
+  .logistik-toggle-btn {
+    padding: 12px 18px;
+    font-size: 0.88rem;
+    min-height: 44px;
+  }
+
+  .abschnitt-laenge,
+  .abschnitt-hoehe {
+    width: 110px;
+    padding: 11px 12px;
+    font-size: 1rem;
+  }
+
+  .abschnitt-bez {
+    padding: 11px 14px;
+    font-size: 0.95rem;
+  }
+}

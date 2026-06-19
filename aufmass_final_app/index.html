@@ -77,7 +77,94 @@
         </div>
       </section>
 
-      <!-- 3. Hausseiten -->
+      <!-- 3. Technik (DIN 18451) -->
+      <section class="card">
+        <h2 class="card-title">Technik (DIN 18451)</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Lastklasse</label>
+            <select class="form-input" id="fieldLastklasse">
+              <option value="">– wahlen –</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Breitenklasse</label>
+            <select class="form-input" id="fieldBreitenklasse">
+              <option value="">– wahlen –</option>
+              <option value="W06">W06</option>
+              <option value="W09">W09</option>
+              <option value="W12">W12</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Verwendungszweck</label>
+            <select class="form-input" id="fieldVerwendungszweck">
+              <option value="">– wahlen –</option>
+              <option value="Maler">Maler</option>
+              <option value="Putz">Putz</option>
+              <option value="Klempner">Klempner</option>
+              <option value="Dach">Dach</option>
+              <option value="WDVS">WDVS</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Verankerungsgrund</label>
+            <select class="form-input" id="fieldVerankerungsgrund">
+              <option value="">– wahlen –</option>
+              <option value="Mauerwerk">Mauerwerk</option>
+              <option value="Beton">Beton</option>
+              <option value="WDVS">WDVS</option>
+              <option value="Denkmal">Denkmal</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ankeranzahl</label>
+          <input class="form-input" type="number" id="fieldAnkerAnzahl" placeholder="0" min="0" inputmode="numeric" style="max-width:160px;" />
+        </div>
+      </section>
+
+      <!-- 4. Logistik -->
+      <section class="card">
+        <h2 class="card-title">Baustelle / Logistik</h2>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Anfahrt (km)</label>
+            <input class="form-input" type="number" id="fieldAnfahrtKm" placeholder="0" min="0" inputmode="decimal" />
+          </div>
+          <div class="form-group" style="flex:2">
+            <label class="form-label">Untergrund</label>
+            <select class="form-input" id="fieldUntergrund">
+              <option value="">– wahlen –</option>
+              <option value="Asphalt">Asphalt</option>
+              <option value="Pflaster">Pflaster</option>
+              <option value="Rasen">Rasen</option>
+              <option value="Schotter">Schotter</option>
+              <option value="Beton">Beton</option>
+              <option value="Sonstiges">Sonstiges</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stellflache-Notiz</label>
+          <input class="form-input" type="text" id="fieldStellflaecheNotiz" placeholder="z. B. Gehweg gesperrt" />
+        </div>
+        <div class="logistik-toggles">
+          <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Offentlicher Grund</button>
+          <button type="button" class="logistik-toggle-btn" id="toggleVerkehr" data-active="0">Verkehrssicherung</button>
+          <button type="button" class="logistik-toggle-btn" id="toggleGenehmigung" data-active="0">Genehmigung erforderlich</button>
+        </div>
+      </section>
+
+      <!-- 5. Hausseiten -->
       <section class="card">
         <div class="section-header">
           <h2 class="card-title">Hausseiten</h2>
@@ -89,7 +176,44 @@
         </div>
       </section>
 
-      <!-- 4. Zusammenfassung -->
+      <!-- 6. Zusatzpositionen -->
+      <section class="card">
+        <div class="section-header">
+          <h2 class="card-title">Zusatzpositionen</h2>
+          <button id="addZusatzBtn" class="btn btn-primary btn-sm">+ Position</button>
+        </div>
+        <div id="zusatzContainer"></div>
+        <div id="noZusatzHint" class="no-sides-hint">
+          Noch keine Zusatzpositionen erfasst.
+        </div>
+      </section>
+
+      <!-- 7. Vorhaltung & Ortstermin -->
+      <section class="card">
+        <h2 class="card-title">Vorhaltung &amp; Ortstermin</h2>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Grundeinsatz (Wochen)</label>
+            <input class="form-input" type="number" id="fieldVorhaltungWochen" placeholder="0" min="0" step="0.5" inputmode="decimal" />
+          </div>
+          <div class="form-group" style="flex:2">
+            <label class="form-label">Vorhaltung (m&#178;&#183;Wochen)</label>
+            <input class="form-input" type="text" id="fieldVorhaltungCalc" readonly placeholder="– wird berechnet –" style="background:#f0f7ff;font-weight:600;color:var(--color-primary);" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Ortstermin-Datum</label>
+            <input class="form-input" type="date" id="fieldOrtsterminDatum" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notiz / Besonderheiten</label>
+          <textarea class="form-input" id="fieldOrtsterminNotiz" rows="3" placeholder="Beobachtungen, Besonderheiten..." style="resize:vertical;line-height:1.5;"></textarea>
+        </div>
+      </section>
+
+      <!-- 8. Zusammenfassung -->
       <section class="card">
         <h2 class="card-title">Zusammenfassung</h2>
         <div id="summaryContent">
@@ -97,7 +221,7 @@
         </div>
       </section>
 
-      <!-- 5. Aktionen -->
+      <!-- 9. Aktionen -->
       <section class="card action-card">
         <div class="action-buttons">
           <button id="saveProjectBtn" class="btn btn-primary btn-full">Speichern</button>
