@@ -1542,7 +1542,8 @@ html, body {
 }
 
 .messung-laenge,
-.messung-hoehe {
+.messung-hoehe,
+.messung-hoehe2 {
   width: 72px;
   padding: 8px;
   border: 1.5px solid var(--color-border);
@@ -1555,7 +1556,9 @@ html, body {
 .messung-laenge::-webkit-outer-spin-button,
 .messung-laenge::-webkit-inner-spin-button,
 .messung-hoehe::-webkit-outer-spin-button,
-.messung-hoehe::-webkit-inner-spin-button {
+.messung-hoehe::-webkit-inner-spin-button,
+.messung-hoehe2::-webkit-outer-spin-button,
+.messung-hoehe2::-webkit-inner-spin-button {
   -webkit-appearance: none;
 }
 
@@ -1604,6 +1607,16 @@ html, body {
   margin-top: 4px;
 }
 
+.konsole-total {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-align: right;
+  padding: 4px 2px 2px;
+  border-top: 1px dashed var(--color-border);
+  margin-top: 2px;
+}
+
 .meas-add-btn-sm {
   padding: 7px 12px;
   font-size: 0.78rem;
@@ -1612,7 +1625,8 @@ html, body {
 
 @media (min-width: 768px) {
   .messung-laenge,
-  .messung-hoehe {
+  .messung-hoehe,
+  .messung-hoehe2 {
     width: 90px;
     padding: 10px;
     font-size: 1rem;

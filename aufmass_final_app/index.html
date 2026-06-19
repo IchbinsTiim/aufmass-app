@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Aufmass-App</title>
+  <title>Aufmaß-App</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -12,7 +12,7 @@
   <div id="homeScreen" class="screen">
     <header class="app-header">
       <div class="header-title">
-        <h1>Aufmass-App</h1>
+        <h1>Aufmaß-App</h1>
       </div>
       <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
     </header>
@@ -29,9 +29,9 @@
   <!-- Projektansicht -->
   <div id="projectScreen" class="screen hidden">
     <header class="app-header">
-      <button id="backBtn" class="btn btn-ghost">&#8592; Zuruck</button>
+      <button id="backBtn" class="btn btn-ghost">&#8592; Zurück</button>
       <h1 id="projectScreenTitle">Projekt</h1>
-      <button id="deleteProjectBtn" class="btn btn-danger-ghost">Loschen</button>
+      <button id="deleteProjectBtn" class="btn btn-danger-ghost">Löschen</button>
     </header>
     <main class="screen-content">
 
@@ -40,8 +40,8 @@
         <h2 class="card-title">Anschrift</h2>
         <div class="form-row">
           <div class="form-group" style="flex: 3">
-            <label class="form-label">Strasse</label>
-            <input class="form-input" type="text" id="fieldStrasse" placeholder="Musterstrasse" autocomplete="street-address" />
+            <label class="form-label">Straße</label>
+            <input class="form-input" type="text" id="fieldStrasse" placeholder="Musterstraße" autocomplete="street-address" />
           </div>
           <div class="form-group" style="flex: 1">
             <label class="form-label">Nr.</label>
@@ -64,16 +64,16 @@
         </div>
       </section>
 
-      <!-- 2. Gerusttyp -->
+      <!-- 2. Gerüsttyp -->
       <section class="card">
-        <h2 class="card-title">Gerusttyp</h2>
+        <h2 class="card-title">Gerüsttyp</h2>
         <div class="type-selector" id="geruesttypSelector">
-          <button class="type-btn active" data-type="fassade">Fassaden-Gerust</button>
-          <button class="type-btn" data-type="dach">Dach-Gerust</button>
-          <button class="type-btn" data-type="sonder">Sonder-Gerust</button>
+          <button class="type-btn active" data-type="fassade">Fassaden-Gerüst</button>
+          <button class="type-btn" data-type="dach">Dach-Gerüst</button>
+          <button class="type-btn" data-type="sonder">Sonder-Gerüst</button>
         </div>
         <div id="sonderNameRow" style="margin-top:10px; display:none;">
-          <input class="form-input" type="text" id="fieldSonderName" placeholder="Bezeichnung fur Sonder-Gerust" />
+          <input class="form-input" type="text" id="fieldSonderName" placeholder="Bezeichnung für Sonder-Gerüst" />
         </div>
       </section>
 
@@ -84,7 +84,7 @@
           <div class="form-group">
             <label class="form-label">Lastklasse</label>
             <select class="form-input" id="fieldLastklasse">
-              <option value="">– wahlen –</option>
+              <option value="">– wählen –</option>
               <option value="1">1</option>
               <option value="2">2</option>
               <option value="3">3</option>
@@ -96,7 +96,7 @@
           <div class="form-group">
             <label class="form-label">Breitenklasse</label>
             <select class="form-input" id="fieldBreitenklasse">
-              <option value="">– wahlen –</option>
+              <option value="">– wählen –</option>
               <option value="W06">W06</option>
               <option value="W09">W09</option>
               <option value="W12">W12</option>
@@ -107,7 +107,7 @@
           <div class="form-group">
             <label class="form-label">Verwendungszweck</label>
             <select class="form-input" id="fieldVerwendungszweck">
-              <option value="">– wahlen –</option>
+              <option value="">– wählen –</option>
               <option value="Maler">Maler</option>
               <option value="Putz">Putz</option>
               <option value="Klempner">Klempner</option>
@@ -118,7 +118,7 @@
           <div class="form-group">
             <label class="form-label">Verankerungsgrund</label>
             <select class="form-input" id="fieldVerankerungsgrund">
-              <option value="">– wahlen –</option>
+              <option value="">– wählen –</option>
               <option value="Mauerwerk">Mauerwerk</option>
               <option value="Beton">Beton</option>
               <option value="WDVS">WDVS</option>
@@ -143,7 +143,7 @@
           <div class="form-group" style="flex:2">
             <label class="form-label">Untergrund</label>
             <select class="form-input" id="fieldUntergrund">
-              <option value="">– wahlen –</option>
+              <option value="">– wählen –</option>
               <option value="Asphalt">Asphalt</option>
               <option value="Pflaster">Pflaster</option>
               <option value="Rasen">Rasen</option>
@@ -154,11 +154,11 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Stellflache-Notiz</label>
+          <label class="form-label">Stellfläche-Notiz</label>
           <input class="form-input" type="text" id="fieldStellflaecheNotiz" placeholder="z. B. Gehweg gesperrt" />
         </div>
         <div class="logistik-toggles">
-          <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Offentlicher Grund</button>
+          <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Öffentlicher Grund</button>
           <button type="button" class="logistik-toggle-btn" id="toggleVerkehr" data-active="0">Verkehrssicherung</button>
           <button type="button" class="logistik-toggle-btn" id="toggleGenehmigung" data-active="0">Genehmigung erforderlich</button>
         </div>
