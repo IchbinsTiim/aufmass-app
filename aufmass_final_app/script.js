@@ -1583,6 +1583,67 @@ function updateSummary() {
 }
 
 // ============================================================
+//  Anfahrt-Berechnung (Nominatim + OSRM)
+// ============================================================
+
+async function autoCalcAnfahrt() {
+  const strasse = (document.getElementById('fieldStrasse').value || '').trim();
+  const nummer  = (document.getElementById('fieldNummer').value  || '').trim();
+  const plz     = (document.getElementById('fieldPlz').value     || '').trim();
+  const ort     = (document.getElementById('fieldOrt').value     || '').trim();
+
+  const strasseNr = [strasse, nummer].filter(Boolean).join(' ');
+  const addrLine  = [strasseNr, plz, ort].filter(Boolean).join(', ');
+  if (!addrLine || (!plz && !ort)) {
+    showToast('Bitte zuerst Adresse eingeben.');
+    return;
+  }
+
+  const btn = document.getElementById('calcAnfahrtBtn');
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  // MHP Arena Stuttgart, Mercedesstraße 87, 70372 Stuttgart
+  const MHP_LAT = 48.7924;
+  const MHP_LON = 9.2309;
+
+  try {
+    const geoUrl = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+      + encodeURIComponent(addrLine + ', Deutschland');
+    const geoResp = await fetch(geoUrl, { headers: { 'Accept-Language': 'de' } });
+    const geoData = await geoResp.json();
+
+    if (!geoData.length) {
+      showToast('Adresse nicht gefunden.');
+      return;
+    }
+
+    const lat = parseFloat(geoData[0].lat);
+    const lon = parseFloat(geoData[0].lon);
+
+    const osrmUrl = 'https://router.project-osrm.org/route/v1/driving/'
+      + lon + ',' + lat + ';' + MHP_LON + ',' + MHP_LAT + '?overview=false';
+    const osrmResp = await fetch(osrmUrl);
+    const osrmData = await osrmResp.json();
+
+    if (osrmData.code !== 'Ok' || !osrmData.routes.length) {
+      showToast('Route nicht berechenbar.');
+      return;
+    }
+
+    const distKm = Math.ceil(osrmData.routes[0].distance / 1000);
+    document.getElementById('fieldAnfahrtKm').value = distKm;
+    showToast('Anfahrt: ' + distKm + ' km zur MHP Arena');
+    saveProjects();
+  } catch (e) {
+    showToast('Fehler bei der Berechnung.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Auto';
+  }
+}
+
+// ============================================================
 //  PDF-Erstellung
 // ============================================================
 
@@ -1878,6 +1939,7 @@ function initApp() {
   document.getElementById('addSideBtn').addEventListener('click', addSide);
   document.getElementById('saveProjectBtn').addEventListener('click', saveCurrentProject);
   document.getElementById('exportPdfBtn').addEventListener('click', generatePDF);
+  document.getElementById('calcAnfahrtBtn').addEventListener('click', autoCalcAnfahrt);
   document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
   document.getElementById('importJsonBtn').addEventListener('click', () => {
     document.getElementById('importFileInput').click();

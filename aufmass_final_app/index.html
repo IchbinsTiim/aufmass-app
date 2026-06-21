@@ -138,7 +138,10 @@
         <div class="form-row">
           <div class="form-group" style="flex:1">
             <label class="form-label">Anfahrt (km)</label>
-            <input class="form-input" type="number" id="fieldAnfahrtKm" placeholder="0" min="0" inputmode="decimal" />
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input class="form-input" type="number" id="fieldAnfahrtKm" placeholder="0" min="0" inputmode="decimal" style="flex:1;min-width:0;" />
+              <button type="button" id="calcAnfahrtBtn" class="btn btn-ghost btn-sm" title="Entfernung zur MHP Arena Stuttgart automatisch berechnen">Auto</button>
+            </div>
           </div>
           <div class="form-group" style="flex:2">
             <label class="form-label">Untergrund</label>
