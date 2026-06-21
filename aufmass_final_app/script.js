@@ -1169,7 +1169,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
   const title = document.createElement('div');
   title.className = 'accessories-title';
-  title.textContent = 'Zubehör';
+  title.textContent = 'Positionen';
   section.appendChild(title);
 
   // Erste Abschnitt-Länge (für "= L1")
@@ -1231,7 +1231,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return wrap;
   }
 
-  function createSingleAcc(accKey, labelText, initData) {
+  function createSingleAcc(accKey, labelText, initData, unitLabel) {
     const row = document.createElement('div');
     row.className = 'acc-single-row';
 
@@ -1241,7 +1241,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     toggleBtn.dataset.acc = accKey;
     toggleBtn.textContent = labelText;
 
-    const lenWrap = createInlineLength(accKey, initData ? initData.laenge : null, initData ? (initData.autoL1 || false) : false);
+    const lenWrap = createInlineLength(accKey, initData ? initData.laenge : null, initData ? (initData.autoL1 || false) : false, unitLabel);
     lenWrap.style.display = initData ? '' : 'none';
 
     toggleBtn.addEventListener('click', () => {
@@ -1419,7 +1419,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
   ttRow.appendChild(ttWrap);
   section.appendChild(ttRow);
 
-  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null));
+  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null, 'm²'));
 
   // L1-Sync
   section._syncL1 = function() {
@@ -1520,12 +1520,12 @@ function updateSummary() {
       const v = lenInp ? parseNum(lenInp.value) : NaN;
       detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
     });
-    [{ acc: 'df', label: 'DF' }, { acc: 'gt', label: 'GT' }, { acc: 'ft', label: 'FT' }, { acc: 'ne', label: 'NE' }].forEach(({ acc, label }) => {
+    [{ acc: 'df', label: 'DF', unit: 'm' }, { acc: 'gt', label: 'GT', unit: 'm' }, { acc: 'ft', label: 'FT', unit: 'm' }, { acc: 'ne', label: 'NE', unit: 'm²' }].forEach(({ acc, label, unit }) => {
       const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
       if (!toggle || !toggle.classList.contains('active')) return;
       const lenInp = card.querySelector('.accessory-length-input[data-acc="' + acc + '"]');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push(label + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      detailParts.push(label + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' ' + unit : ''));
     });
     const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
     if (ttToggle && ttToggle.classList.contains('active')) {
@@ -1553,7 +1553,7 @@ function updateSummary() {
   // Zusatzpositionen
   const zusatzRows = document.querySelectorAll('#zusatzContainer .zusatz-row');
   if (zusatzRows.length > 0) {
-    html += `<tr><td colspan="2" style="padding-top:10px;font-size:0.72rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--color-border);">Zusatzpositionen</td></tr>`;
+    html += `<tr><td colspan="2" style="padding-top:10px;font-size:0.72rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--color-border);">Positionen</td></tr>`;
     zusatzRows.forEach(row => {
       const art     = row.querySelector('.zusatz-art')?.value   || '–';
       const einheit = row.querySelector('.zusatz-einheit')?.value || '';
@@ -1815,29 +1815,22 @@ function generatePDF() {
   y += 5;
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
-  // ── Zubehör ───────────────────────────────────────────────────
+  // ── Positionen ─────────────────────────────────────────────────
   const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
   const hasAcc = kTypen.length > 0 || totals.ig > 0 || totals.df > 0 ||
     totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
 
-  if (hasAcc) {
+  if (hasAcc || zusatz.length > 0) {
     y += 1;
     hline(0.3);
-    secHead('Zubehör');
+    secHead('Positionen');
     kTypen.forEach(t => pdfRow('Konsole ' + t + ' cm', fmtNum(round2(totals.konsolen[t])) + ' m'));
     if (totals.ig > 0) pdfRow('Innengeländer',   fmtNum(round2(totals.ig)) + ' m');
     if (totals.df > 0) pdfRow('Dachfang',        fmtNum(round2(totals.df)) + ' m');
     if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
     if (totals.ft > 0) pdfRow('Fußgängertunnel', fmtNum(round2(totals.ft)) + ' m');
     if (totals.tt > 0) pdfRow('Treppenturm',     fmtNum(round2(totals.tt)) + ' m (H)');
-    if (totals.ne > 0) pdfRow('Netze',           fmtNum(round2(totals.ne)) + ' m');
-  }
-
-  // ── Zusatzpositionen ──────────────────────────────────────────
-  if (zusatz.length > 0) {
-    y += 1;
-    hline(0.3);
-    secHead('Zusatzpositionen');
+    if (totals.ne > 0) pdfRow('Netze',           fmtNum(round2(totals.ne)) + ' m²');
     zusatz.forEach(z => {
       const mengeStr = z.menge !== null ? fmtNum(z.menge) + ' ' + z.einheit : '–';
       const label    = (z.art || '–') + (z.notiz ? '  (' + z.notiz + ')' : '');
