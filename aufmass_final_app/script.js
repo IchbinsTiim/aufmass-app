@@ -11,7 +11,7 @@ let currentProjectId = null;
 
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
-  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer'
+  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 
@@ -1587,12 +1587,11 @@ function updateSummary() {
 // ============================================================
 
 function generatePDF() {
-  const anschrift      = collectAnschrift();
-  const geruesttyp     = collectGeruesttyp();
-  const seiten         = collectSeiten();
-  const technik        = collectTechnik();
-  const logistik       = collectLogistik();
-  const zusatz         = collectZusatzpositionen();
+  const anschrift  = collectAnschrift();
+  const geruesttyp = collectGeruesttyp();
+  const seiten     = collectSeiten();
+  const logistik   = collectLogistik();
+  const zusatz     = collectZusatzpositionen();
 
   const sonderName = document.getElementById('fieldSonderName').value.trim();
   const geruesttypLabel = geruesttyp === 'sonder'
@@ -1600,60 +1599,96 @@ function generatePDF() {
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-  const LM = 14, PW = 182;
+  const LM  = 14;   // linker Rand
+  const RM  = 196;  // rechter Rand
+  const IND = 18;   // Einzug für Inhalte
   let y = 16;
 
-  doc.setFontSize(18);
+  function chk(h = 8) {
+    if (y + h > 272) { doc.addPage(); y = 16; }
+  }
+
+  function hline(w = 0.3) {
+    chk(6);
+    doc.setLineWidth(w);
+    doc.line(LM, y, RM, y);
+    y += 5;
+  }
+
+  function secHead(title) {
+    chk(10);
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'bold');
+    doc.text(title.toUpperCase(), LM, y);
+    doc.setFont(undefined, 'normal');
+    y += 5;
+  }
+
+  function pdfRow(label, value) {
+    chk(6);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(label, IND, y);
+    if (value != null && value !== '') doc.text(String(value), RM, y, { align: 'right' });
+    y += 6;
+  }
+
+  function pdfRowBold(label, value) {
+    chk(7);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(label, IND, y);
+    if (value != null && value !== '') doc.text(String(value), RM, y, { align: 'right' });
+    doc.setFont(undefined, 'normal');
+    y += 7;
+  }
+
+  // ── Kopfzeile ─────────────────────────────────────────────────
+  doc.setFontSize(15);
   doc.setFont(undefined, 'bold');
   doc.text('Aufmaß-Bericht', LM, y);
-  y += 10;
-
-  doc.setLineWidth(0.5);
-  doc.line(LM, y, LM + PW, y);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text(new Date().toLocaleDateString('de-DE'), RM, y, { align: 'right' });
   y += 7;
 
-  doc.setFontSize(11);
-  doc.setFont(undefined, 'normal');
+  hline(0.5);
 
+  // Projektdaten
   const addrLine = [
     [anschrift.strasse, anschrift.nummer].filter(Boolean).join(' '),
     [anschrift.plz, anschrift.ort].filter(Boolean).join(' ')
   ].filter(Boolean).join(', ');
+  if (addrLine)           { doc.setFontSize(10); doc.text(addrLine, LM, y); y += 5; }
+  if (anschrift.bauherr)  { doc.setFontSize(10); doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 5; }
+  doc.setFontSize(10); doc.text(geruesttypLabel, LM, y); y += 5;
+  y += 2;
 
-  if (addrLine)            { doc.text(addrLine, LM, y); y += 6; }
-  if (anschrift.bauherr)   { doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 6; }
-  doc.text('Gerüsttyp: ' + geruesttypLabel, LM, y); y += 6;
-  doc.text('Datum: ' + new Date().toLocaleDateString('de-DE'), LM, y); y += 6;
-  y += 4;
+  // ── Gerüstfläche ──────────────────────────────────────────────
+  hline(0.4);
+  secHead('Gerüstfläche');
 
   let totalArea = 0;
-
-  const totals = {
-    konsolen: {},  // { typ: totalMeters }
-    ig: 0, df: 0, gt: 0, ft: 0, tt: 0, ne: 0
-  };
+  const totals = { konsolen: {}, ig: 0, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
 
   seiten.forEach((seite, idx) => {
-    if (y > 255) { doc.addPage(); y = 16; }
-
     const name = seite.name === '__manual__' ? seite.manualName : seite.name;
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.text(name || ('Seite ' + (idx + 1)), LM, y);
-    y += 6;
 
-    doc.setFont(undefined, 'normal');
+    chk(10);
     doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(name || ('Seite ' + (idx + 1)), IND, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
 
     let seitenFlaeche = 0;
     (seite.abschnitte || []).forEach(a => {
-      const ef       = a.einzelfeld || false;
-      const isGiebel = a.giebel    || false;
+      const ef = a.einzelfeld || false;
+      const isGiebel = a.giebel || false;
       (a.messungen || []).forEach(m => {
         let lEff = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
         if (lEff <= 0) return;
-        if (y > 258) { doc.addPage(); y = 16; }
         const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
         const efStr  = ef ? ' (EF)' : '';
         if (isGiebel) {
@@ -1662,141 +1697,108 @@ function generatePDF() {
           if (h2Eff < h1Eff || h1Eff < 0) return;
           const pair = round2(lEff * (h1Eff + h2Eff) / 2);
           seitenFlaeche += pair;
-          doc.text(bezStr + fmtNum(lEff) + ' m x (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)', LM + 4, y);
+          chk(6);
+          doc.setFontSize(9);
+          doc.text(bezStr + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr, IND + 3, y);
+          doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
+          y += 5;
         } else {
           const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
           if (hEff <= 0) return;
           const pair = round2(lEff * hEff);
           seitenFlaeche += pair;
-          doc.text(bezStr + fmtNum(lEff) + ' m x ' + fmtNum(hEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²', LM + 4, y);
+          chk(6);
+          doc.setFontSize(9);
+          doc.text(bezStr + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr, IND + 3, y);
+          doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
+          y += 5;
         }
-        y += 5;
       });
     });
-    totalArea += seitenFlaeche;
 
     if (seitenFlaeche > 0) {
-      if (y > 258) { doc.addPage(); y = 16; }
+      totalArea += seitenFlaeche;
+      chk(6);
+      doc.setFontSize(10);
       doc.setFont(undefined, 'bold');
-      doc.text('Seite gesamt: ' + fmtNum(seitenFlaeche) + ' m²', LM + 4, y);
+      doc.text(fmtNum(seitenFlaeche) + ' m²', RM, y, { align: 'right' });
       doc.setFont(undefined, 'normal');
       y += 5;
     }
 
-    // Zubehör
-    const accLines = [];
+    // Zubehör-Totals sammeln
     if (Array.isArray(seite.konsolen)) {
       seite.konsolen.forEach(k => {
-        accLines.push('K ' + k.typ + (k.laenge !== null && !isNaN(k.laenge) ? ': ' + fmtNum(k.laenge) + ' m' : ''));
-        if (k.laenge !== null && !isNaN(k.laenge)) totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + k.laenge;
+        if (k.laenge !== null && !isNaN(k.laenge))
+          totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + k.laenge;
       });
     }
     if (Array.isArray(seite.innengelaender)) {
       seite.innengelaender.forEach(ig => {
-        accLines.push('IG' + (ig.laenge !== null && !isNaN(ig.laenge) ? ': ' + fmtNum(ig.laenge) + ' m' : ''));
         if (ig.laenge !== null && !isNaN(ig.laenge)) totals.ig += ig.laenge;
       });
     }
-    if (seite.dachfang)          { const l = seite.dachfang.laenge;          accLines.push('DF' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.df += l || 0; }
-    if (seite.gittertraeger)     { const l = seite.gittertraeger.laenge;     accLines.push('GT' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.gt += l || 0; }
-    if (seite.fussgaengertunnel) { const l = seite.fussgaengertunnel.laenge; accLines.push('FT' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.ft += l || 0; }
-    if (seite.treppenturm)       { const h = seite.treppenturm.hoehe;       accLines.push('TT' + (h !== null && !isNaN(h) ? ': ' + fmtNum(h) + ' m (H)' : '')); totals.tt += h || 0; }
-    if (seite.netze)             { const l = seite.netze.laenge;             accLines.push('NE' + (l !== null && !isNaN(l) ? ': ' + fmtNum(l) + ' m' : '')); totals.ne += l || 0; }
+    if (seite.dachfang          && seite.dachfang.laenge          != null) totals.df += seite.dachfang.laenge          || 0;
+    if (seite.gittertraeger     && seite.gittertraeger.laenge     != null) totals.gt += seite.gittertraeger.laenge     || 0;
+    if (seite.fussgaengertunnel && seite.fussgaengertunnel.laenge != null) totals.ft += seite.fussgaengertunnel.laenge || 0;
+    if (seite.treppenturm       && seite.treppenturm.hoehe        != null) totals.tt += seite.treppenturm.hoehe        || 0;
+    if (seite.netze             && seite.netze.laenge             != null) totals.ne += seite.netze.laenge             || 0;
 
-    if (accLines.length > 0) {
-      if (y > 258) { doc.addPage(); y = 16; }
-      doc.text(accLines.join('   '), LM + 4, y);
-      y += 5;
-    }
-
-    y += 3;
+    y += 2;
   });
 
   // Gesamtfläche
-  if (y > 258) { doc.addPage(); y = 16; }
-  doc.setLineWidth(0.5);
-  doc.line(LM, y, LM + PW, y);
-  y += 7;
-  doc.setFontSize(12);
-  doc.setFont(undefined, 'bold');
-  doc.text('Gesamtfläche: ' + fmtNum(totalArea) + ' m²', LM, y);
-  y += 8;
+  chk(8);
+  doc.setLineWidth(0.4);
+  doc.line(LM, y, RM, y);
+  y += 5;
+  pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
-  // Zubehör-Ubersicht
-  const hasAcc = Object.keys(totals.konsolen).length > 0 || totals.ig > 0 ||
-    totals.df > 0 || totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
+  // ── Zubehör ───────────────────────────────────────────────────
+  const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
+  const hasAcc = kTypen.length > 0 || totals.ig > 0 || totals.df > 0 ||
+    totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
 
   if (hasAcc) {
-    if (y > 240) { doc.addPage(); y = 16; }
-    doc.setLineWidth(0.3);
-    doc.line(LM, y, LM + PW, y);
-    y += 7;
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.text('Zubehör-Gesamtübersicht', LM, y);
-    y += 8;
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-
-    const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
-    if (kTypen.length > 0) {
-      if (y > 258) { doc.addPage(); y = 16; }
-      doc.text('Konsolen:  ' + kTypen.map(t => 'K ' + t + ': ' + fmtNum(round2(totals.konsolen[t])) + ' m').join('   '), LM + 4, y); y += 6;
-    }
-    if (totals.ig > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Innengeländer:  ' + fmtNum(round2(totals.ig)) + ' m', LM + 4, y); y += 6; }
-    if (totals.df > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Dachfang:  ' + fmtNum(round2(totals.df)) + ' m', LM + 4, y); y += 6; }
-    if (totals.gt > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Gitterträger:  ' + fmtNum(round2(totals.gt)) + ' m', LM + 4, y); y += 6; }
-    if (totals.ft > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Fußgängertunnel:  ' + fmtNum(round2(totals.ft)) + ' m', LM + 4, y); y += 6; }
-    if (totals.tt > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Treppenturm:  ' + fmtNum(round2(totals.tt)) + ' m (H)', LM + 4, y); y += 6; }
-    if (totals.ne > 0) { if (y > 258) { doc.addPage(); y = 16; } doc.text('Netze:  ' + fmtNum(round2(totals.ne)) + ' m', LM + 4, y); y += 6; }
+    y += 1;
+    hline(0.3);
+    secHead('Zubehör');
+    kTypen.forEach(t => pdfRow('Konsole ' + t + ' cm', fmtNum(round2(totals.konsolen[t])) + ' m'));
+    if (totals.ig > 0) pdfRow('Innengeländer',   fmtNum(round2(totals.ig)) + ' m');
+    if (totals.df > 0) pdfRow('Dachfang',        fmtNum(round2(totals.df)) + ' m');
+    if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
+    if (totals.ft > 0) pdfRow('Fußgängertunnel', fmtNum(round2(totals.ft)) + ' m');
+    if (totals.tt > 0) pdfRow('Treppenturm',     fmtNum(round2(totals.tt)) + ' m (H)');
+    if (totals.ne > 0) pdfRow('Netze',           fmtNum(round2(totals.ne)) + ' m');
   }
 
-  // Zusatzpositionen
+  // ── Zusatzpositionen ──────────────────────────────────────────
   if (zusatz.length > 0) {
-    if (y > 240) { doc.addPage(); y = 16; }
-    doc.setLineWidth(0.3);
-    doc.line(LM, y, LM + PW, y);
-    y += 7;
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.text('Zusatzpositionen', LM, y);
-    y += 8;
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    y += 1;
+    hline(0.3);
+    secHead('Zusatzpositionen');
     zusatz.forEach(z => {
-      if (y > 258) { doc.addPage(); y = 16; }
       const mengeStr = z.menge !== null ? fmtNum(z.menge) + ' ' + z.einheit : '–';
-      const notizStr = z.notiz ? '  – ' + z.notiz : '';
-      doc.text((z.art || '–') + ':  ' + mengeStr + notizStr, LM + 4, y);
-      y += 6;
+      const label    = (z.art || '–') + (z.notiz ? '  (' + z.notiz + ')' : '');
+      pdfRow(label, mengeStr);
     });
   }
 
-  // Logistik
-  const logFields = [
-    logistik.anfahrtKm        ? 'Anfahrt: ' + logistik.anfahrtKm + ' km' : '',
-    logistik.untergrund        ? 'Untergrund: ' + logistik.untergrund : '',
-    logistik.stellflaecheNotiz ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
-    logistik.oeffentlicherGrund     ? 'Öffentlicher Grund: Ja' : '',
-    logistik.verkehrssicherung      ? 'Verkehrssicherung: erforderlich' : '',
-    logistik.genehmigungErforderlich? 'Genehmigung: erforderlich' : ''
+  // ── Baustelle / Logistik ──────────────────────────────────────
+  const logParts = [
+    logistik.anfahrtKm             ? logistik.anfahrtKm + ' km Anfahrt' : '',
+    logistik.untergrund             ? 'Untergrund: ' + logistik.untergrund : '',
+    logistik.stellflaecheNotiz      ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
+    logistik.oeffentlicherGrund     ? 'Öffentlicher Grund' : '',
+    logistik.verkehrssicherung      ? 'Verkehrssicherung' : '',
+    logistik.genehmigungErforderlich? 'Genehmigung erforderlich' : ''
   ].filter(Boolean);
 
-  if (logFields.length > 0) {
-    if (y > 240) { doc.addPage(); y = 16; }
-    doc.setLineWidth(0.3);
-    doc.line(LM, y, LM + PW, y);
-    y += 7;
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.text('Baustelle / Logistik', LM, y);
-    y += 8;
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    logFields.forEach(f => {
-      if (y > 258) { doc.addPage(); y = 16; }
-      doc.text(f, LM + 4, y); y += 6;
-    });
+  if (logParts.length > 0) {
+    y += 1;
+    hline(0.3);
+    secHead('Baustelle / Logistik');
+    logParts.forEach(f => pdfRow(f, ''));
   }
 
   const proj = getCurrentProject();
