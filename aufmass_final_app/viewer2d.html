@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gerüst 2D-Ansicht</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="viewer2d.css" />
+</head>
+<body>
+
+  <header class="viewer-header">
+    <a href="index.html" class="back-link">← Aufmaß</a>
+    <h1>Gerüst 2D-Ansicht</h1>
+    <p>Erstellen Sie einen digitalen Grundrissplan Ihrer Gerüstkonstruktion. Klicken Sie auf ein Feld im Plan, um die Länge zu bearbeiten.</p>
+  </header>
+
+  <div id="toolbar">
+    <div class="tool-group">
+      <label class="tool-label">Projekt
+        <input type="text" id="projectName" placeholder="z. B. Haus Meier" />
+      </label>
+      <label class="tool-label">Gerüsttiefe (m)
+        <input type="number" id="scaffDepth" value="0.73" min="0.10" step="0.01" />
+      </label>
+    </div>
+    <div class="tool-group presets">
+      <span class="tool-label">Vorlage:</span>
+      <button id="lShapeBtn" class="secondary">L-Form</button>
+      <button id="uShapeBtn" class="secondary">U-Form</button>
+      <button id="rectBtn" class="secondary">Rechteck</button>
+    </div>
+    <div class="tool-group actions">
+      <button id="addSectionBtn" class="primary">+ Abschnitt</button>
+      <button id="savePlanBtn" class="secondary">Speichern</button>
+      <button id="loadPlanBtn" class="secondary">Laden</button>
+      <button id="exportPdfBtn" class="primary">PDF</button>
+    </div>
+    <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
+  </div>
+
+  <div id="appLayout">
+    <!-- Left: section editor -->
+    <aside id="sidePanel">
+      <div id="sectionsContainer"></div>
+      <p id="noSectionsHint" class="hint">Klicken Sie auf „+ Abschnitt" oder wählen Sie eine Vorlage.</p>
+    </aside>
+
+    <!-- Right: SVG canvas -->
+    <div id="viewerPanel">
+      <svg id="planSvg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="svgGrid" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
+            <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#dde" stroke-width="0.8"/>
+          </pattern>
+          <pattern id="svgGrid5" x="0" y="0" width="500" height="500" patternUnits="userSpaceOnUse">
+            <rect width="500" height="500" fill="url(#svgGrid)"/>
+            <path d="M 500 0 L 0 0 0 500" fill="none" stroke="#ccd" stroke-width="2"/>
+          </pattern>
+        </defs>
+        <rect id="gridBg" fill="url(#svgGrid5)" />
+        <g id="planGroup"></g>
+      </svg>
+      <div id="emptyHint" class="empty-hint">
+        Wählen Sie eine Vorlage oder fügen Sie einen Abschnitt hinzu.
+      </div>
+    </div>
+  </div>
+
+  <!-- Bay editor popup (injected by JS) -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="viewer2d.js"></script>
+</body>
+</html>
