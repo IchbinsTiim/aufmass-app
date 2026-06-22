@@ -15,7 +15,9 @@
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const PX_PER_M = 100; // SVG pixels per meter (base scale)
+const PX_PER_M  = 100;
+const HANDLE_R  = 18;    // visible drag handle radius (SVG units)
+const SNAP_STEP = 0.25;  // snap grid in metres
 
 const DIR_META = {
   N: { dx:  0, dy: -1, label: 'N ↑' },
@@ -24,19 +26,14 @@ const DIR_META = {
   W: { dx: -1, dy:  0, label: 'W ←' }
 };
 
-// Standard Gerüstfeld-Längen nach DIN 18451 / Layher Allround / PERI UP
 const STD_LENGTHS = [2.07, 2.57, 3.07];
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-let _sId = 0;
-let _bId = 0;
-
-let state = {
-  project:  '',
-  depth:    0.73,   // Gerüsttiefe in m
-  sections: []      // [{ id, name, dir:'N'|'E'|'S'|'W', bays:[{id, len}] }]
-};
+let _sId = 0, _bId = 0;
+let state = { project: '', depth: 0.73, sections: [] };
+let drag  = null;
+let rafPending = false;
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -51,15 +48,28 @@ function mkSection(dir = 'S', name) {
 
 // ── Geometry ───────────────────────────────────────────────────────────────
 
-/** Right-perpendicular (clockwise 90°) of a direction vector — points outward. */
 function outVec(dir) {
   return { dx: dir.dy, dy: -dir.dx };
 }
 
-/**
- * Build the list of renderable elements from state.
- * Returns: bay, corner, wallLine, sectionLabel, dot  objects.
- */
+function snapLen(len) {
+  const g = Math.round(len / SNAP_STEP) * SNAP_STEP;
+  for (const s of STD_LENGTHS) {
+    if (Math.abs(g - s) <= 0.13) return s;
+  }
+  return Math.max(0.25, +g.toFixed(2));
+}
+
+function screenToSvg(clientX, clientY) {
+  const svg  = document.getElementById('planSvg');
+  const rect = svg.getBoundingClientRect();
+  const vb   = svg.viewBox.baseVal;
+  return {
+    x: vb.x + (clientX - rect.left) * (vb.width  / rect.width),
+    y: vb.y + (clientY - rect.top)  * (vb.height / rect.height)
+  };
+}
+
 function computeLayout() {
   const depth = state.depth * PX_PER_M;
   const els   = [];
@@ -68,7 +78,6 @@ function computeLayout() {
   state.sections.forEach((sec, si) => {
     const dir = DIR_META[sec.dir];
     const out = outVec(dir);
-
     let x = cx, y = cy;
     const wallStart = { x, y };
     const isVert = sec.dir === 'N' || sec.dir === 'S';
@@ -79,9 +88,9 @@ function computeLayout() {
       const pxLen = bay.len * PX_PER_M;
 
       const p0 = { x, y };
-      const p1 = { x: x + dir.dx * pxLen,             y: y + dir.dy * pxLen };
-      const p2 = { x: p1.x + out.dx * depth,           y: p1.y + out.dy * depth };
-      const p3 = { x: p0.x + out.dx * depth,           y: p0.y + out.dy * depth };
+      const p1 = { x: x + dir.dx * pxLen,            y: y + dir.dy * pxLen };
+      const p2 = { x: p1.x + out.dx * depth,          y: p1.y + out.dy * depth };
+      const p3 = { x: p0.x + out.dx * depth,          y: p0.y + out.dy * depth };
 
       const mcx = (p0.x + p1.x + p2.x + p3.x) / 4;
       const mcy = (p0.y + p1.y + p2.y + p3.y) / 4;
@@ -92,22 +101,29 @@ function computeLayout() {
         si, bi, dir: sec.dir, secId: sec.id, bayId: bay.id
       });
 
+      // Drag handle at mid-point of far-end edge (p1–p2)
+      els.push({
+        type: 'handle',
+        x: (p1.x + p2.x) / 2,
+        y: (p1.y + p2.y) / 2,
+        len: bay.len, si, bi, isVert
+      });
+
       x += dir.dx * pxLen;
       y += dir.dy * pxLen;
     });
 
-    // ── Building wall line (facade) ─────────────────────────────────────
+    // ── Building wall line ──────────────────────────────────────────────
     els.push({ type: 'wallLine', x1: wallStart.x, y1: wallStart.y, x2: x, y2: y });
 
-    // ── Section total label (outside the bays) ──────────────────────────
+    // ── Section total label ─────────────────────────────────────────────
     const totalLen = sec.bays.reduce((s, b) => s + b.len, 0);
     if (totalLen > 0) {
       const offScale = depth + 14;
       const lx = (wallStart.x + x) / 2 + out.dx * offScale;
       const ly = (wallStart.y + y) / 2 + out.dy * offScale;
       els.push({
-        type: 'sectionLabel',
-        x: lx, y: ly,
+        type: 'sectionLabel', x: lx, y: ly,
         text: `${sec.name}: ${totalLen.toFixed(2)} m`,
         rotate: isVert ? -90 : 0
       });
@@ -118,25 +134,22 @@ function computeLayout() {
     if (next) {
       const nDir = DIR_META[next.dir];
       const nOut = outVec(nDir);
-      // Cross product: positive → exterior corner (gap to fill)
       const cross = out.dx * nOut.dy - out.dy * nOut.dx;
       if (cross > 0) {
         const c0 = { x, y };
-        const c1 = { x: x + out.dx  * depth, y: y + out.dy  * depth };
+        const c1 = { x: x + out.dx  * depth,    y: y + out.dy  * depth };
         const c2 = { x: c1.x + nOut.dx * depth, y: c1.y + nOut.dy * depth };
-        const c3 = { x: x + nOut.dx * depth, y: y + nOut.dy * depth };
+        const c3 = { x: x + nOut.dx * depth,    y: y + nOut.dy * depth };
         els.push({ type: 'corner', pts: [c0, c1, c2, c3] });
       }
     }
 
-    // ── Corner dot at start of section ─────────────────────────────────
+    // ── Corner dot ─────────────────────────────────────────────────────
     els.push({ type: 'dot', x: cx, y: cy });
-
     cx = x;
     cy = y;
   });
 
-  // Final dot at end of last section
   if (state.sections.length) els.push({ type: 'dot', x: cx, y: cy });
 
   return els;
@@ -175,36 +188,31 @@ function renderSvg() {
   const depth = state.depth * PX_PER_M;
   const els   = computeLayout();
 
-  // ── Compute bounding box ──────────────────────────────────────────────
+  // Bounding box
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  function trackPt(x, y) {
+  const trackPt = (x, y) => {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
-  }
-
+  };
   els.forEach(el => {
-    if (el.pts) el.pts.forEach(p => trackPt(p.x, p.y));
-    if (el.type === 'wallLine') { trackPt(el.x1, el.y1); trackPt(el.x2, el.y2); }
-    if (el.type === 'dot')      { trackPt(el.x, el.y); }
-    if (el.type === 'sectionLabel') { trackPt(el.x, el.y); }
+    if (el.pts)               el.pts.forEach(p => trackPt(p.x, p.y));
+    if (el.type === 'wallLine')     { trackPt(el.x1, el.y1); trackPt(el.x2, el.y2); }
+    if (el.type === 'dot')          trackPt(el.x, el.y);
+    if (el.type === 'sectionLabel') trackPt(el.x, el.y);
+    if (el.type === 'handle')       trackPt(el.x, el.y);
   });
 
-  const PAD = depth * 3.5;
+  const PAD = depth * 3.5 + HANDLE_R * 3;
   minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
-  const vw = maxX - minX;
-  const vh = maxY - minY;
+  const vw = maxX - minX, vh = maxY - minY;
   svg.setAttribute('viewBox', `${minX.toFixed(1)} ${minY.toFixed(1)} ${vw.toFixed(1)} ${vh.toFixed(1)}`);
 
-  // ── Grid background ───────────────────────────────────────────────────
   const gbg = document.getElementById('gridBg');
   gbg.setAttribute('x', minX); gbg.setAttribute('y', minY);
   gbg.setAttribute('width', vw); gbg.setAttribute('height', vh);
 
-  // Font sizes relative to scale
   const bayFontSize  = Math.max(depth * 0.38, 9);
   const infoFontSize = Math.max(depth * 0.28, 7);
-
-  // ── Render layers (back to front) ─────────────────────────────────────
 
   // 1. Corner pieces (behind bays)
   els.filter(e => e.type === 'corner').forEach(el => {
@@ -220,10 +228,9 @@ function renderSvg() {
       points: ptsStr(el.pts), fill: '#deeeff',
       stroke: '#2c6fa8', 'stroke-width': 2, cursor: 'pointer'
     });
-    poly.addEventListener('click', () => openBayEditor(el));
+    poly.addEventListener('click', () => openSheet(el.si, el.bi));
     g.appendChild(poly);
 
-    // Length label (rotated for vertical bays)
     const isVert = el.dir === 'N' || el.dir === 'S';
     const txt = svgEl('text', {
       x: el.cx, y: el.cy,
@@ -237,7 +244,7 @@ function renderSvg() {
     g.appendChild(txt);
   });
 
-  // 3. Building facade lines (on top of bays)
+  // 3. Building facade lines
   els.filter(e => e.type === 'wallLine').forEach(el => {
     g.appendChild(svgEl('line', {
       x1: el.x1, y1: el.y1, x2: el.x2, y2: el.y2,
@@ -245,7 +252,7 @@ function renderSvg() {
     }));
   });
 
-  // 4. Corner dots at building corners
+  // 4. Corner dots
   const dotR = Math.max(depth * 0.11, 4);
   els.filter(e => e.type === 'dot').forEach(el => {
     g.appendChild(svgEl('circle', {
@@ -254,7 +261,7 @@ function renderSvg() {
     }));
   });
 
-  // 5. Section total labels (outside scaffold, small)
+  // 5. Section total labels
   els.filter(e => e.type === 'sectionLabel').forEach(el => {
     const txt = svgEl('text', {
       x: el.x, y: el.y,
@@ -267,24 +274,81 @@ function renderSvg() {
     g.appendChild(txt);
   });
 
-  // 6. Scale bar (5 m)
+  // 6. Drag handles (topmost layer)
+  els.filter(e => e.type === 'handle').forEach(el => {
+    const isActive = drag && drag.si === el.si && drag.bi === el.bi;
+
+    // Large transparent hit area – easy finger target
+    const hit = svgEl('circle', {
+      cx: el.x, cy: el.y,
+      r: HANDLE_R * 2.2,
+      fill: 'transparent',
+      'data-si': el.si,
+      'data-bi': el.bi,
+      style: 'cursor:grab'
+    });
+    hit.addEventListener('pointerdown', onHandleDown);
+    g.appendChild(hit);
+
+    // Visible circle
+    g.appendChild(svgEl('circle', {
+      cx: el.x, cy: el.y, r: HANDLE_R,
+      fill: isActive ? '#005bb5' : '#007aff',
+      stroke: '#fff', 'stroke-width': 2.5,
+      'pointer-events': 'none'
+    }));
+
+    // Arrow symbol
+    const arrow = svgEl('text', {
+      x: el.x, y: el.y,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': Math.round(HANDLE_R * 1.05),
+      'font-family': 'system-ui, sans-serif',
+      fill: '#fff', 'font-weight': '700',
+      'pointer-events': 'none'
+    });
+    arrow.textContent = el.isVert ? '↕' : '↔';
+    g.appendChild(arrow);
+
+    // Measurement bubble during active drag
+    if (isActive) {
+      const len = state.sections[el.si].bays[el.bi].len;
+      const bx = el.x + (el.isVert ?  HANDLE_R * 2.8 : 0);
+      const by = el.y + (el.isVert ?  0 : -HANDLE_R * 2.8);
+      const br = svgEl('rect', {
+        x: bx - 34, y: by - 15,
+        width: 68, height: 30, rx: 7,
+        fill: '#111', opacity: '0.88',
+        'pointer-events': 'none'
+      });
+      const bt = svgEl('text', {
+        x: bx, y: by,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': 15, 'font-family': 'system-ui, sans-serif',
+        fill: '#fff', 'font-weight': '700',
+        'pointer-events': 'none'
+      });
+      bt.textContent = len.toFixed(2) + ' m';
+      g.appendChild(br);
+      g.appendChild(bt);
+    }
+  });
+
+  // 7. Scale bar
   drawScaleBar(g, minX, minY, vw, vh, infoFontSize);
 }
 
 function drawScaleBar(g, minX, minY, vw, vh, fontSize) {
-  const barMeters = 5;
-  const barLen = barMeters * PX_PER_M;
+  const barLen = 5 * PX_PER_M;
   const bx = minX + vw * 0.04;
   const by = minY + vh - (vh * 0.05);
   const tickH = 8;
 
-  const bg = svgEl('rect', {
+  g.appendChild(svgEl('rect', {
     x: bx - 8, y: by - fontSize - 6,
     width: barLen + 16, height: fontSize + tickH + 12,
     fill: 'rgba(255,255,255,0.75)', rx: 4
-  });
-  g.appendChild(bg);
-
+  }));
   g.appendChild(svgEl('line', { x1: bx, y1: by, x2: bx + barLen, y2: by, stroke: '#333', 'stroke-width': 2 }));
   g.appendChild(svgEl('line', { x1: bx, y1: by - tickH, x2: bx, y2: by + tickH, stroke: '#333', 'stroke-width': 2 }));
   g.appendChild(svgEl('line', { x1: bx + barLen, y1: by - tickH, x2: bx + barLen, y2: by + tickH, stroke: '#333', 'stroke-width': 2 }));
@@ -294,80 +358,191 @@ function drawScaleBar(g, minX, minY, vw, vh, fontSize) {
     'text-anchor': 'middle', 'font-size': fontSize,
     'font-family': 'system-ui, sans-serif', fill: '#333', 'font-weight': '600'
   });
-  lbl.textContent = `${barMeters},00 m`;
+  lbl.textContent = '5,00 m';
   g.appendChild(lbl);
 }
 
-// ── Bay editor popup ───────────────────────────────────────────────────────
+// ── Drag handlers ──────────────────────────────────────────────────────────
 
-function openBayEditor(el) {
-  // Remove any existing popup
-  document.getElementById('bayEditorOverlay')?.remove();
-  document.getElementById('bayEditorPopup')?.remove();
+function onHandleDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const si  = parseInt(e.currentTarget.dataset.si);
+  const bi  = parseInt(e.currentTarget.dataset.bi);
+  const svg = document.getElementById('planSvg');
+
+  // Capture on SVG so re-renders (g.innerHTML='') don't break the pointer capture
+  svg.setPointerCapture(e.pointerId);
+
+  drag = {
+    si, bi,
+    startLen: state.sections[si].bays[bi].len,
+    startPt:  screenToSvg(e.clientX, e.clientY),
+    dir:      DIR_META[state.sections[si].dir],
+    moved:    false
+  };
+}
+
+function onSvgPointerMove(e) {
+  if (!drag) return;
+
+  const pt  = screenToSvg(e.clientX, e.clientY);
+  const dPx = (pt.x - drag.startPt.x) * drag.dir.dx
+            + (pt.y - drag.startPt.y) * drag.dir.dy;
+
+  if (Math.abs(dPx) > 5) drag.moved = true;
+
+  const newLen = snapLen(drag.startLen + dPx / PX_PER_M);
+  if (newLen !== state.sections[drag.si].bays[drag.bi].len) {
+    state.sections[drag.si].bays[drag.bi].len = newLen;
+    if (!rafPending) {
+      rafPending = true;
+      requestAnimationFrame(() => { renderSvg(); rafPending = false; });
+    }
+  }
+}
+
+function onSvgPointerUp(e) {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+
+  if (!d.moved) {
+    openSheet(d.si, d.bi);
+  } else {
+    renderAll();
+  }
+}
+
+// ── Bottom sheet ───────────────────────────────────────────────────────────
+
+function openSheet(si, bi) {
+  closeSheet();
+
+  const sec = state.sections[si];
+  const bay = sec && sec.bays[bi];
+  if (!sec || !bay) return;
 
   const overlay = document.createElement('div');
-  overlay.id = 'bayEditorOverlay';
-  overlay.className = 'bay-popup-overlay';
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', () => { renderAll(); closeSheet(); });
 
-  const popup = document.createElement('div');
-  popup.id = 'bayEditorPopup';
-  popup.className = 'bay-popup';
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
 
-  popup.innerHTML = `
-    <div class="bay-popup-header">Feld ${el.bi + 1} – ${
-      state.sections[el.si] ? state.sections[el.si].name : `Abschnitt ${el.si + 1}`
-    }</div>
-    <label>Länge (m):
-      <input type="number" id="popupLenInput" value="${el.len.toFixed(2)}"
-             min="0.01" step="0.01" style="font-size:1.2rem;padding:0.5rem" />
-    </label>
-    <div class="popup-quick">
-      ${STD_LENGTHS.map(l =>
-        `<button class="quick-btn" data-len="${l}">${l.toFixed(2)}</button>`
-      ).join('')}
-    </div>
-    <div class="popup-actions">
-      <button id="popupOkBtn" class="primary">Übernehmen</button>
-      <button id="popupCancelBtn" class="secondary">Abbrechen</button>
-    </div>
-  `;
+  // Header
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = `Feld ${bi + 1} – ${sec.name}`;
+
+  // Standard size buttons
+  const stdDiv = document.createElement('div');
+  stdDiv.className = 'sheet-std-btns';
+  STD_LENGTHS.forEach(l => {
+    const btn = document.createElement('button');
+    btn.className = 'std-btn' + (Math.abs(bay.len - l) < 0.001 ? ' active' : '');
+    btn.textContent = l.toFixed(2) + ' m';
+    btn.addEventListener('click', () => {
+      bay.len = l;
+      renderAll();
+      closeSheet();
+    });
+    stdDiv.appendChild(btn);
+  });
+
+  // +/- adjustment row
+  const adjRow = document.createElement('div');
+  adjRow.className = 'sheet-adj-row';
+
+  const minusBtn = document.createElement('button');
+  minusBtn.className = 'adj-btn';
+  minusBtn.textContent = '−';
+
+  const inp = document.createElement('input');
+  inp.type = 'number';
+  inp.className = 'sheet-inp';
+  inp.value = bay.len.toFixed(2);
+  inp.min = '0.25';
+  inp.step = '0.25';
+  inp.inputMode = 'decimal';
+
+  const plusBtn = document.createElement('button');
+  plusBtn.className = 'adj-btn';
+  plusBtn.textContent = '+';
+
+  const syncInp = () => { inp.value = bay.len.toFixed(2); renderSvg(); };
+
+  minusBtn.addEventListener('click', () => {
+    bay.len = Math.max(0.25, +(bay.len - 0.25).toFixed(2));
+    syncInp();
+  });
+  plusBtn.addEventListener('click', () => {
+    bay.len = +(bay.len + 0.25).toFixed(2);
+    syncInp();
+  });
+  inp.addEventListener('change', () => {
+    const v = parseFloat(inp.value);
+    if (v >= 0.25) { bay.len = +v.toFixed(2); renderSvg(); }
+  });
+
+  adjRow.appendChild(minusBtn);
+  adjRow.appendChild(inp);
+  adjRow.appendChild(plusBtn);
+
+  // Action buttons
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'sheet-del';
+  delBtn.textContent = 'Feld löschen';
+  delBtn.addEventListener('click', () => {
+    if (sec.bays.length > 1) {
+      sec.bays.splice(bi, 1);
+    }
+    renderAll();
+    closeSheet();
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'sheet-add';
+  addBtn.textContent = '+ Feld danach';
+  addBtn.addEventListener('click', () => {
+    sec.bays.splice(bi + 1, 0, mkBay());
+    renderAll();
+    closeSheet();
+  });
+
+  const okBtn = document.createElement('button');
+  okBtn.className = 'sheet-ok';
+  okBtn.textContent = 'Fertig';
+  okBtn.addEventListener('click', () => { renderAll(); closeSheet(); });
+
+  actRow.appendChild(delBtn);
+  actRow.appendChild(addBtn);
+  actRow.appendChild(okBtn);
+
+  sheet.appendChild(hdr);
+  sheet.appendChild(stdDiv);
+  sheet.appendChild(adjRow);
+  sheet.appendChild(actRow);
 
   document.body.appendChild(overlay);
-  document.body.appendChild(popup);
+  document.body.appendChild(sheet);
 
-  const lenInput = document.getElementById('popupLenInput');
-  lenInput.focus();
-  lenInput.select();
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
 
-  const apply = () => {
-    const val = parseFloat(lenInput.value);
-    if (val > 0) {
-      state.sections[el.si].bays[el.bi].len = +val.toFixed(2);
-      renderAll();
-    }
-    close();
-  };
-
-  const close = () => {
-    overlay.remove();
-    popup.remove();
-  };
-
-  popup.querySelectorAll('.quick-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      lenInput.value = btn.dataset.len;
-      lenInput.focus();
-    });
-  });
-
-  document.getElementById('popupOkBtn').addEventListener('click', apply);
-  document.getElementById('popupCancelBtn').addEventListener('click', close);
-  overlay.addEventListener('click', close);
-
-  lenInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter')  apply();
-    if (e.key === 'Escape') close();
-  });
+function closeSheet() {
+  document.getElementById('sheetOverlay')?.remove();
+  const s = document.getElementById('bottomSheet');
+  if (!s) return;
+  s.classList.remove('open');
+  setTimeout(() => s.remove(), 230);
 }
 
 // ── Side panel (section editor) ────────────────────────────────────────────
@@ -387,7 +562,7 @@ function renderSections() {
     const card = document.createElement('div');
     card.className = 'section-card';
 
-    // ── Header ──────────────────────────────────────────────────────────
+    // Header
     const hdr = document.createElement('div');
     hdr.className = 'sec-hdr';
 
@@ -406,10 +581,9 @@ function renderSections() {
     hdr.appendChild(nameIn);
     hdr.appendChild(rmSec);
 
-    // ── Direction buttons ────────────────────────────────────────────────
+    // Direction buttons
     const dirRow = document.createElement('div');
     dirRow.className = 'dir-row';
-
     Object.keys(DIR_META).forEach(d => {
       const btn = document.createElement('button');
       btn.className = 'dir-btn' + (sec.dir === d ? ' active' : '');
@@ -418,17 +592,16 @@ function renderSections() {
       dirRow.appendChild(btn);
     });
 
-    // ── Bay list ─────────────────────────────────────────────────────────
+    // Bay list
     const baysDiv = document.createElement('div');
     baysDiv.className = 'bays-div';
 
+    const totEl = document.createElement('div');
+    totEl.className = 'sec-total';
     const updateTotal = () => {
       const total = sec.bays.reduce((s, b) => s + b.len, 0);
       totEl.textContent = `Gesamt: ${total.toFixed(2)} m  (${sec.bays.length} Felder)`;
     };
-
-    const totEl = document.createElement('div');
-    totEl.className = 'sec-total';
     updateTotal();
 
     sec.bays.forEach((bay, bi) => {
@@ -451,7 +624,6 @@ function renderSections() {
         renderSvg();
       });
 
-      // Standard-length quick buttons
       const qd = document.createElement('div');
       qd.className = 'quick-btns';
       STD_LENGTHS.forEach(l => {
@@ -470,7 +642,6 @@ function renderSections() {
       const rmBay = document.createElement('button');
       rmBay.className = 'remove-btn small';
       rmBay.textContent = '×';
-      rmBay.title = 'Feld entfernen';
       rmBay.addEventListener('click', () => { sec.bays.splice(bi, 1); renderAll(); });
 
       row.appendChild(num);
@@ -503,7 +674,6 @@ function renderAll() {
 
 function applyLShape() {
   _sId = 0; _bId = 0;
-  // East face going South, South face going West – matches the reference sketch
   const s1 = mkSection('S', 'Ostseite');
   const s2 = mkSection('W', 'Südseite');
   s1.bays = [mkBay(2.52), mkBay(2.52), mkBay(2.52), mkBay(2.52), mkBay(3.07)];
@@ -560,7 +730,7 @@ function onLoadFile(e) {
   reader.onload = ev => {
     try {
       const d = JSON.parse(ev.target.result);
-      const s = d.state || d; // support legacy format
+      const s = d.state || d;
       state.project  = s.project  || '';
       state.depth    = s.depth    || 0.73;
       state.sections = s.sections || [];
@@ -583,16 +753,14 @@ async function exportPdf() {
   const { jsPDF } = window.jspdf;
   const svg = document.getElementById('planSvg');
 
-  const vb = svg.viewBox.baseVal;
+  const vb   = svg.viewBox.baseVal;
   const svgW = vb.width  || 800;
   const svgH = vb.height || 600;
 
-  // Render at 3× for print quality
   const scale = 3;
   const cW = Math.round(svgW * scale);
   const cH = Math.round(svgH * scale);
 
-  // Serialise SVG and force explicit dimensions so browsers render it to canvas
   const serializer = new XMLSerializer();
   let svgStr = serializer.serializeToString(svg);
   svgStr = svgStr.replace(/(<svg[^>]*?)(\s*\bwidth\s*=\s*["'][^"']*["'])?(\s*\bheight\s*=\s*["'][^"']*["'])?/,
@@ -615,16 +783,14 @@ async function exportPdf() {
 
   const imgData = canvas.toDataURL('image/png');
 
-  const orient  = cW > cH ? 'landscape' : 'portrait';
-  const doc     = new jsPDF({ orientation: orient, unit: 'mm', format: 'a4' });
-  const pdfW    = orient === 'landscape' ? 297 : 210;
-  const pdfH    = orient === 'landscape' ? 210 : 297;
-  const margin  = 10;
-  const titleH  = 20;
-  const availW  = pdfW - 2 * margin;
-  const availH  = pdfH - margin - titleH - margin;
+  const orient = cW > cH ? 'landscape' : 'portrait';
+  const doc    = new jsPDF({ orientation: orient, unit: 'mm', format: 'a4' });
+  const pdfW   = orient === 'landscape' ? 297 : 210;
+  const pdfH   = orient === 'landscape' ? 210 : 297;
+  const margin = 10, titleH = 20;
+  const availW = pdfW - 2 * margin;
+  const availH = pdfH - margin - titleH - margin;
 
-  // Scale image to fit
   const ratio = Math.min(availW / (cW / (96 / 25.4)), availH / (cH / (96 / 25.4)));
   const imgW  = (cW / (96 / 25.4)) * ratio;
   const imgH  = (cH / (96 / 25.4)) * ratio;
@@ -670,7 +836,12 @@ function init() {
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
   document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
 
-  // Default: L-shape from the reference sketch
+  // SVG-level pointer events for drag (survive re-renders via pointer capture)
+  const svg = document.getElementById('planSvg');
+  svg.addEventListener('pointermove',   onSvgPointerMove);
+  svg.addEventListener('pointerup',     onSvgPointerUp);
+  svg.addEventListener('pointercancel', onSvgPointerUp);
+
   applyLShape();
 }
 

@@ -307,3 +307,145 @@
   font-size: 0.82rem;
   margin: 0;
 }
+
+/* ── SVG touch support ───────────────────────────────────────────────── */
+#planSvg {
+  touch-action: none;
+}
+
+/* ── Bottom Sheet (iPad touch UI) ───────────────────────────────────── */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  z-index: 200;
+}
+
+.bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border-radius: 18px 18px 0 0;
+  padding: 1.25rem 1rem calc(1.5rem + env(safe-area-inset-bottom));
+  z-index: 201;
+  box-shadow: 0 -4px 28px rgba(0,0,0,0.18);
+  transform: translateY(100%);
+  transition: transform 0.22s ease-out;
+}
+.bottom-sheet.open {
+  transform: translateY(0);
+}
+
+.sheet-header {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #1a3a5c;
+  margin-bottom: 1rem;
+}
+
+/* Standard field length buttons */
+.sheet-std-btns {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.std-btn {
+  flex: 1;
+  padding: 1.1rem 0.4rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  border: 2.5px solid #007aff;
+  border-radius: 12px;
+  background: #f0f7ff;
+  color: #007aff;
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+}
+.std-btn.active,
+.std-btn:active {
+  background: #007aff;
+  color: #fff;
+}
+
+/* +/- adjustment row */
+.sheet-adj-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.adj-btn {
+  width: 56px;
+  height: 56px;
+  font-size: 2rem;
+  line-height: 1;
+  border: 2px solid #007aff;
+  border-radius: 10px;
+  background: #f0f7ff;
+  color: #007aff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.adj-btn:active { background: #007aff; color: #fff; }
+
+.sheet-inp {
+  flex: 1;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  padding: 0.65rem 0.5rem;
+  border: 2px solid #ccc;
+  border-radius: 10px;
+  -moz-appearance: textfield;
+}
+.sheet-inp::-webkit-outer-spin-button,
+.sheet-inp::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* Action row */
+.sheet-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sheet-del {
+  flex: 0 0 auto;
+  background: #ff3b30;
+  color: #fff;
+  border: none;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sheet-add {
+  flex: 0 0 auto;
+  background: #34c759;
+  color: #fff;
+  border: none;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sheet-ok {
+  flex: 1;
+  background: #007aff;
+  color: #fff;
+  border: none;
+  padding: 0.9rem;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
