@@ -1,2242 +1,1982 @@
-/*
- * Script für die Fassaden‑Aufmaß‑App.
- * Erstellt dynamisch Wände und Öffnungen, berechnet die Flächen und stellt
- * eine Zusammenfassung bereit. Die Logik basiert auf dem DOM und liest die
- * aktuellen Werte direkt aus den Formularfeldern aus.
- */
+'use strict';
 
-// Hilfsfunktion, um eine neue Wand anzulegen
-function createWall(index) {
-  const wallDiv = document.createElement('div');
-  wallDiv.className = 'wall';
+// ============================================================
+//  Konstanten & Zustand
+// ============================================================
 
-  // Kopfbereich mit fortlaufender Nummer und Entfernen‑Button
-  const header = document.createElement('div');
-  header.className = 'wall-header';
-  const title = document.createElement('h3');
-  title.textContent = `Wand ${index}`;
-  header.appendChild(title);
-  const removeWallBtn = document.createElement('button');
-  removeWallBtn.className = 'remove-btn';
-  removeWallBtn.type = 'button';
-  removeWallBtn.textContent = 'Entfernen';
-  removeWallBtn.addEventListener('click', () => {
-    wallDiv.remove();
-    renumberWalls();
-    updateSummary();
-  });
-  header.appendChild(removeWallBtn);
+const STORAGE_KEY = 'aufmass_projects_v2';
 
-  // Container für die Eingaben
-  const body = document.createElement('div');
-  body.className = 'wall-body';
+let projects = [];
+let currentProjectId = null;
 
-  // Auswahl der Hausseite mit einer manuellen Eingabeoption
-  const sideWrapper = document.createElement('div');
-  const sideLabel = document.createElement('label');
-  sideLabel.textContent = 'Seite:';
-  const sideSelect = document.createElement('select');
-  sideSelect.className = 'wall-side';
-  [
-    { value: '', text: 'Bitte wählen' },
-    { value: 'Straßenseite', text: 'Straßenseite' },
-    { value: 'Linke Seite', text: 'Linke Seite' },
-    { value: 'Rechte Seite', text: 'Rechte Seite' },
-    { value: 'Rückseite', text: 'Rückseite' },
-    // fünfte Option für eine manuelle Eingabe. Die Bezeichnung "Andere (manuell)"
-    // lässt direkt erkennen, dass eine eigene Eingabe möglich ist.
-    { value: '__manual__', text: 'Andere (manuell)' }
-  ].forEach(optData => {
-    const opt = document.createElement('option');
-    opt.value = optData.value;
-    opt.textContent = optData.text;
-    sideSelect.appendChild(opt);
-  });
-  // Eingabefeld für manuelle Bezeichnung der Seite
-  const manualSideInput = document.createElement('input');
-  manualSideInput.type = 'text';
-  manualSideInput.placeholder = 'Seitenname';
-  manualSideInput.className = 'wall-side-manual';
-  manualSideInput.style.display = 'none';
-  manualSideInput.addEventListener('input', updateSummary);
-  // Seitenwechsel: Zeige oder verstecke das manuelle Eingabefeld
-  sideSelect.addEventListener('change', () => {
-    if (sideSelect.value === '__manual__') {
-      manualSideInput.style.display = '';
-    } else {
-      manualSideInput.style.display = 'none';
-      manualSideInput.value = '';
-    }
-    updateSummary();
-  });
-  sideWrapper.appendChild(sideLabel);
-  sideWrapper.appendChild(sideSelect);
-  sideWrapper.appendChild(manualSideInput);
+const ZUSATZ_ARTEN = [
+  'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
+  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen'
+];
+const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 
-  // Auswahl des Typs (Traufe, Giebel, Sonstige)
-  const typeWrapper = document.createElement('div');
-  const typeLabel = document.createElement('label');
-  typeLabel.textContent = 'Typ:';
-  const typeSelect = document.createElement('select');
-  typeSelect.className = 'wall-type';
-  [
-    { value: '', text: 'Bitte wählen' },
-    { value: 'Traufe', text: 'Traufe' },
-    { value: 'Giebel', text: 'Giebel' },
-    { value: 'Sonstige', text: 'Sonstige' }
-  ].forEach(optData => {
-    const opt = document.createElement('option');
-    opt.value = optData.value;
-    opt.textContent = optData.text;
-    typeSelect.appendChild(opt);
-  });
-  // Button zum Kopieren der Länge von der ersten Traufe/Giebel usw.
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.textContent = 'Länge übernehmen';
-  copyBtn.className = 'copy-length-btn';
-  copyBtn.style.display = 'none';
-  // Kopierfunktion
-  copyBtn.addEventListener('click', () => {
-    // Suche erste Wand mit gleichem Typ (Traufe oder Giebel) vor dieser Wand
-    const allWalls = document.querySelectorAll('#wallsContainer .wall');
-    let referenceWall = null;
-    for (const otherWall of allWalls) {
-      if (otherWall === wallDiv) break;
-      const otherType = otherWall.querySelector('.wall-type');
-      if (otherType && otherType.value === typeSelect.value && typeSelect.value) {
-        referenceWall = otherWall;
-        break;
-      }
-    }
-    if (referenceWall) {
-      // hole Länge(n) aus referenz
-      const refLengthRows = referenceWall.querySelectorAll('.length-row');
-      // leere aktuelle längen und extras
-      const currentContainer = lengthsContainer;
-      currentContainer.innerHTML = '';
-      refLengthRows.forEach(refRow => {
-        // erstelle neue reihe
-        const newRow = document.createElement('div');
-        newRow.className = 'dimension-row length-row';
-        const lenInput = document.createElement('input');
-        lenInput.type = 'number';
-        lenInput.min = '0';
-        lenInput.step = '0.01';
-        lenInput.placeholder = 'Länge (m)';
-        lenInput.className = 'length';
-        lenInput.addEventListener('input', () => {
-          updateScaffoldingLength(wallDiv);
-          updateSummary();
-        });
-        // extras select
-        const extraSelect = document.createElement('select');
-        extraSelect.className = 'length-extra';
-        [
-          { value: '0', text: '+0 m' },
-          { value: '1', text: '+1 m' },
-          { value: '2', text: '+2 m' }
-        ].forEach(optData => {
-          const opt = document.createElement('option');
-          opt.value = optData.value;
-          opt.textContent = optData.text;
-          extraSelect.appendChild(opt);
-        });
-        extraSelect.addEventListener('change', () => {
-          updateScaffoldingLength(wallDiv);
-          updateSummary();
-        });
-        // entfernen button
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'remove-btn';
-        removeBtn.type = 'button';
-        removeBtn.textContent = '×';
-        removeBtn.title = 'Länge entfernen';
-        removeBtn.addEventListener('click', () => {
-          newRow.remove();
-          updateScaffoldingLength(wallDiv);
-          updateSummary();
-        });
-        // setze werte von referenz
-        const refLen = parseFloat(refRow.querySelector('.length')?.value) || 0;
-        lenInput.value = refLen ? refLen.toFixed(2) : '';
-        const refExtra = refRow.querySelector('.length-extra')?.value;
-        if (refExtra !== undefined) {
-          extraSelect.value = refExtra;
-        }
-        newRow.appendChild(lenInput);
-        newRow.appendChild(extraSelect);
-        newRow.appendChild(removeBtn);
-        currentContainer.appendChild(newRow);
-      });
-      updateScaffoldingLength(wallDiv);
-      updateSummary();
-    }
-  });
-  typeSelect.addEventListener('change', () => {
-    // Bei Wahl von "Giebel" automatisch eine zweite Höhe hinzufügen,
-    // falls noch nicht vorhanden. Ein Giebel benötigt zwei Höhen (Anfang und Spitze).
-    if (typeSelect.value === 'Giebel') {
-      const existingHeights = wallDiv.querySelectorAll('.height-row');
-      if (existingHeights.length < 2) {
-        // füge zusätzliche Höhe hinzu (nutze definierte Funktion addHeightField)
-        addHeightField();
-      }
-    }
+// ============================================================
+//  localStorage
+// ============================================================
 
-    // Zeige Kopierbutton nur, wenn Traufe oder Giebel und es gibt bereits eine Wand mit diesem Typ
-    const val = typeSelect.value;
-    if (val === 'Traufe' || val === 'Giebel') {
-      // Prüfe, ob es eine andere Wand mit gleichem Typ gibt
-      const allWalls = document.querySelectorAll('#wallsContainer .wall');
-      let found = false;
-      for (const otherWall of allWalls) {
-        if (otherWall === wallDiv) continue;
-        const otherType = otherWall.querySelector('.wall-type');
-        if (otherType && otherType.value === val) {
-          found = true;
-          break;
-        }
-      }
-      copyBtn.style.display = found ? '' : 'none';
-    } else {
-      copyBtn.style.display = 'none';
-    }
-    updateSummary();
-  });
-  typeWrapper.appendChild(typeLabel);
-  typeWrapper.appendChild(typeSelect);
-  typeWrapper.appendChild(copyBtn);
-
-  // Container für mehrere Längen
-  const lengthsContainer = document.createElement('div');
-  lengthsContainer.className = 'lengths';
-  // Hilfsfunktion zum Erstellen eines Längen‑Eingabefelds
-  function addLengthField() {
-    const row = document.createElement('div');
-    row.className = 'dimension-row length-row';
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.min = '0';
-    input.step = '0.01';
-    input.placeholder = 'Länge (m)';
-    input.className = 'length';
-    input.addEventListener('input', () => {
-      updateScaffoldingLength(wallDiv);
-      updateSummary();
-    });
-    // Extra-Zuschlag pro Länge: Auswahl 0, 1 oder 2 Meter
-    const extraSelect = document.createElement('select');
-    extraSelect.className = 'length-extra';
-    // Definiere Optionen für 0, 1 und 2 Meter
-    [
-      { value: '0', text: '+0 m' },
-      { value: '1', text: '+1 m' },
-      { value: '2', text: '+2 m' }
-    ].forEach(optData => {
-      const opt = document.createElement('option');
-      opt.value = optData.value;
-      opt.textContent = optData.text;
-      extraSelect.appendChild(opt);
-    });
-    // Setze standardmäßig den Zuschlag auf +2 m,
-    // da die oberste Lage bei der Gerüststellung üblicherweise berücksichtigt wird.
-    extraSelect.value = '2';
-    extraSelect.addEventListener('change', () => {
-      updateScaffoldingLength(wallDiv);
-      updateSummary();
-    });
-    // Entfernen‑Button für diese Länge
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'remove-btn';
-    removeBtn.type = 'button';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'Länge entfernen';
-    removeBtn.addEventListener('click', () => {
-      row.remove();
-      updateScaffoldingLength(wallDiv);
-      updateSummary();
-    });
-    // Zusammenbauen: Reihenfolge: Eingabe, Extra, Entfernen
-    row.appendChild(input);
-    row.appendChild(extraSelect);
-    row.appendChild(removeBtn);
-    lengthsContainer.appendChild(row);
-  }
-  // Anfangs eine Länge anlegen
-  addLengthField();
-  // Button zum Hinzufügen weiterer Längen
-  const addLengthBtn = document.createElement('button');
-  addLengthBtn.className = 'primary';
-  addLengthBtn.type = 'button';
-  addLengthBtn.textContent = 'Länge hinzufügen';
-  addLengthBtn.addEventListener('click', () => {
-    addLengthField();
-  });
-
-  // Container für mehrere Höhen
-  const heightsContainer = document.createElement('div');
-  heightsContainer.className = 'heights';
-  function addHeightField() {
-    const row = document.createElement('div');
-    row.className = 'dimension-row height-row';
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.min = '0';
-    input.step = '0.01';
-    input.placeholder = 'Höhe (m)';
-    input.className = 'height';
-    input.addEventListener('input', updateSummary);
-    // Extra: Oberste Lage +2 m pro Höhe
-    const extrasContainer = document.createElement('div');
-    extrasContainer.className = 'height-extras';
-    const topCheck = document.createElement('input');
-    topCheck.type = 'checkbox';
-    topCheck.className = 'height-top-extra';
-    topCheck.title = 'Oberste Lage +2,00 m';
-    // Standardmäßig ist die +2 m für die oberste Lage aktiviert
-    topCheck.checked = true;
-    topCheck.addEventListener('change', updateSummary);
-    const topLabel = document.createElement('label');
-    topLabel.appendChild(topCheck);
-    topLabel.appendChild(document.createTextNode(' +2 m oben'));
-    extrasContainer.appendChild(topLabel);
-    // Entfernen‑Button für diese Höhe
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'remove-btn';
-    removeBtn.type = 'button';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'Höhe entfernen';
-    removeBtn.addEventListener('click', () => {
-      row.remove();
-      updateSummary();
-    });
-    row.appendChild(input);
-    row.appendChild(extrasContainer);
-    row.appendChild(removeBtn);
-    heightsContainer.appendChild(row);
-  }
-  // Anfangs eine Höhe anlegen
-  addHeightField();
-  // Button zum Hinzufügen weiterer Höhen
-  const addHeightBtn = document.createElement('button');
-  addHeightBtn.className = 'primary';
-  addHeightBtn.type = 'button';
-  addHeightBtn.textContent = 'Höhe hinzufügen';
-  addHeightBtn.addEventListener('click', () => {
-    addHeightField();
-  });
-
-  // Checkbox für Giebelmittelwert
-  const meanWrapper = document.createElement('div');
-  meanWrapper.className = 'mean-wrapper';
-  const meanCheck = document.createElement('input');
-  meanCheck.type = 'checkbox';
-  meanCheck.className = 'use-mean-height';
-  meanCheck.addEventListener('change', updateSummary);
-  const meanLabel = document.createElement('label');
-  meanLabel.appendChild(meanCheck);
-  meanLabel.appendChild(document.createTextNode(' Mittelwert für Giebel berechnen'));
-  meanWrapper.appendChild(meanLabel);
-
-  // Gerüst‑Anzeige für diese Wand
-  const scaffWrapper = document.createElement('div');
-  scaffWrapper.className = 'scaffolding';
-  // Anzeige der Gerüstlänge
-  const scaffLenDisplay = document.createElement('div');
-  scaffLenDisplay.className = 'scaff-length';
-  scaffLenDisplay.textContent = 'Gerüstlänge: 0,00 m';
-  scaffWrapper.appendChild(scaffLenDisplay);
-
-  // Ordnen der Eingabeelemente im Body
-  // Füge Seite und Typ Auswahl als gemeinsame Zeile hinzu
-  const sideTypeRow = document.createElement('div');
-  sideTypeRow.className = 'side-type-row';
-  sideTypeRow.appendChild(sideWrapper);
-  sideTypeRow.appendChild(typeWrapper);
-  body.appendChild(sideTypeRow);
-  // Höhenabschnitt
-  body.appendChild(heightsContainer);
-  body.appendChild(addHeightBtn);
-  // Längenabschnitt
-  body.appendChild(lengthsContainer);
-  body.appendChild(addLengthBtn);
-  // Mittelwert für Giebel
-  body.appendChild(meanWrapper);
-  // Gerüst‑Optionen
-  body.appendChild(scaffWrapper);
-
-  // Zusatzoptionen wie Treppenturm, Netze, Lampen, Parkplatz, Tunnelrahmen
-  const optionsWrapper = document.createElement('div');
-  optionsWrapper.className = 'wall-options';
-  // Treppenturm
-  const ttRow = document.createElement('div');
-  ttRow.className = 'option-row';
-  const ttCheck = document.createElement('input');
-  ttCheck.type = 'checkbox';
-  ttCheck.className = 'tt-check';
-  ttCheck.title = 'Treppenturm hinzufügen';
-  const ttLabel = document.createElement('label');
-  ttLabel.appendChild(ttCheck);
-  ttLabel.appendChild(document.createTextNode(' Treppenturm'));
-  // Höhe für TT (wird automatisch höchste Höhe +2 m, veränderbar)
-  const ttHeight = document.createElement('input');
-  ttHeight.type = 'number';
-  ttHeight.min = '0';
-  ttHeight.step = '0.01';
-  ttHeight.placeholder = 'TT‑Höhe (m)';
-  ttHeight.className = 'tt-height';
-  ttHeight.style.display = 'none';
-  // Kennzeichen für manuelle Anpassung
-  ttHeight.dataset.manual = 'false';
-  ttHeight.addEventListener('input', () => {
-    ttHeight.dataset.manual = 'true';
-    updateSummary();
-  });
-  // Käfig für TT
-  const cageCheck = document.createElement('input');
-  cageCheck.type = 'checkbox';
-  cageCheck.className = 'tt-cage';
-  cageCheck.style.display = 'none';
-  const cageLabel = document.createElement('label');
-  cageLabel.appendChild(cageCheck);
-  cageLabel.appendChild(document.createTextNode(' Käfig'));
-  cageLabel.style.display = 'none';
-  cageCheck.addEventListener('change', updateSummary);
-  // Extra +2 m für TT (standardmäßig ausgewählt)
-  const ttExtraCheck = document.createElement('input');
-  ttExtraCheck.type = 'checkbox';
-  ttExtraCheck.className = 'tt-extra';
-  ttExtraCheck.title = '+2 m beim Treppenturm';
-  ttExtraCheck.checked = true;
-  const ttExtraLabel = document.createElement('label');
-  ttExtraLabel.appendChild(ttExtraCheck);
-  ttExtraLabel.appendChild(document.createTextNode(' +2 m'));
-  ttExtraLabel.style.display = 'none';
-  // Wenn ttExtra geändert wird, Standardhöhe ggf. aktualisieren
-  ttExtraCheck.addEventListener('change', () => {
-    // Beim Wechsel setzen wir die manuellen Flags zurück, damit die Höhe neu berechnet wird
-    if (ttHeight.dataset.manual !== 'true') {
-      // Der Wert wird in updateSummary neu gesetzt
-    }
-    updateSummary();
-  });
-  // Umschalten der Sichtbarkeit von Höhe und Käfig
-  ttCheck.addEventListener('change', () => {
-    if (ttCheck.checked) {
-      ttHeight.style.display = '';
-      cageCheck.style.display = '';
-      cageLabel.style.display = '';
-      ttExtraLabel.style.display = '';
-    } else {
-      ttHeight.style.display = 'none';
-      cageCheck.style.display = 'none';
-      cageLabel.style.display = 'none';
-      ttExtraLabel.style.display = 'none';
-    }
-    updateSummary();
-  });
-  ttRow.appendChild(ttLabel);
-  ttRow.appendChild(ttHeight);
-  ttRow.appendChild(ttExtraLabel);
-  ttRow.appendChild(cageLabel);
-  // Staubschutznetz
-  const netRow = document.createElement('div');
-  netRow.className = 'option-row';
-  const netCheck = document.createElement('input');
-  netCheck.type = 'checkbox';
-  netCheck.className = 'net-check';
-  netCheck.title = 'Staubschutznetz';
-  const netLabel = document.createElement('label');
-  netLabel.appendChild(netCheck);
-  netLabel.appendChild(document.createTextNode(' Staubschutznetz'));
-  // Eingabefeld für Netzfläche (manuell anpassbar)
-  const netInput = document.createElement('input');
-  netInput.type = 'number';
-  netInput.min = '0';
-  netInput.step = '0.01';
-  netInput.className = 'net-area';
-  netInput.dataset.manual = 'false';
-  netInput.style.display = 'none';
-  netInput.addEventListener('input', () => {
-    netInput.dataset.manual = 'true';
-    updateSummary();
-  });
-  // Ein-/Ausblenden des Eingabefelds bei Checkbox
-  netCheck.addEventListener('change', () => {
-    if (netCheck.checked) {
-      netInput.style.display = '';
-    } else {
-      netInput.style.display = 'none';
-      netInput.value = '';
-      netInput.dataset.manual = 'false';
-    }
-    updateSummary();
-  });
-  netRow.appendChild(netLabel);
-  netRow.appendChild(netInput);
-  // Lampen (auswählbar mit Checkbox)
-  const lampRow = document.createElement('div');
-  lampRow.className = 'option-row';
-  // Lampen-Checkbox
-  const lampCheck = document.createElement('input');
-  lampCheck.type = 'checkbox';
-  lampCheck.className = 'lamp-check';
-  lampCheck.title = 'Lampen hinzuschalten';
-  const lampCheckLabel = document.createElement('label');
-  lampCheckLabel.appendChild(lampCheck);
-  lampCheckLabel.appendChild(document.createTextNode(' Lampen'));
-  // Lampen-Eingabefeld
-  const lampInput = document.createElement('input');
-  lampInput.type = 'number';
-  lampInput.min = '0';
-  lampInput.step = '1';
-  lampInput.className = 'lamp-count';
-  lampInput.dataset.manual = 'false';
-  lampInput.style.display = 'none';
-  lampInput.addEventListener('input', () => {
-    lampInput.dataset.manual = 'true';
-    updateSummary();
-  });
-  // Wenn man Lampen-Checkbox klickt, Eingabe ein-/ausblenden
-  lampCheck.addEventListener('change', () => {
-    if (lampCheck.checked) {
-      lampInput.style.display = '';
-    } else {
-      lampInput.style.display = 'none';
-      lampInput.value = '';
-      lampInput.dataset.manual = 'false';
-    }
-    updateSummary();
-  });
-  lampRow.appendChild(lampCheckLabel);
-  lampRow.appendChild(lampInput);
-  // Parkplatz und Genehmigung (zwei separate Optionen)
-  const parkingRow = document.createElement('div');
-  parkingRow.className = 'option-row';
-  // Parkplatz
-  const parkCheck = document.createElement('input');
-  parkCheck.type = 'checkbox';
-  parkCheck.className = 'parking-check';
-  const parkLabel = document.createElement('label');
-  parkLabel.appendChild(parkCheck);
-  parkLabel.appendChild(document.createTextNode(' Parkplatz'));
-  // Genehmigung
-  const permitCheck = document.createElement('input');
-  permitCheck.type = 'checkbox';
-  permitCheck.className = 'permit-check';
-  const permitLabel = document.createElement('label');
-  permitLabel.appendChild(permitCheck);
-  permitLabel.appendChild(document.createTextNode(' Genehmigung'));
-  // Event Listener
-  parkCheck.addEventListener('change', updateSummary);
-  permitCheck.addEventListener('change', updateSummary);
-  // Zusammenbauen
-  parkingRow.appendChild(parkLabel);
-  parkingRow.appendChild(permitLabel);
-  // Tunnelrahmen (auswählbar mit Checkbox)
-  const tunnelRow = document.createElement('div');
-  tunnelRow.className = 'option-row';
-  // Tunnel-Checkbox
-  const tunnelCheck = document.createElement('input');
-  tunnelCheck.type = 'checkbox';
-  tunnelCheck.className = 'tunnel-check';
-  tunnelCheck.title = 'Tunnelrahmen hinzufügen';
-  const tunnelCheckLabel = document.createElement('label');
-  tunnelCheckLabel.appendChild(tunnelCheck);
-  tunnelCheckLabel.appendChild(document.createTextNode(' Tunnelrahmen'));
-  // Tunnel-Längenfeld
-  const tunnelInput = document.createElement('input');
-  tunnelInput.type = 'number';
-  tunnelInput.min = '0';
-  tunnelInput.step = '0.01';
-  tunnelInput.className = 'tunnel-length';
-  tunnelInput.dataset.manual = 'false';
-  tunnelInput.style.display = 'none';
-  tunnelInput.addEventListener('input', () => {
-    tunnelInput.dataset.manual = 'true';
-    updateSummary();
-  });
-  // Ein-/Ausblenden bei Checkbox
-  tunnelCheck.addEventListener('change', () => {
-    if (tunnelCheck.checked) {
-      tunnelInput.style.display = '';
-    } else {
-      tunnelInput.style.display = 'none';
-      tunnelInput.value = '';
-      tunnelInput.dataset.manual = 'false';
-    }
-    updateSummary();
-  });
-  tunnelRow.appendChild(tunnelCheckLabel);
-  tunnelRow.appendChild(tunnelInput);
-
-  // Füge die Optionzeilen zum Wrapper hinzu
-  optionsWrapper.appendChild(ttRow);
-  optionsWrapper.appendChild(netRow);
-  optionsWrapper.appendChild(lampRow);
-  optionsWrapper.appendChild(parkingRow);
-  optionsWrapper.appendChild(tunnelRow);
-
-  // Dachfang (DF) mit Konsolen 0,50 und DF-Netzen
-  const dfRow = document.createElement('div');
-  dfRow.className = 'option-row';
-  const dfCheck = document.createElement('input');
-  dfCheck.type = 'checkbox';
-  dfCheck.className = 'df-check';
-  dfCheck.title = 'Dachfang (DF) auswählen';
-  const dfLabel = document.createElement('label');
-  dfLabel.appendChild(dfCheck);
-  dfLabel.appendChild(document.createTextNode(' DF'));
-  // Konsolen 0,50 (Anzahl oder Länge?)
-  const dfConsoleInput = document.createElement('input');
-  dfConsoleInput.type = 'number';
-  dfConsoleInput.min = '0';
-  dfConsoleInput.step = '0.01';
-  dfConsoleInput.placeholder = 'Konsolen 0,50';
-  dfConsoleInput.className = 'df-console';
-  dfConsoleInput.style.display = 'none';
-  dfConsoleInput.dataset.manual = 'false';
-  dfConsoleInput.addEventListener('input', () => {
-    dfConsoleInput.dataset.manual = 'true';
-    updateSummary();
-  });
-  // DF Netze – Länge der Seite
-  const dfNetInput = document.createElement('input');
-  dfNetInput.type = 'number';
-  dfNetInput.min = '0';
-  dfNetInput.step = '0.01';
-  dfNetInput.placeholder = 'DF‑Netze (m)';
-  dfNetInput.className = 'df-net';
-  dfNetInput.style.display = 'none';
-  dfNetInput.dataset.manual = 'false';
-  dfNetInput.addEventListener('input', () => {
-    dfNetInput.dataset.manual = 'true';
-    updateSummary();
-  });
-  // Umschalten der Sichtbarkeit der DF-Felder
-  dfCheck.addEventListener('change', () => {
-    if (dfCheck.checked) {
-      dfConsoleInput.style.display = '';
-      dfNetInput.style.display = '';
-    } else {
-      dfConsoleInput.style.display = 'none';
-      dfConsoleInput.value = '';
-      dfConsoleInput.dataset.manual = 'false';
-      dfNetInput.style.display = 'none';
-      dfNetInput.value = '';
-      dfNetInput.dataset.manual = 'false';
-    }
-    updateSummary();
-  });
-  dfRow.appendChild(dfLabel);
-  dfRow.appendChild(dfConsoleInput);
-  dfRow.appendChild(dfNetInput);
-  optionsWrapper.appendChild(dfRow);
-
-  // ------- Konsolen -------
-  const consRow = document.createElement('div');
-  consRow.className = 'option-row';
-  const consCheck = document.createElement('input');
-  consCheck.type = 'checkbox';
-  consCheck.className = 'cons-check';
-  consCheck.title = 'Konsolen hinzufügen';
-  const consLabel = document.createElement('label');
-  consLabel.appendChild(consCheck);
-  consLabel.appendChild(document.createTextNode(' Konsole'));
-  // Container für Konsolen-Einträge
-  const consContainer = document.createElement('div');
-  consContainer.className = 'cons-container';
-  consContainer.style.display = 'none';
-  // Schaltfläche zum Hinzufügen einer neuen Konsole
-  const addConsBtn = document.createElement('button');
-  addConsBtn.type = 'button';
-  addConsBtn.textContent = 'Konsole hinzufügen';
-  addConsBtn.className = 'secondary';
-  // Funktion zum Hinzufügen einer Konsole
-  function addConsoleRow() {
-    const row = document.createElement('div');
-    row.className = 'console-row';
-    // Dropdown für Konsolentypen
-    const typeSel = document.createElement('select');
-    typeSel.className = 'console-type';
-    // Liste der verfügbaren Konsolen zur Auswahl. Der Begriff "Konsole"
-    // wird in der Anzeige weggelassen; nur die Längen (ggf. mit Hinweis
-    // auf Rohrverbinder oder Stecksystem) werden gezeigt.
-    [
-      '0,22 m',
-      '0,36 m (ohne Rohrverbinder)',
-      '0,36 m (mit Rohrverbinder)',
-      '0,22 m Steck',
-      '0,36 m Steck',
-      '0,50 m',
-      '0,73 m'
-    ].forEach(optText => {
-      const opt = document.createElement('option');
-      opt.value = optText;
-      opt.textContent = optText;
-      typeSel.appendChild(opt);
-    });
-    typeSel.addEventListener('change', updateSummary);
-    // Länge
-    const lenInput = document.createElement('input');
-    lenInput.type = 'number';
-    lenInput.min = '0';
-    lenInput.step = '0.01';
-    lenInput.placeholder = 'Länge (m)';
-    lenInput.className = 'console-length';
-    lenInput.addEventListener('input', () => {
-      lenInput.dataset.manual = 'true';
-      updateSummary();
-    });
-    // Gesamtlänge übernehmen
-    const lenAuto = document.createElement('input');
-    lenAuto.type = 'checkbox';
-    lenAuto.className = 'console-auto';
-    lenAuto.title = 'Gesamtlänge übernehmen';
-    lenAuto.addEventListener('change', () => {
-      if (lenAuto.checked) {
-        const totalLen = computeTotalScaffoldLength(wallDiv);
-        if (!isNaN(totalLen)) {
-          lenInput.value = totalLen.toFixed(2);
-        }
-        lenInput.disabled = true;
-      } else {
-        lenInput.disabled = false;
-      }
-      updateSummary();
-    });
-    // Lagenanzahl mit Label
-    const layerLabel = document.createElement('span');
-    layerLabel.textContent = 'Lagen';
-    const layerInput = document.createElement('input');
-    layerInput.type = 'number';
-    layerInput.min = '1';
-    layerInput.step = '1';
-    layerInput.value = '1';
-    layerInput.className = 'console-layers';
-    layerInput.addEventListener('input', updateSummary);
-    // Entfernen-Schaltfläche
-    const rmBtn = document.createElement('button');
-    rmBtn.type = 'button';
-    rmBtn.textContent = '×';
-    rmBtn.className = 'remove-row-btn';
-    rmBtn.addEventListener('click', () => {
-      row.remove();
-      updateSummary();
-    });
-    // Zeile zusammensetzen
-    row.appendChild(typeSel);
-    // Füge Längeingabe und Auto-Checkbox direkt an
-    row.appendChild(lenInput);
-    row.appendChild(lenAuto);
-    // Füge Label und Eingabe für Lagen hinzu (Wrapper bleibt zur Gruppe)
-    const layerWrapper = document.createElement('span');
-    layerWrapper.style.display = 'flex';
-    layerWrapper.style.alignItems = 'center';
-    layerWrapper.style.gap = '0.25rem';
-    layerWrapper.appendChild(layerLabel);
-    layerWrapper.appendChild(layerInput);
-    row.appendChild(layerWrapper);
-    row.appendChild(rmBtn);
-    consContainer.insertBefore(row, addConsBtn);
-    updateSummary();
-  }
-  addConsBtn.addEventListener('click', addConsoleRow);
-  // Umschalten der Sichtbarkeit des Konsolen-Containers
-  consCheck.addEventListener('change', () => {
-    if (consCheck.checked) {
-      consContainer.style.display = '';
-      if (consContainer.querySelectorAll('.console-row').length === 0) {
-        addConsoleRow();
-      }
-    } else {
-      consContainer.style.display = 'none';
-      consContainer.querySelectorAll('.console-row').forEach(r => r.remove());
-    }
-    updateSummary();
-  });
-  consRow.appendChild(consLabel);
-  consRow.appendChild(consContainer);
-  consContainer.appendChild(addConsBtn);
-  optionsWrapper.appendChild(consRow);
-
-  // ------- Innengeländer -------
-  const innerRow = document.createElement('div');
-  innerRow.className = 'option-row';
-  const innerCheck = document.createElement('input');
-  innerCheck.type = 'checkbox';
-  innerCheck.className = 'inner-check';
-  innerCheck.title = 'Innengeländer hinzufügen';
-  const innerLabel = document.createElement('label');
-  innerLabel.appendChild(innerCheck);
-  innerLabel.appendChild(document.createTextNode(' Innengeländer'));
-  // Container für Innengeländer mit dynamischen Einträgen
-  const innerContainer = document.createElement('div');
-  innerContainer.className = 'inner-container';
-  innerContainer.style.display = 'none';
-  // Button zum Hinzufügen einer Innengeländer-Zeile
-  const addInnerBtn = document.createElement('button');
-  addInnerBtn.type = 'button';
-  addInnerBtn.textContent = 'Innengeländer hinzufügen';
-  addInnerBtn.className = 'secondary';
-  // Funktion zum Hinzufügen einer Innengeländer-Zeile
-  function addInnerRow() {
-    const row = document.createElement('div');
-    row.className = 'inner-row';
-    // Länge
-    const lenInput = document.createElement('input');
-    lenInput.type = 'number';
-    lenInput.min = '0';
-    lenInput.step = '0.01';
-    lenInput.placeholder = 'Länge (m)';
-    lenInput.className = 'inner-length';
-    lenInput.addEventListener('input', () => {
-      lenInput.dataset.manual = 'true';
-      updateSummary();
-    });
-    // Gesamtlänge übernehmen
-    const autoChk = document.createElement('input');
-    autoChk.type = 'checkbox';
-    autoChk.className = 'inner-auto';
-    autoChk.title = 'Gesamtlänge übernehmen';
-    autoChk.addEventListener('change', () => {
-      if (autoChk.checked) {
-        const totalLen = computeTotalScaffoldLength(wallDiv);
-        if (!isNaN(totalLen)) {
-          lenInput.value = totalLen.toFixed(2);
-        }
-        lenInput.disabled = true;
-      } else {
-        lenInput.disabled = false;
-      }
-      updateSummary();
-    });
-    // Lagen
-    const layerLabel = document.createElement('span');
-    layerLabel.textContent = 'Lagen';
-    const layerInput = document.createElement('input');
-    layerInput.type = 'number';
-    layerInput.min = '1';
-    layerInput.step = '1';
-    layerInput.value = '1';
-    layerInput.className = 'inner-layers';
-    layerInput.addEventListener('input', updateSummary);
-    const layerWrapper = document.createElement('span');
-    layerWrapper.style.display = 'flex';
-    layerWrapper.style.alignItems = 'center';
-    layerWrapper.style.gap = '0.25rem';
-    layerWrapper.appendChild(layerLabel);
-    layerWrapper.appendChild(layerInput);
-    // Entfernen-Button
-    const rmBtn = document.createElement('button');
-    rmBtn.type = 'button';
-    rmBtn.textContent = '×';
-    rmBtn.className = 'remove-row-btn';
-    rmBtn.addEventListener('click', () => {
-      row.remove();
-      updateSummary();
-    });
-    // Zeile zusammenbauen
-    row.appendChild(lenInput);
-    row.appendChild(autoChk);
-    row.appendChild(layerWrapper);
-    row.appendChild(rmBtn);
-    // In Container vor dem Hinzufügen-Button einfügen
-    innerContainer.insertBefore(row, addInnerBtn);
-    updateSummary();
-  }
-  addInnerBtn.addEventListener('click', addInnerRow);
-  // Umschalten der Sichtbarkeit der Innengeländer-Optionen
-  innerCheck.addEventListener('change', () => {
-    if (innerCheck.checked) {
-      innerContainer.style.display = '';
-      // Falls noch keine Zeilen vorhanden, eine hinzufügen
-      if (innerContainer.querySelectorAll('.inner-row').length === 0) {
-        addInnerRow();
-      }
-    } else {
-      innerContainer.style.display = 'none';
-      // Alle vorhandenen Zeilen entfernen
-      innerContainer.querySelectorAll('.inner-row').forEach(r => r.remove());
-    }
-    updateSummary();
-  });
-  // Elemente zusammenfügen
-  innerRow.appendChild(innerLabel);
-  innerRow.appendChild(innerContainer);
-  innerContainer.appendChild(addInnerBtn);
-  optionsWrapper.appendChild(innerRow);
-
-  body.appendChild(optionsWrapper);
-
-  // Container für Öffnungen
-  const openingsContainer = document.createElement('div');
-  openingsContainer.className = 'openings';
-
-  // Button zum Hinzufügen von Öffnungen
-  const addOpeningBtn = document.createElement('button');
-  addOpeningBtn.className = 'primary';
-  addOpeningBtn.type = 'button';
-  addOpeningBtn.textContent = 'Öffnung hinzufügen';
-  addOpeningBtn.addEventListener('click', () => {
-    addOpening(openingsContainer);
-  });
-
-  // Zusammenführen aller Teile
-  wallDiv.appendChild(header);
-  wallDiv.appendChild(body);
-  wallDiv.appendChild(addOpeningBtn);
-  wallDiv.appendChild(openingsContainer);
-  // Initial Gerüstlänge berechnen
-  updateScaffoldingLength(wallDiv);
-  return wallDiv;
-}
-
-// Fügt eine Öffnung (Fenster/Tür) zu einer Wand hinzu
-function addOpening(container) {
-  const row = document.createElement('div');
-  row.className = 'opening-row';
-  // Breite der Öffnung
-  const wInput = document.createElement('input');
-  wInput.type = 'number';
-  wInput.min = '0';
-  wInput.step = '0.01';
-  wInput.placeholder = 'Breite (m)';
-  wInput.className = 'opening-width';
-  wInput.addEventListener('input', updateSummary);
-  // Höhe der Öffnung
-  const hInput = document.createElement('input');
-  hInput.type = 'number';
-  hInput.min = '0';
-  hInput.step = '0.01';
-  hInput.placeholder = 'Höhe (m)';
-  hInput.className = 'opening-height';
-  hInput.addEventListener('input', updateSummary);
-  // Entfernen‑Button für die Öffnung
-  const removeBtn = document.createElement('button');
-  removeBtn.className = 'remove-btn';
-  removeBtn.type = 'button';
-  removeBtn.textContent = '×';
-  removeBtn.title = 'Öffnung entfernen';
-  removeBtn.addEventListener('click', () => {
-    row.remove();
-    updateSummary();
-  });
-  row.appendChild(wInput);
-  row.appendChild(hInput);
-  row.appendChild(removeBtn);
-  container.appendChild(row);
-  updateSummary();
-}
-
-// Berechnet die Gerüstlänge für eine Wand und aktualisiert die Anzeige
-function updateScaffoldingLength(wallDiv) {
-  const scaffLenDisplay = wallDiv.querySelector('.scaff-length');
-  // Berechne die Gerüstlänge als Summe aller Längen inklusive individueller Zuschläge
-  let scaffLen = 0;
-  const lengthRows = wallDiv.querySelectorAll('.length-row');
-  lengthRows.forEach(row => {
-    const lenInput = row.querySelector('.length');
-    const extraSelect = row.querySelector('.length-extra');
-    const val = parseFloat(lenInput?.value) || 0;
-    let extra = 0;
-    if (extraSelect) {
-      extra = parseFloat(extraSelect.value) || 0;
-    }
-    scaffLen += val + extra;
-  });
-  if (scaffLenDisplay) {
-    scaffLenDisplay.textContent = `Gerüstlänge: ${scaffLen.toFixed(2)} m`;
+function loadProjects() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    projects = raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    projects = [];
   }
 }
 
-/**
- * Berechnet die gesamte Gerüstlänge einer Wand aus allen Längenangaben
- * inklusive der pro Länge gewählten Zuschläge. Diese Funktion wird
- * beispielsweise von den Konsolen- und Innengeländeroptionen verwendet,
- * um die Standardlänge zu bestimmen.
- *
- * @param {HTMLElement} wallDiv Das DOM-Element der Wand
- * @returns {number} Gesamtlänge der Wand inklusive Zuschläge
- */
-function computeTotalScaffoldLength(wallDiv) {
+function saveProjects() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+}
+
+function getCurrentProject() {
+  return projects.find(p => p.id === currentProjectId) || null;
+}
+
+// ============================================================
+//  Hilfsfunktionen
+// ============================================================
+
+const round2 = n => Math.round(n * 100) / 100;
+
+function genId(prefix) {
+  return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function fmtNum(n) {
+  return n.toFixed(2).replace('.', ',');
+}
+
+function parseNum(str) {
+  if (str === null || str === undefined || str === '') return NaN;
+  return parseFloat(String(str).replace(',', '.'));
+}
+
+function getTypeLabel(type) {
+  if (type === 'dach') return 'Dach-Gerüst';
+  if (type === 'sonder') return 'Sonder-Gerüst';
+  return 'Fassaden-Gerüst';
+}
+
+function getTypeBadge(type) {
+  if (type === 'dach') return 'Dach';
+  if (type === 'sonder') return 'Son.';
+  return 'Fass.';
+}
+
+function getProjectLabel(project) {
+  const a = project.anschrift || {};
+  const parts = [];
+  if (a.strasse || a.nummer) {
+    parts.push([a.strasse, a.nummer].filter(Boolean).join(' '));
+  }
+  if (a.plz || a.ort) {
+    parts.push([a.plz, a.ort].filter(Boolean).join(' '));
+  }
+  return parts.join(', ') || 'Neues Projekt';
+}
+
+function getSeiteName(seite) {
+  if (seite.name === '__manual__') return seite.manualName || 'Unbenannte Seite';
+  return seite.name || 'Unbenannte Seite';
+}
+
+// Flache eines Abschnitts (Summe aller Messpaare, optionales +2m je Wert)
+// Giebel: Flache = L × (H1_Dachrinne + H2_Spitze) / 2
+function berechneAbschnitt(abschnitt) {
+  const ef       = abschnitt.einzelfeld || false;
+  const isGiebel = abschnitt.giebel    || false;
+  let flaeche = 0;
+  for (const m of (abschnitt.messungen || [])) {
+    let l = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+    if (ef) l = Math.max(l, 2.5);
+    if (l <= 0) continue;
+    if (isGiebel) {
+      const h1 = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
+      const h2 = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+      if (h2 >= h1 && h1 >= 0) flaeche += l * (h1 + h2) / 2;
+    } else {
+      const h = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+      if (h > 0) flaeche += l * h;
+    }
+  }
+  return round2(flaeche);
+}
+
+// Gesamt-Flache einer Karte (Summe aller Abschnitte)
+function computeCardFlaeche(card) {
   let total = 0;
-  const lengthRows = wallDiv.querySelectorAll('.length-row');
-  lengthRows.forEach(row => {
-    const lenInput = row.querySelector('.length');
-    const extraSelect = row.querySelector('.length-extra');
-    let val = parseFloat(lenInput?.value);
-    if (isNaN(val)) val = 0;
-    let extra = parseFloat(extraSelect?.value);
-    if (isNaN(extra)) extra = 0;
-    total += val + extra;
+  card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+    const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+    const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
+    abRow.querySelectorAll('.messung-row').forEach(mRow => {
+      const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      let lEff  = (l || 0) + (lP2 ? 2 : 0);
+      if (ef) lEff = Math.max(lEff, 2.5);
+      if (isNaN(l) || lEff <= 0) return;
+      if (isGiebel) {
+        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+        const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+        if (!isNaN(h) && !isNaN(h2)) {
+          const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
+          const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+          if (h2Eff >= h1Eff && h1Eff >= 0) total += lEff * (h1Eff + h2Eff) / 2;
+        }
+      } else {
+        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        if (!isNaN(h)) {
+          const hEff = (h || 0) + (hP2 ? 2 : 0);
+          if (hEff > 0) total += lEff * hEff;
+        }
+      }
+    });
   });
-  return total;
+  return round2(total);
 }
 
-// Aktualisiert die Nummerierung der Wände nach dem Löschen
-function renumberWalls() {
-  const walls = document.querySelectorAll('#wallsContainer .wall');
-  walls.forEach((wall, idx) => {
-    const title = wall.querySelector('.wall-header h3');
-    title.textContent = `Wand ${idx + 1}`;
+// Migration alter Projekte → Schema 2.1 (messungen je Abschnitt)
+function migrateSeite(seite) {
+  // Bereits v2.1 (hat messungen)
+  if (seite.abschnitte && seite.abschnitte.length > 0 && seite.abschnitte[0].messungen) return seite;
+
+  // v2.0: abschnitte mit laenge/hoeheBisBelag, aber noch ohne messungen
+  if (seite.abschnitte && seite.abschnitte.length > 0) {
+    return {
+      ...seite,
+      abschnitte: seite.abschnitte.map(a => ({
+        id:          a.id || genId('ab'),
+        bezeichnung: a.bezeichnung || '',
+        einzelfeld:  a.einzelfeld  || false,
+        messungen: [{
+          id:          genId('m'),
+          laenge:      a.laenge      ?? null,
+          laengePlus2: false,
+          hoehe:       a.hoeheBisBelag ?? null,
+          hoehePlus2:  false
+        }]
+      }))
+    };
+  }
+
+  // Altes Schema (v1.x): hoehen / laengen
+  const hoehen  = (seite.hoehen  || []).filter(h => h.wert !== null && !isNaN(h.wert) && h.wert > 0);
+  const laengen = (seite.laengen || []).filter(l => l.wert !== null && !isNaN(l.wert));
+  let avgHoehe = null;
+  if (hoehen.length > 0) {
+    const sum = hoehen.reduce((s, h) => {
+      const ex = typeof h.extra === 'boolean' ? (h.extra ? 2 : 0) : (parseNum(h.extra) || 0);
+      return s + (h.wert || 0) + ex;
+    }, 0);
+    avgHoehe = round2(sum / hoehen.length);
+  }
+  const abschnitte = laengen.map(l => {
+    const ex  = typeof l.extra === 'boolean' ? (l.extra ? 2 : 0) : (parseNum(l.extra) || 0);
+    const eff = round2((l.wert || 0) + ex);
+    return {
+      id: genId('ab'), bezeichnung: '', einzelfeld: false,
+      messungen: [{ id: genId('m'), laenge: eff > 0 ? eff : null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+    };
   });
+  if (abschnitte.length === 0) {
+    abschnitte.push({
+      id: genId('ab'), bezeichnung: '', einzelfeld: false,
+      messungen: [{ id: genId('m'), laenge: null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+    });
+  }
+  return { ...seite, abschnitte };
 }
 
-// Berechnet die Flächen und aktualisiert die Zusammenfassung
-function updateSummary() {
-  const summaryDiv = document.getElementById('summary');
-  const wallElements = document.querySelectorAll('#wallsContainer .wall');
-  if (wallElements.length === 0) {
-    summaryDiv.innerHTML = '<p>Noch keine Wände erfasst.</p>';
+// ============================================================
+//  Toast
+// ============================================================
+
+let toastTimer = null;
+
+function showToast(msg) {
+  const el = document.getElementById('toastEl');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ============================================================
+//  Screen-Wechsel
+// ============================================================
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  window.scrollTo(0, 0);
+}
+
+// ============================================================
+//  Startseite - Projektliste
+// ============================================================
+
+function renderProjectList() {
+  const listEl  = document.getElementById('projectList');
+  const emptyEl = document.getElementById('emptyState');
+  listEl.innerHTML = '';
+
+  if (projects.length === 0) {
+    emptyEl.classList.remove('hidden');
     return;
   }
-  let totalArea = 0;
-  let totalTunnel = 0;
-  // Globale Summen für Extras über alle Wände
-  const globalTotals = {
-    lamp: 0,
-    cage: 0,
-    netArea: 0,
-    dfNet: 0,
-    consoleLen: 0,
-    tunnel: 0,
-    parking: 0,
-    permit: 0,
-    consoles: 0,
-    inner: 0
-  };
-  let html = '';
-  wallElements.forEach((wall, i) => {
-    // Verwende Seite und Typ für die Bezeichnung
-    let name = '';
-    const sideSel = wall.querySelector('.wall-side');
-    const manualSideInput = wall.querySelector('.wall-side-manual');
-    const typeSel = wall.querySelector('.wall-type');
-    // Bestimme den Namen basierend auf der Seite (oder manueller Eingabe) und dem Typ
-    if (sideSel) {
-      if (sideSel.value === '__manual__' && manualSideInput && manualSideInput.value.trim() !== '') {
-        name = manualSideInput.value.trim();
-      } else if (sideSel.value) {
-        name = sideSel.value;
-      }
-    }
-    if (typeSel && typeSel.value) {
-      name = name ? `${name} ${typeSel.value}` : typeSel.value;
-    }
-    if (!name) {
-      name = `Wand ${i + 1}`;
-    }
-    // Sammle Längen und ihre individuellen Zuschläge
-    const lengthRows = wall.querySelectorAll('.length-row');
-    let lengths = [];
-    let lengthExtras = [];
-    let baseLengthSum = 0;
-    let lengthExtraSum = 0;
-    lengthRows.forEach(row => {
-      const lenInput = row.querySelector('.length');
-      const extraSelect = row.querySelector('.length-extra');
-      const val = parseFloat(lenInput?.value);
-      if (!isNaN(val) && val > 0) {
-        lengths.push(val);
-        baseLengthSum += val;
-      } else {
-        lengths.push(0);
-      }
-      // Zusatzmeter pro Länge (0,1,2)
-      let extra = 0;
-      if (extraSelect) {
-        extra = parseFloat(extraSelect.value);
-        if (isNaN(extra)) extra = 0;
-      }
-      lengthExtras.push(extra);
-      lengthExtraSum += extra;
-    });
+  emptyEl.classList.add('hidden');
 
-    // Sammle Höhen und ihre individuellen Top‑Zuschläge
-    const heightRows = wall.querySelectorAll('.height-row');
-    let heights = [];
-    let heightExtras = [];
-    heightRows.forEach(row => {
-      const hInput = row.querySelector('.height');
-      const topExtChk = row.querySelector('.height-top-extra');
-      const val = parseFloat(hInput?.value);
-      if (!isNaN(val) && val > 0) {
-        heights.push(val);
-      } else {
-        heights.push(0);
-      }
-      const hExt = topExtChk?.checked ? 2 : 0;
-      heightExtras.push(hExt);
-    });
+  const sorted = [...projects].sort((a, b) =>
+    (b.geaendert || '').localeCompare(a.geaendert || '')
+  );
 
-    // Mittelwertoption
-    const meanCheck = wall.querySelector('.use-mean-height');
-    // Berechne angepasste Höhen = Höhe + individueller Zuschlag
-    const adjustedHeights = heights.map((h, idx) => h + heightExtras[idx]);
-    const validAdjusted = adjustedHeights.filter(h => h > 0);
-    let heightForArea = 0;
-    if (validAdjusted.length > 0) {
-      if (meanCheck?.checked && validAdjusted.length >= 2) {
-        const minH = Math.min(...validAdjusted);
-        const maxH = Math.max(...validAdjusted);
-        heightForArea = (minH + maxH) / 2;
-      } else {
-        heightForArea = Math.max(...validAdjusted);
-      }
-    }
+  sorted.forEach(proj => {
+    const card = document.createElement('div');
+    card.className = 'project-card';
+    const typ = proj.geruesttyp || 'fassade';
+    const seitenAnzahl = (proj.seiten || []).length;
+    const bauherr = proj.anschrift?.bauherr || '';
+    const typeDisplay = (typ === 'sonder' && proj.geruesttypName)
+      ? proj.geruesttypName : getTypeLabel(typ);
+    const metaParts = [typeDisplay, seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : ''), fmtDate(proj.geaendert)];
 
-    // Aktualisiere Standardwerte für Treppenturm‑Höhe, Lampen und Tunnelrahmen
-    // Maximale tatsächliche Höhe (für Treppenturm). Es soll die höchste
-    // eingegebene Höhe ohne Berücksichtigung des Top‑Zuschlags verwendet werden,
-    // damit der +2 m‑Zuschlag nicht doppelt addiert wird.
-    const maxOriginal = heights.length > 0 ? Math.max(...heights.filter(h => h > 0)) : 0;
-    // Lampenanzahl (1 pro 5 m Gerüstlänge)
-    // Lampenanzahl: eine am Anfang, alle 5 m und am Ende
-    const scaffLenForLamps = baseLengthSum + lengthExtraSum;
-    /*
-     * Lampenberechnung: immer eine am Anfang und eine am Ende sowie alle 5 m.
-     * Beispiel: bei 7 m Gerüstlänge erhält man Lampen bei 0 m, 5 m und 7 m, also 3 Stück.
-     * Dies entspricht floor(L / 5) + 2.
-     */
-    const defaultLampCount = scaffLenForLamps > 0 ? Math.floor(scaffLenForLamps / 5) + 2 : 0;
-    // Tunnelrahmenlänge (gesamte Länge)
-    const defaultTunnelLen = baseLengthSum + lengthExtraSum;
-    // Greife auf optionale Felder zu
-    const ttCheckField = wall.querySelector('.tt-check');
-    const ttHeightField = wall.querySelector('.tt-height');
-    const ttExtraField = wall.querySelector('.tt-extra');
-    if (ttCheckField && ttCheckField.checked && ttHeightField && ttHeightField.dataset.manual !== 'true') {
-      const extraVal = ttExtraField && ttExtraField.checked ? 2 : 0;
-      // Verwende die maximale Originalhöhe (ohne Top‑Extras) + ggf. TT‑Extra
-      const defTTHeight = maxOriginal > 0 ? maxOriginal + extraVal : 0;
-      if (defTTHeight > 0) {
-        ttHeightField.value = defTTHeight.toFixed(2);
-      } else {
-        ttHeightField.value = '';
-      }
-    }
-    // Lampen: nur wenn ausgewählt
-    const lampCheckField = wall.querySelector('.lamp-check');
-    const lampField = wall.querySelector('.lamp-count');
-    if (lampCheckField && lampField) {
-      if (lampCheckField.checked) {
-        if (lampField.dataset.manual !== 'true') {
-          lampField.value = defaultLampCount > 0 ? defaultLampCount : '';
-        }
-      } else {
-        // Reset value if not selected
-        lampField.value = '';
-        lampField.dataset.manual = 'false';
-      }
-    }
-    // Tunnelrahmen: nur wenn ausgewählt
-    const tunnelCheckField = wall.querySelector('.tunnel-check');
-    const tunnelField = wall.querySelector('.tunnel-length');
-    if (tunnelCheckField && tunnelField) {
-      if (tunnelCheckField.checked) {
-        if (tunnelField.dataset.manual !== 'true') {
-          tunnelField.value = defaultTunnelLen > 0 ? defaultTunnelLen.toFixed(2) : '';
-        }
-      } else {
-        tunnelField.value = '';
-        tunnelField.dataset.manual = 'false';
-      }
-    }
-
-    // Gerüstfläche berechnen: Summe der Längen + Zuschläge multipliziert mit der maßgeblichen Höhe
-    const area = (baseLengthSum + lengthExtraSum) * heightForArea;
-    totalArea += area;
-
-    // Darstellung: Liste der Höhen mit Zuschlägen
-    let heightsLines = '';
-    heightRows.forEach((row, idx) => {
-      const hVal = parseFloat(row.querySelector('.height')?.value) || 0;
-      heightsLines += `H${idx + 1}: ${hVal.toFixed(2)} m`;
-      const hExt = heightExtras[idx];
-      if (hVal > 0 && hExt > 0) {
-        heightsLines += ` + ${hExt.toFixed(2)} m`;
-      }
-      heightsLines += '<br />';
-    });
-    // Mittelwertanzeige wird in der Zusammenfassung nicht mehr ausgegeben,
-    // aber die Berechnung (heightForArea) bleibt erhalten, falls der Nutzer den Mittelwert nutzt.
-    let meanLine = '';
-    // Darstellung: Liste der Längen mit Zuschlägen
-    let lengthsLines = '';
-    lengthRows.forEach((row, idx) => {
-      const lVal = parseFloat(row.querySelector('.length')?.value) || 0;
-      lengthsLines += `L${idx + 1}: ${lVal.toFixed(2)} m`;
-      const lExt = lengthExtras[idx];
-      if (lVal > 0 && lExt > 0) {
-        lengthsLines += ` + ${lExt.toFixed(2)} m`;
-      }
-      lengthsLines += '<br />';
-    });
-    // Extra‑Zeile für Gesamtlänge: nur ausgeben, wenn mehr als eine Länge erfasst wurde
-    let lengthExtraLine = '';
-    if (lengthRows.length > 1) {
-      if (lengthExtraSum > 0) {
-        lengthExtraLine = `Gesamtlänge: ${baseLengthSum.toFixed(2)} m + ${lengthExtraSum.toFixed(2)} m<br />`;
-      } else {
-        lengthExtraLine = `Gesamtlänge: ${baseLengthSum.toFixed(2)} m<br />`;
-      }
-    }
-
-    // Fläche pro Wand anzeigen
-    const areaLine = `Fläche: ${area.toFixed(2)} m²`;
-
-    // Zusätzliche Optionen auswerten und sammeln
-    const extrasList = [];
-    // Treppenturm
-    const ttCheck = wall.querySelector('.tt-check');
-    const ttHeightInput = wall.querySelector('.tt-height');
-    const ttCage = wall.querySelector('.tt-cage');
-    if (ttCheck && ttCheck.checked) {
-      const ttHeightVal = parseFloat(ttHeightInput?.value) || 0;
-      if (ttHeightVal > 0) {
-        extrasList.push(`Treppenturm: ${ttHeightVal.toFixed(2)} m`);
-      }
-      if (ttCage && ttCage.checked) {
-        extrasList.push(`Käfig: 1 x`);
-        globalTotals.cage += 1;
-      }
-    }
-    // Staubschutznetz: nutze die gesamte Fläche dieser Wand als Standard,
-    // aber ermögliche manuelle Anpassung über das Eingabefeld
-    const netCheck = wall.querySelector('.net-check');
-    const netInput = wall.querySelector('.net-area');
-    if (netCheck && netInput) {
-      if (netCheck.checked) {
-        // Wenn nicht manuell gesetzt, Standardwert auf Flächeninhalt setzen
-        if (netInput.dataset.manual !== 'true') {
-          netInput.value = area > 0 ? area.toFixed(2) : '';
-        }
-        const netVal = parseFloat(netInput.value);
-        if (!isNaN(netVal) && netVal > 0) {
-          extrasList.push(`Staubschutznetz: ${netVal.toFixed(2)} m²`);
-          globalTotals.netArea += netVal;
-        }
-      } else {
-        // Reset bei deaktiviertem Netz
-        netInput.value = '';
-        netInput.dataset.manual = 'false';
-      }
-    }
-    // Lampen
-    const lampCheck = wall.querySelector('.lamp-check');
-    const lampInput = wall.querySelector('.lamp-count');
-    if (lampCheck && lampCheck.checked && lampInput) {
-      const lampVal = parseFloat(lampInput.value);
-      if (!isNaN(lampVal) && lampVal > 0) {
-        extrasList.push(`Lampen: ${lampVal.toFixed(0)}`);
-        globalTotals.lamp += lampVal;
-      }
-    }
-    // Parkplatz/Genehmigung (getrennt)
-    const parkCheck = wall.querySelector('.parking-check');
-    const permitCheck = wall.querySelector('.permit-check');
-    if (parkCheck && parkCheck.checked) {
-      extrasList.push(`Parkplatz`);
-      globalTotals.parking += 1;
-    }
-    if (permitCheck && permitCheck.checked) {
-      extrasList.push(`Genehmigung`);
-      globalTotals.permit += 1;
-    }
-    // Tunnelrahmen
-    const tunnelCheck = wall.querySelector('.tunnel-check');
-    const tunnelInput = wall.querySelector('.tunnel-length');
-    if (tunnelCheck && tunnelCheck.checked && tunnelInput) {
-      const tunnelVal = parseFloat(tunnelInput.value);
-      if (!isNaN(tunnelVal) && tunnelVal > 0) {
-        extrasList.push(`Tunnelrahmen: ${tunnelVal.toFixed(2)} m`);
-        totalTunnel += tunnelVal;
-        globalTotals.tunnel += tunnelVal;
-      }
-    }
-    // Dachfang (DF): Konsolen 0,50 und DF‑Netze
-    const dfCheck = wall.querySelector('.df-check');
-    const dfConsoleInput = wall.querySelector('.df-console');
-    const dfNetInput = wall.querySelector('.df-net');
-    if (dfCheck && dfCheck.checked) {
-      // Standard DF‑Konsolen: gleiche Länge wie DF‑Netze (Gesamtlänge) sofern nicht manuell verändert
-      if (dfConsoleInput && dfConsoleInput.dataset.manual !== 'true') {
-        // Verwende die Standard-Netzlänge für Konsolen
-        const defConsoleLen = (baseLengthSum + lengthExtraSum) > 0 ? (baseLengthSum + lengthExtraSum).toFixed(2) : '';
-        dfConsoleInput.value = defConsoleLen;
-      }
-      // Standard DF‑Netze: gesamte Länge dieser Wand, sofern nicht manuell angepasst
-      if (dfNetInput && dfNetInput.dataset.manual !== 'true') {
-        const defNetLen = (baseLengthSum + lengthExtraSum) > 0 ? (baseLengthSum + lengthExtraSum).toFixed(2) : '';
-        dfNetInput.value = defNetLen;
-      }
-      // Standard DF‑Konsolen: kein automatischer Vorschlag (bleibt leer oder 0)
-      // Sammle Konsolen-Wert
-      if (dfNetInput) {
-        const netVal = parseFloat(dfNetInput.value);
-        if (!isNaN(netVal) && netVal > 0) {
-          // DF Netze wird mit Länge angegeben
-          extrasList.push(`DF Netze: ${netVal.toFixed(2)} m`);
-          globalTotals.dfNet += netVal;
-        }
-      }
-      if (dfConsoleInput) {
-        const consoleVal = parseFloat(dfConsoleInput.value);
-        if (!isNaN(consoleVal) && consoleVal > 0) {
-          // Konsole 0,50 wird mit derselben Länge wie DF Netze ausgegeben (ohne 'l')
-          extrasList.push(`Konsole 0,50: ${consoleVal.toFixed(2)} m`);
-          globalTotals.consoleLen += consoleVal;
-        }
-      }
-    }
-
-    // Konsolen: mehrere Einträge möglich
-    const consCheck = wall.querySelector('.cons-check');
-    if (consCheck && consCheck.checked) {
-      const consRows = wall.querySelectorAll('.console-row');
-      consRows.forEach(row => {
-        const typeSel = row.querySelector('.console-type');
-        const lenInput = row.querySelector('.console-length');
-        const layerInput = row.querySelector('.console-layers');
-        const lenVal = parseFloat(lenInput?.value);
-        const layVal = parseInt(layerInput?.value) || 1;
-        if (!isNaN(lenVal) && lenVal > 0 && typeSel) {
-        const totalLen = lenVal * layVal;
-        extrasList.push(`${typeSel.value}: ${totalLen.toFixed(2)} m (${layVal} Lagen)`);
-        globalTotals.consoles += totalLen;
-        }
-      });
-    }
-    // Innengeländer – mehrere Einträge möglich
-    const innerCheck = wall.querySelector('.inner-check');
-    if (innerCheck && innerCheck.checked) {
-      const innerRows = wall.querySelectorAll('.inner-row');
-      innerRows.forEach(row => {
-        const lenInput = row.querySelector('.inner-length');
-        const layersInput = row.querySelector('.inner-layers');
-        const lenVal = parseFloat(lenInput?.value);
-        const layVal = parseInt(layersInput?.value) || 1;
-        if (!isNaN(lenVal) && lenVal > 0) {
-          const totalLen = lenVal * layVal;
-          extrasList.push(`Innengeländer: ${totalLen.toFixed(2)} m (${layVal} Lagen)`);
-          globalTotals.inner += totalLen;
-        }
-      });
-    }
-    // Zusammenbauen des HTML-Blocks für diese Wand
-    html += `<div class="summary-item"><strong>${name}</strong><br />`;
-    html += `${heightsLines}${meanLine}${lengthsLines}${lengthExtraLine}${areaLine}`;
-    if (extrasList.length > 0) {
-      // Leere Zeile zwischen Hauptmaßen und Extras
-      html += `<br /><br />${extrasList.join('<br />')}`;
-    }
-    html += `</div>`;
+    card.innerHTML = `
+      <div class="project-card-badge ${typ}">${getTypeBadge(typ)}</div>
+      <div class="project-card-body">
+        <div class="project-card-address">${getProjectLabel(proj)}</div>
+        <div class="project-card-meta">${metaParts.join(' · ')}</div>
+        ${bauherr ? `<div class="project-card-meta">${bauherr}</div>` : ''}
+      </div>
+      <div class="project-card-arrow">&rsaquo;</div>
+    `;
+    card.addEventListener('click', () => openProject(proj.id));
+    listEl.appendChild(card);
   });
-  html += `<hr /><div class="summary-item"><strong>Gesamt Fläche:</strong> ${totalArea.toFixed(2)} m²</div>`;
-  // Wenn Tunnelrahmen über mehrere Wände hinweg ausgewählt wurde, Gesamtlänge ausgeben
-  // Gesamter Tunnelrahmen wird über die Extras-Summe ausgegeben (Konsole 0,50/Tunnel), daher hier kein separater Eintrag
-  // Ausgabe der summierten Extras (z. B. Lampen, Käfige, Netze etc.)
-  const extrasSummaryLines = [];
-  if (globalTotals.lamp > 0) {
-    extrasSummaryLines.push(`Lampen: ${globalTotals.lamp.toFixed(0)} ×`);
-  }
-  if (globalTotals.cage > 0) {
-    extrasSummaryLines.push(`Käfig: ${globalTotals.cage.toFixed(0)} ×`);
-  }
-  if (globalTotals.netArea > 0) {
-    extrasSummaryLines.push(`Staubschutznetz: ${globalTotals.netArea.toFixed(2)} m²`);
-  }
-  if (globalTotals.dfNet > 0) {
-    extrasSummaryLines.push(`DF Netze: ${globalTotals.dfNet.toFixed(2)} m`);
-  }
-  if (globalTotals.consoleLen > 0) {
-    extrasSummaryLines.push(`Konsole 0,50: ${globalTotals.consoleLen.toFixed(2)} m`);
-  }
-  if (globalTotals.tunnel > 0) {
-    extrasSummaryLines.push(`Tunnelrahmen: ${globalTotals.tunnel.toFixed(2)} m`);
-  }
-  if (globalTotals.parking > 0) {
-    extrasSummaryLines.push(`Parkplatz: ${globalTotals.parking.toFixed(0)}`);
-  }
-  if (globalTotals.permit > 0) {
-    extrasSummaryLines.push(`Genehmigung: ${globalTotals.permit.toFixed(0)}`);
-  }
-  if (extrasSummaryLines.length > 0) {
-    html += `<div class="summary-item"><strong>Gesamt Extras:</strong><br />${extrasSummaryLines.join('<br />')}</div>`;
-  }
-  summaryDiv.innerHTML = html;
 }
 
-/**
- * Serialisiert das aktuell erfasste Projekt in ein einfaches JSON-Objekt.
- * Das Objekt enthält den Projektnamen sowie eine Liste aller Wände mit
- * ihren Längen, Höhen und Zusatzoptionen. Dieses Format kann später
- * wieder eingelesen werden, um das Projekt erneut zu laden.
- */
-function serializeProject() {
-  const projectNameInput = document.getElementById('projectName');
-  const data = {
-    projectName: projectNameInput ? projectNameInput.value.trim() : '',
-    walls: []
-  };
-  const wallElements = document.querySelectorAll('#wallsContainer .wall');
-  wallElements.forEach(wall => {
-    const wallData = {};
-    // Seite / Typ
-    const sideSel = wall.querySelector('.wall-side');
-    const manualSideInput = wall.querySelector('.wall-side-manual');
-    const typeSel = wall.querySelector('.wall-type');
-    wallData.side = sideSel ? sideSel.value : '';
-    wallData.manualSide = manualSideInput ? manualSideInput.value : '';
-    wallData.type = typeSel ? typeSel.value : '';
-    // Längen und Extras
-    wallData.lengths = [];
-    const lengthRows = wall.querySelectorAll('.length-row');
-    lengthRows.forEach(row => {
-      const lenInput = row.querySelector('.length');
-      const extraSelect = row.querySelector('.length-extra');
-      const val = parseFloat(lenInput?.value);
-      const extra = parseFloat(extraSelect?.value) || 0;
-      wallData.lengths.push({ value: isNaN(val) ? '' : val, extra: extra });
-    });
-    // Höhen und Extras
-    wallData.heights = [];
-    const heightRows = wall.querySelectorAll('.height-row');
-    heightRows.forEach(row => {
-      const hInput = row.querySelector('.height');
-      const topCheck = row.querySelector('.height-top-extra');
-      const val = parseFloat(hInput?.value);
-      const extra = topCheck && topCheck.checked ? 2 : 0;
-      wallData.heights.push({ value: isNaN(val) ? '' : val, extra: extra });
-    });
-    // Mittelwertoption
-    const meanCheck = wall.querySelector('.use-mean-height');
-    wallData.useMeanHeight = !!(meanCheck && meanCheck.checked);
-    // Treppenturm
-    const ttCheck = wall.querySelector('.tt-check');
-    wallData.tt = {};
-    if (ttCheck && ttCheck.checked) {
-      const ttHeight = wall.querySelector('.tt-height');
-      const ttExtra = wall.querySelector('.tt-extra');
-      const ttCage = wall.querySelector('.tt-cage');
-      wallData.tt.enabled = true;
-      wallData.tt.height = ttHeight ? ttHeight.value : '';
-      wallData.tt.heightManual = ttHeight ? ttHeight.dataset.manual === 'true' : false;
-      wallData.tt.extra = ttExtra && ttExtra.checked;
-      wallData.tt.cage = ttCage && ttCage.checked;
-    } else {
-      wallData.tt.enabled = false;
-    }
-    // Staubschutznetz
-    const netCheck = wall.querySelector('.net-check');
-    wallData.net = {};
-    if (netCheck && netCheck.checked) {
-      const netInput = wall.querySelector('.net-area');
-      wallData.net.enabled = true;
-      wallData.net.value = netInput ? netInput.value : '';
-      wallData.net.manual = netInput ? netInput.dataset.manual === 'true' : false;
-    } else {
-      wallData.net.enabled = false;
-    }
-    // Lampen
-    const lampCheck = wall.querySelector('.lamp-check');
-    wallData.lamp = {};
-    if (lampCheck && lampCheck.checked) {
-      const lampInput = wall.querySelector('.lamp-count');
-      wallData.lamp.enabled = true;
-      wallData.lamp.count = lampInput ? lampInput.value : '';
-      wallData.lamp.manual = lampInput ? lampInput.dataset.manual === 'true' : false;
-    } else {
-      wallData.lamp.enabled = false;
-    }
-    // Parkplatz / Genehmigung
-    const parkCheck = wall.querySelector('.parking-check');
-    const permitCheck = wall.querySelector('.permit-check');
-    wallData.parking = !!(parkCheck && parkCheck.checked);
-    wallData.permit = !!(permitCheck && permitCheck.checked);
-    // Tunnelrahmen
-    const tunnelCheck = wall.querySelector('.tunnel-check');
-    wallData.tunnel = {};
-    if (tunnelCheck && tunnelCheck.checked) {
-      const tunnelInput = wall.querySelector('.tunnel-length');
-      wallData.tunnel.enabled = true;
-      wallData.tunnel.length = tunnelInput ? tunnelInput.value : '';
-      wallData.tunnel.manual = tunnelInput ? tunnelInput.dataset.manual === 'true' : false;
-    } else {
-      wallData.tunnel.enabled = false;
-    }
-    // Dachfang
-    const dfCheck = wall.querySelector('.df-check');
-    wallData.df = {};
-    if (dfCheck && dfCheck.checked) {
-      const dfConsole = wall.querySelector('.df-console');
-      const dfNet = wall.querySelector('.df-net');
-      wallData.df.enabled = true;
-      wallData.df.console = dfConsole ? dfConsole.value : '';
-      wallData.df.consoleManual = dfConsole ? dfConsole.dataset.manual === 'true' : false;
-      wallData.df.net = dfNet ? dfNet.value : '';
-      wallData.df.netManual = dfNet ? dfNet.dataset.manual === 'true' : false;
-    } else {
-      wallData.df.enabled = false;
-    }
+// ============================================================
+//  Projekt erstellen / öffnen
+// ============================================================
 
-    // Konsolen (mehrere möglich)
-    const consCheckEl = wall.querySelector('.cons-check');
-    wallData.consoles = [];
-    if (consCheckEl && consCheckEl.checked) {
-      const consRows = wall.querySelectorAll('.console-row');
-      consRows.forEach(row => {
-        const typeSel = row.querySelector('.console-type');
-        const lenInput = row.querySelector('.console-length');
-        const layerInput = row.querySelector('.console-layers');
-        const autoBox = row.querySelector('.console-auto');
-        const val = parseFloat(lenInput?.value);
-        wallData.consoles.push({
-          type: typeSel ? typeSel.value : '',
-          length: isNaN(val) ? '' : val,
-          layers: layerInput ? parseInt(layerInput.value) || 1 : 1,
-          auto: autoBox ? autoBox.checked : false
-        });
-      });
-    }
-    // Innengeländer: kann mehrere Zeilen haben
-    const innerCheckEl = wall.querySelector('.inner-check');
-    wallData.inners = [];
-    if (innerCheckEl && innerCheckEl.checked) {
-      const rows = wall.querySelectorAll('.inner-row');
-      rows.forEach(row => {
-        const lenInput = row.querySelector('.inner-length');
-        const layersInput = row.querySelector('.inner-layers');
-        const autoBox = row.querySelector('.inner-auto');
-        const val = parseFloat(lenInput?.value);
-        wallData.inners.push({
-          length: isNaN(val) ? '' : val,
-          layers: layersInput ? parseInt(layersInput.value) || 1 : 1,
-          auto: autoBox ? autoBox.checked : false
-        });
-      });
-    }
-    data.walls.push(wallData);
-  });
-  return data;
+function createNewProject() {
+  const today = new Date().toISOString().slice(0, 10);
+  const proj = {
+    id: genId('proj'),
+    erstellt: today,
+    geaendert: today,
+    anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '' },
+    geruesttyp: 'fassade',
+    geruesttypName: '',
+    seiten: [],
+    technik: { lastklasse: '3', breitenklasse: 'W06' },
+    logistik: {},
+    zusatzpositionen: []
+  };
+  projects.push(proj);
+  saveProjects();
+  openProject(proj.id);
 }
 
-/**
- * Lädt ein Projekt aus einem JSON-Objekt und rekonstruiert die Wände.
- * Vor dem Laden werden vorhandene Wände gelöscht. Alle relevanten
- * Eingabefelder werden mit den gespeicherten Werten befüllt.
- * @param {Object} data Das geladene Projektobjekt
- */
-function loadProject(data) {
-  const wallsContainer = document.getElementById('wallsContainer');
-  // Alte Wände entfernen
-  wallsContainer.innerHTML = '';
-  // Projektname setzen
-  const projName = document.getElementById('projectName');
-  if (projName && data.projectName !== undefined) {
-    projName.value = data.projectName;
-  }
-  if (!data.walls || !Array.isArray(data.walls)) {
-    updateSummary();
-    return;
-  }
-  data.walls.forEach((wallObj, idx) => {
-      // Neue Wand hinzufügen
-      const wall = createWall(idx + 1);
-      wallsContainer.appendChild(wall);
-      // Setze Seite und Typ (oder manuelle Seite)
-      const sideSel = wall.querySelector('.wall-side');
-      const manualSide = wall.querySelector('.wall-side-manual');
-      const typeSel = wall.querySelector('.wall-type');
-      if (sideSel) {
-        if (wallObj.side === '__manual__') {
-          sideSel.value = '__manual__';
-          manualSide.style.display = '';
-          manualSide.value = wallObj.manualSide || '';
-        } else {
-          sideSel.value = wallObj.side || '';
-          manualSide.style.display = 'none';
-          manualSide.value = wallObj.manualSide || '';
-        }
-      }
-      if (typeSel) {
-        typeSel.value = wallObj.type || '';
-        // Trigger change to show copy button or auto add height for Giebel
-        typeSel.dispatchEvent(new Event('change'));
-      }
-      // Setze Höhen
-      const heightsContainer = wall.querySelector('.heights');
-      const hRows = heightsContainer.querySelectorAll('.height-row');
-      // Entferne vorhandene Höhen bis auf erste, dann füge je nach Daten hinzu
-      hRows.forEach((r, i) => {
-        if (i === 0) {
-          // Keep first row
-        } else {
-          r.remove();
-        }
-      });
-      wallObj.heights = wallObj.heights || [];
-      // Wir gehen Höhe für Höhe durch. Für die erste bestehende Zeile setzen wir den Wert,
-      // für weitere Höhen klicken wir auf "Höhe hinzufügen" und setzen anschließend den Wert.
-      wallObj.heights.forEach((hObj, i) => {
-        // Wenn i > 0, füge eine neue Zeile hinzu
-        if (i > 0) {
-          // Suche den Höhe-Hinzufügen-Button nach seinem Text
-          const heightAddBtn = Array.from(wall.querySelectorAll('button.primary')).find(btn => btn.textContent.includes('Höhe'));
-          if (heightAddBtn) {
-            heightAddBtn.click();
-          }
-        }
-        // Jetzt gibt es ausreichend Zeilen; hole die aktuelle Zeile
-        const currentRow = heightsContainer.querySelectorAll('.height-row')[i];
-        if (currentRow) {
-          const input = currentRow.querySelector('.height');
-          const topCheck = currentRow.querySelector('.height-top-extra');
-          if (input && hObj.value !== '') input.value = hObj.value;
-          if (topCheck) topCheck.checked = (hObj.extra === 2);
-        }
-      });
-      // Setze Mittelwert-Checkbox
-      const meanCheck = wall.querySelector('.use-mean-height');
-      if (meanCheck) meanCheck.checked = !!wallObj.useMeanHeight;
+function openProject(projectId) {
+  currentProjectId = projectId;
+  const proj = getCurrentProject();
+  if (!proj) return;
 
-      // Setze Längen
-      const lengthsContainer = wall.querySelector('.lengths');
-      const lRows = lengthsContainer.querySelectorAll('.length-row');
-      // Entferne alle zusätzlichen Längen außer der ersten
-      lRows.forEach((r, i) => {
-        if (i === 0) {
-          // Keep first
-        } else {
-          r.remove();
-        }
-      });
-      wallObj.lengths = wallObj.lengths || [];
-      wallObj.lengths.forEach((lObj, i) => {
-        if (i > 0) {
-          // Klicke auf "Länge hinzufügen"
-          const lengthAddBtn = Array.from(wall.querySelectorAll('button.primary')).find(btn => btn.textContent.includes('Länge'));
-          if (lengthAddBtn) {
-            lengthAddBtn.click();
-          }
-        }
-        const currentRow = lengthsContainer.querySelectorAll('.length-row')[i];
-        if (currentRow) {
-          const input = currentRow.querySelector('.length');
-          const extraSel = currentRow.querySelector('.length-extra');
-          if (input && lObj.value !== '') input.value = lObj.value;
-          if (extraSel) {
-            // Umwandlung in String zur Auswahl
-            extraSel.value = (lObj.extra !== undefined && lObj.extra !== null) ? String(lObj.extra) : '0';
-          }
-        }
-      });
-      // Aktualisiere Gerüstlänge nach Änderungen an Längen
-      updateScaffoldingLength(wall);
-      // Treppenturm
-      const ttCheckEl = wall.querySelector('.tt-check');
-      const ttHeightEl = wall.querySelector('.tt-height');
-      const ttExtraEl = wall.querySelector('.tt-extra');
-      const ttCageEl = wall.querySelector('.tt-cage');
-      if (wallObj.tt && wallObj.tt.enabled) {
-        if (ttCheckEl) {
-          ttCheckEl.checked = true;
-          // Zeige Eingabefelder
-          if (ttHeightEl) ttHeightEl.style.display = '';
-          if (ttExtraEl) ttExtraEl.style.display = '';
-          if (ttCageEl) ttCageEl.style.display = '';
-        }
-        if (ttHeightEl) {
-          ttHeightEl.value = wallObj.tt.height || '';
-          ttHeightEl.dataset.manual = wallObj.tt.heightManual ? 'true' : 'false';
-        }
-        if (ttExtraEl) {
-          ttExtraEl.checked = !!wallObj.tt.extra;
-        }
-        if (ttCageEl) {
-          ttCageEl.checked = !!wallObj.tt.cage;
-        }
-      } else {
-        if (ttCheckEl) ttCheckEl.checked = false;
-      }
-      // Staubschutznetz
-      const netCheckEl = wall.querySelector('.net-check');
-      const netInputEl = wall.querySelector('.net-area');
-      if (wallObj.net && wallObj.net.enabled) {
-        if (netCheckEl) {
-          netCheckEl.checked = true;
-          if (netInputEl) netInputEl.style.display = '';
-        }
-        if (netInputEl) {
-          netInputEl.value = wallObj.net.value || '';
-          netInputEl.dataset.manual = wallObj.net.manual ? 'true' : 'false';
-        }
-      } else {
-        if (netCheckEl) netCheckEl.checked = false;
-        if (netInputEl) {
-          netInputEl.value = '';
-          netInputEl.dataset.manual = 'false';
-          netInputEl.style.display = 'none';
-        }
-      }
-      // Lampen
-      const lampCheckEl = wall.querySelector('.lamp-check');
-      const lampInputEl = wall.querySelector('.lamp-count');
-      if (wallObj.lamp && wallObj.lamp.enabled) {
-        if (lampCheckEl) lampCheckEl.checked = true;
-        if (lampInputEl) {
-          lampInputEl.value = wallObj.lamp.count || '';
-          lampInputEl.dataset.manual = wallObj.lamp.manual ? 'true' : 'false';
-          lampInputEl.style.display = '';
-        }
-      } else {
-        if (lampCheckEl) lampCheckEl.checked = false;
-        if (lampInputEl) {
-          lampInputEl.value = '';
-          lampInputEl.dataset.manual = 'false';
-          lampInputEl.style.display = 'none';
-        }
-      }
-      // Parkplatz
-      const parkEl = wall.querySelector('.parking-check');
-      const permitEl = wall.querySelector('.permit-check');
-      if (parkEl) parkEl.checked = !!wallObj.parking;
-      if (permitEl) permitEl.checked = !!wallObj.permit;
-      // Tunnelrahmen
-      const tunnelCheckEl = wall.querySelector('.tunnel-check');
-      const tunnelInputEl = wall.querySelector('.tunnel-length');
-      if (wallObj.tunnel && wallObj.tunnel.enabled) {
-        if (tunnelCheckEl) tunnelCheckEl.checked = true;
-        if (tunnelInputEl) {
-          tunnelInputEl.value = wallObj.tunnel.length || '';
-          tunnelInputEl.dataset.manual = wallObj.tunnel.manual ? 'true' : 'false';
-          tunnelInputEl.style.display = '';
-        }
-      } else {
-        if (tunnelCheckEl) tunnelCheckEl.checked = false;
-        if (tunnelInputEl) {
-          tunnelInputEl.value = '';
-          tunnelInputEl.dataset.manual = 'false';
-          tunnelInputEl.style.display = 'none';
-        }
-      }
-      // DF (Dachfang)
-      const dfCheckEl = wall.querySelector('.df-check');
-      const dfConsoleEl = wall.querySelector('.df-console');
-      const dfNetEl = wall.querySelector('.df-net');
-      if (wallObj.df && wallObj.df.enabled) {
-        if (dfCheckEl) dfCheckEl.checked = true;
-        if (dfConsoleEl) {
-          dfConsoleEl.value = wallObj.df.console || '';
-          dfConsoleEl.dataset.manual = wallObj.df.consoleManual ? 'true' : 'false';
-          dfConsoleEl.style.display = '';
-        }
-        if (dfNetEl) {
-          dfNetEl.value = wallObj.df.net || '';
-          dfNetEl.dataset.manual = wallObj.df.netManual ? 'true' : 'false';
-          dfNetEl.style.display = '';
-        }
-      } else {
-        if (dfCheckEl) dfCheckEl.checked = false;
-        if (dfConsoleEl) {
-          dfConsoleEl.value = '';
-          dfConsoleEl.dataset.manual = 'false';
-          dfConsoleEl.style.display = 'none';
-        }
-        if (dfNetEl) {
-          dfNetEl.value = '';
-          dfNetEl.dataset.manual = 'false';
-          dfNetEl.style.display = 'none';
-        }
-      }
+  document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
 
-      // Konsolen
-      const consCheckEl = wall.querySelector('.cons-check');
-      const consContainer = wall.querySelector('.cons-container');
-      if (wallObj.consoles && Array.isArray(wallObj.consoles) && wallObj.consoles.length > 0) {
-        if (consCheckEl) consCheckEl.checked = true;
-        if (consContainer) {
-          consContainer.style.display = '';
-          // Entferne vorhandene Reihen (es sollte nur der Add-Button vorhanden sein)
-          consContainer.querySelectorAll('.console-row').forEach(r => r.remove());
-          const addConsBtn = consContainer.querySelector('button.secondary');
-          // Füge jede Konsole hinzu
-          wallObj.consoles.forEach((consObj, idx) => {
-            // Klicke den Hinzufügen-Button
-            if (addConsBtn) {
-              addConsBtn.click();
-            }
-            // Aktuell wurde eine neue Zeile vor dem Button eingefügt
-            const rows = consContainer.querySelectorAll('.console-row');
-            const row = rows[rows.length - 1];
-            if (row) {
-              const typeSel = row.querySelector('.console-type');
-              const lenInput = row.querySelector('.console-length');
-              const layersInput = row.querySelector('.console-layers');
-              const autoBox = row.querySelector('.console-auto');
-              if (typeSel) typeSel.value = consObj.type || typeSel.value;
-              if (lenInput) lenInput.value = consObj.length !== '' ? consObj.length : '';
-              if (layersInput) layersInput.value = consObj.layers || 1;
-              if (autoBox) autoBox.checked = !!consObj.auto;
-              // Wenn auto aktiviert, setze disable state
-              if (autoBox && autoBox.checked) {
-                lenInput.disabled = true;
-              }
-            }
-          });
-        }
-      } else {
-        if (consCheckEl) consCheckEl.checked = false;
-        if (consContainer) {
-          consContainer.style.display = 'none';
-          // Entferne alle console rows except Add button
-          consContainer.querySelectorAll('.console-row').forEach(r => r.remove());
-        }
-      }
-      // Innengeländer
-      const innerCheckEl = wall.querySelector('.inner-check');
-      const innerContainer = wall.querySelector('.inner-container');
-      if (innerCheckEl) {
-        // Entferne bereits vorhandene inner rows
-        innerContainer.querySelectorAll('.inner-row').forEach(r => r.remove());
-        if (wallObj.inners && Array.isArray(wallObj.inners) && wallObj.inners.length > 0) {
-          innerCheckEl.checked = true;
-          innerContainer.style.display = '';
-          // Für jede gespeicherte Innengeländer-Zeile den Hinzufügen-Button klicken
-          const addInnerBtn = innerContainer.querySelector('button.secondary');
-          wallObj.inners.forEach((innerObj, idx) => {
-            if (addInnerBtn) {
-              addInnerBtn.click();
-            }
-            // Die neue Zeile ist jeweils vor dem Button eingefügt, also letzte .inner-row nehmen
-            const rows = innerContainer.querySelectorAll('.inner-row');
-            const row = rows[rows.length - 1];
-            if (row) {
-              const lenInput = row.querySelector('.inner-length');
-              const layersInput = row.querySelector('.inner-layers');
-              const autoBox = row.querySelector('.inner-auto');
-              if (lenInput) lenInput.value = innerObj.length !== '' ? innerObj.length : '';
-              if (layersInput) layersInput.value = innerObj.layers || 1;
-              if (autoBox) {
-                autoBox.checked = !!innerObj.auto;
-                if (autoBox.checked) {
-                  lenInput.disabled = true;
-                }
-              }
-            }
-          });
-        } else {
-          innerCheckEl.checked = false;
-          innerContainer.style.display = 'none';
-        }
-      }
+  const a = proj.anschrift || {};
+  document.getElementById('fieldStrasse').value = a.strasse || '';
+  document.getElementById('fieldNummer').value  = a.nummer  || '';
+  document.getElementById('fieldPlz').value     = a.plz     || '';
+  document.getElementById('fieldOrt').value     = a.ort     || '';
+  document.getElementById('fieldBauherr').value = a.bauherr || '';
+
+  const typ = proj.geruesttyp || 'fassade';
+  document.querySelectorAll('.type-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.type === typ);
   });
-  // After constructing all walls, update summary
+  document.getElementById('sonderNameRow').style.display = typ === 'sonder' ? '' : 'none';
+  document.getElementById('fieldSonderName').value = proj.geruesttypName || '';
+
+  loadTechnik(proj.technik);
+  loadLogistik(proj.logistik);
+
+  renderSeiten((proj.seiten || []).map(migrateSeite));
+  renderZusatzpositionen(proj.zusatzpositionen || []);
+  updateSummary();
+  showScreen('projectScreen');
+}
+
+// ============================================================
+//  Daten sammeln
+// ============================================================
+
+function collectAnschrift() {
+  return {
+    strasse:  document.getElementById('fieldStrasse').value.trim(),
+    nummer:   document.getElementById('fieldNummer').value.trim(),
+    plz:      document.getElementById('fieldPlz').value.trim(),
+    ort:      document.getElementById('fieldOrt').value.trim(),
+    bauherr:  document.getElementById('fieldBauherr').value.trim()
+  };
+}
+
+function collectGeruesttyp() {
+  const active = document.querySelector('.type-btn.active');
+  return active ? active.dataset.type : 'fassade';
+}
+
+function collectTechnik() {
+  const ankerVal = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
+  return {
+    lastklasse:        document.getElementById('fieldLastklasse')?.value        || '',
+    breitenklasse:     document.getElementById('fieldBreitenklasse')?.value     || '',
+    verwendungszweck:  document.getElementById('fieldVerwendungszweck')?.value  || '',
+    verankerungsgrund: document.getElementById('fieldVerankerungsgrund')?.value || '',
+    ankerAnzahl:       isNaN(ankerVal) ? null : ankerVal
+  };
+}
+
+function loadTechnik(t) {
+  if (!t) return;
+  document.getElementById('fieldLastklasse').value        = t.lastklasse        || '';
+  document.getElementById('fieldBreitenklasse').value     = t.breitenklasse     || '';
+  document.getElementById('fieldVerwendungszweck').value  = t.verwendungszweck  || '';
+  document.getElementById('fieldVerankerungsgrund').value = t.verankerungsgrund || '';
+  document.getElementById('fieldAnkerAnzahl').value       = t.ankerAnzahl != null ? t.ankerAnzahl : '';
+}
+
+function setLogistikToggle(id, active) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.dataset.active = active ? '1' : '0';
+  btn.classList.toggle('active', !!active);
+}
+
+function collectLogistik() {
+  const anfahrtVal = parseNum(document.getElementById('fieldAnfahrtKm')?.value);
+  return {
+    anfahrtKm:              isNaN(anfahrtVal) ? null : anfahrtVal,
+    untergrund:             document.getElementById('fieldUntergrund')?.value.trim()         || '',
+    stellflaecheNotiz:      document.getElementById('fieldStellflaecheNotiz')?.value.trim()  || '',
+    oeffentlicherGrund:     document.getElementById('toggleOeffentlich')?.dataset.active === '1',
+    verkehrssicherung:      document.getElementById('toggleVerkehr')?.dataset.active    === '1',
+    genehmigungErforderlich:document.getElementById('toggleGenehmigung')?.dataset.active === '1'
+  };
+}
+
+function loadLogistik(l) {
+  if (!l) return;
+  document.getElementById('fieldAnfahrtKm').value         = l.anfahrtKm != null ? l.anfahrtKm : '';
+  document.getElementById('fieldUntergrund').value        = l.untergrund        || '';
+  document.getElementById('fieldStellflaecheNotiz').value = l.stellflaecheNotiz || '';
+  setLogistikToggle('toggleOeffentlich', l.oeffentlicherGrund);
+  setLogistikToggle('toggleVerkehr',     l.verkehrssicherung);
+  setLogistikToggle('toggleGenehmigung', l.genehmigungErforderlich);
+}
+
+
+function collectZusatzpositionen() {
+  const result = [];
+  document.querySelectorAll('#zusatzContainer .zusatz-row').forEach(row => {
+    const art      = row.querySelector('.zusatz-art')?.value      || '';
+    const einheit  = row.querySelector('.zusatz-einheit')?.value  || 'm';
+    const mengeVal = parseNum(row.querySelector('.zusatz-menge')?.value);
+    const notiz    = row.querySelector('.zusatz-notiz')?.value.trim() || '';
+    result.push({ art, einheit, menge: isNaN(mengeVal) ? null : mengeVal, notiz });
+  });
+  return result;
+}
+
+function collectSeiten() {
+  const result = [];
+  document.querySelectorAll('#seitenContainer .seite-card').forEach(card => {
+    const sel    = card.querySelector('.seite-select');
+    const manual = card.querySelector('.seite-manual-input');
+
+    // Abschnitte
+    const abschnitte = [];
+    card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+      const bez    = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      const ef     = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+      const giebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
+      const messungen = [];
+      abRow.querySelectorAll('.messung-row').forEach(mRow => {
+        const lV   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+        const hV   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const h2V  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+        const lP2  = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active')  || false;
+        const hP2  = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')   || false;
+        const hP22 = mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active')  || false;
+        messungen.push({
+          id:           genId('m'),
+          laenge:       isNaN(lV)  ? null : lV,
+          laengePlus2:  lP2,
+          hoehe:        isNaN(hV)  ? null : hV,
+          hoehePlus2:   hP2,
+          hoehe2:       isNaN(h2V) ? null : h2V,
+          hoehe2Plus2:  hP22
+        });
+      });
+      abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
+    });
+
+    // Konsolen
+    const konsolen = [];
+    card.querySelectorAll('.acc-konsole-list .acc-multi-row').forEach(row => {
+      const activeTypBtn = row.querySelector('.konsole-btn.active');
+      if (!activeTypBtn) return;
+      const l1Btn  = row.querySelector('.accessory-l1-btn');
+      const lenInp = row.querySelector('.accessory-length-input');
+      const len    = lenInp ? parseNum(lenInp.value) : NaN;
+      konsolen.push({
+        typ:    activeTypBtn.dataset.typ,
+        laenge: isNaN(len) ? null : len,
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+      });
+    });
+
+    // Innengeländer
+    const innengelaender = [];
+    card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
+      const l1Btn  = row.querySelector('.accessory-l1-btn');
+      const lenInp = row.querySelector('.accessory-length-input');
+      const len    = lenInp ? parseNum(lenInp.value) : NaN;
+      innengelaender.push({
+        laenge: isNaN(len) ? null : len,
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+      });
+    });
+
+    function collectSingleToggle(accKey) {
+      const toggle = card.querySelector(`.accessory-toggle[data-acc="${accKey}"]`);
+      if (!toggle || !toggle.classList.contains('active')) return null;
+      const l1Btn  = card.querySelector(`.accessory-l1-btn[data-acc="${accKey}"]`);
+      const lenInp = card.querySelector(`.accessory-length-input[data-acc="${accKey}"]`);
+      const len    = lenInp ? parseNum(lenInp.value) : NaN;
+      return { laenge: isNaN(len) ? null : len, autoL1: l1Btn ? l1Btn.dataset.active === '1' : false };
+    }
+
+    const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
+    const ttInp    = card.querySelector('.accessory-length-input[data-acc="tt"]');
+    const ttVal    = ttInp ? parseNum(ttInp.value) : NaN;
+
+    const ksInp  = card.querySelector('.ks-input');
+    const ksVal  = ksInp ? parseNum(ksInp.value) : NaN;
+
+    result.push({
+      id:               card.dataset.sideId,
+      name:             sel ? sel.value : '',
+      manualName:       manual ? manual.value.trim() : '',
+      abschnitte,
+      konsolen,
+      innengelaender,
+      dachfang:          collectSingleToggle('df'),
+      gittertraeger:     collectSingleToggle('gt'),
+      fussgaengertunnel: collectSingleToggle('ft'),
+      treppenturm: (ttToggle && ttToggle.classList.contains('active'))
+        ? { hoehe: isNaN(ttVal) ? null : ttVal }
+        : null,
+      netze:    collectSingleToggle('ne'),
+      ks:       isNaN(ksVal) ? null : ksVal,
+      ksManual: ksInp ? !!ksInp._ksManual : false
+    });
+  });
+  return result;
+}
+
+// ============================================================
+//  Speichern / Löschen
+// ============================================================
+
+function saveCurrentProject() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+
+  proj.anschrift        = collectAnschrift();
+  proj.geruesttyp       = collectGeruesttyp();
+  proj.geruesttypName   = document.getElementById('fieldSonderName').value.trim();
+  proj.seiten           = collectSeiten();
+  proj.technik          = collectTechnik();
+  proj.logistik         = collectLogistik();
+  proj.zusatzpositionen = collectZusatzpositionen();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+  document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
+  saveProjects();
+  showToast('Gespeichert');
+}
+
+function deleteCurrentProject() {
+  if (!currentProjectId) return;
+  if (!confirm('Dieses Projekt wirklich loschen?')) return;
+  projects = projects.filter(p => p.id !== currentProjectId);
+  saveProjects();
+  currentProjectId = null;
+  renderProjectList();
+  showScreen('homeScreen');
+}
+
+// ============================================================
+//  Hausseiten rendern
+// ============================================================
+
+function renderSeiten(seitenData) {
+  const container = document.getElementById('seitenContainer');
+  container.innerHTML = '';
+  seitenData.forEach(seite => container.appendChild(createSeiteCard(seite)));
+  renumberSeitenBadges();
+  refreshNoSidesHint();
   updateSummary();
 }
 
-// Initialisierung nach dem Laden des Dokuments
-document.addEventListener('DOMContentLoaded', () => {
-  const addWallBtn = document.getElementById('addWallBtn');
-  const wallsContainer = document.getElementById('wallsContainer');
-  addWallBtn.addEventListener('click', () => {
-    const wallCount = wallsContainer.children.length + 1;
-    const wall = createWall(wallCount);
-    wallsContainer.appendChild(wall);
+function refreshNoSidesHint() {
+  const container = document.getElementById('seitenContainer');
+  const hint = document.getElementById('noSidesHint');
+  hint.classList.toggle('hidden', container.querySelectorAll('.seite-card').length > 0);
+}
+
+// ============================================================
+//  Seite-Karte erstellen
+// ============================================================
+
+function createSeiteCard(seiteData) {
+  const sideId = seiteData.id || genId('side');
+
+  const card = document.createElement('div');
+  card.className = 'seite-card';
+  card.dataset.sideId = sideId;
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'seite-header';
+
+  const numBadge = document.createElement('div');
+  numBadge.className = 'seite-number';
+  numBadge.textContent = '?';
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'seite-title';
+  titleEl.textContent = getSeiteName(seiteData);
+
+  const previewEl = document.createElement('div');
+  previewEl.className = 'seite-preview';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'seite-chevron open';
+  chevron.textContent = '›';
+
+  header.appendChild(numBadge);
+  header.appendChild(titleEl);
+  header.appendChild(previewEl);
+  header.appendChild(chevron);
+
+  // Body
+  const body = document.createElement('div');
+  body.className = 'seite-body';
+
+  let accSectionRef = null;
+  let ksInputRef    = null;
+
+  const mainOnChange = () => {
+    updateCardPreview(card, previewEl);
     updateSummary();
+    if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
+    if (ksInputRef && !ksInputRef._ksManual) {
+      const fl = computeCardFlaeche(card);
+      ksInputRef.value = fl > 0 ? fl.toFixed(2) : '';
+    }
+  };
+
+  // Name-Auswahl
+  const nameRow = document.createElement('div');
+  nameRow.className = 'seite-name-row';
+
+  const nameSelect = document.createElement('select');
+  nameSelect.className = 'seite-select';
+  [
+    { value: 'Straßenseite',  label: 'Straßenseite' },
+    { value: 'Linker Giebel',  label: 'Linker Giebel' },
+    { value: 'Rechter Giebel', label: 'Rechter Giebel' },
+    { value: 'Rückseite',      label: 'Rückseite' },
+    { value: 'Linke Traufe',   label: 'Linke Traufe' },
+    { value: 'Rechte Traufe',  label: 'Rechte Traufe' },
+    { value: '__manual__',     label: 'Andere...' }
+  ].forEach(opt => {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    nameSelect.appendChild(o);
+  });
+  const _legacyNames = { 'Strassenseite': 'Straßenseite', 'Ruckseite': 'Rückseite' };
+  nameSelect.value = _legacyNames[seiteData.name] || seiteData.name || 'Straßenseite';
+  if (!nameSelect.value) nameSelect.value = 'Straßenseite';
+
+  const manualInput = document.createElement('input');
+  manualInput.type = 'text';
+  manualInput.className = 'seite-manual-input';
+  manualInput.placeholder = 'Bezeichnung eingeben';
+  manualInput.value = seiteData.manualName || '';
+  manualInput.style.display = seiteData.name === '__manual__' ? '' : 'none';
+
+  function updateTitle() {
+    titleEl.textContent = nameSelect.value === '__manual__'
+      ? (manualInput.value.trim() || 'Unbenannte Seite')
+      : nameSelect.value;
+  }
+
+  nameSelect.addEventListener('change', () => {
+    manualInput.style.display = nameSelect.value === '__manual__' ? '' : 'none';
+    updateTitle();
+    mainOnChange();
+  });
+  manualInput.addEventListener('input', () => { updateTitle(); mainOnChange(); });
+
+  nameRow.appendChild(nameSelect);
+  nameRow.appendChild(manualInput);
+
+  // Abschnitte
+  const abschnittSection = createAbschnittSection(seiteData, mainOnChange);
+
+  // Zubehör
+  accSectionRef = createAccessoriesSection(seiteData, card, mainOnChange);
+
+  // KS
+  const ksRow = document.createElement('div');
+  ksRow.className = 'ks-row';
+
+  const ksLabel = document.createElement('span');
+  ksLabel.className = 'ks-label';
+  ksLabel.textContent = 'KS';
+
+  const ksInput = document.createElement('input');
+  ksInput.type = 'number';
+  ksInput.className = 'ks-input';
+  ksInput.step = '0.01';
+  ksInput.min = '0';
+  ksInput.inputMode = 'decimal';
+  ksInput.placeholder = '0,00';
+  ksInput._ksManual = !!(seiteData.ksManual);
+  if (seiteData.ks !== null && seiteData.ks !== undefined && !isNaN(seiteData.ks)) {
+    ksInput.value = seiteData.ks;
+  }
+  ksInput.addEventListener('input', () => { ksInput._ksManual = true; });
+  ksInputRef = ksInput;
+
+  const ksUnit = document.createElement('span');
+  ksUnit.className = 'ks-unit';
+  ksUnit.textContent = 'm²';
+
+  const ksResetBtn = document.createElement('button');
+  ksResetBtn.type = 'button';
+  ksResetBtn.className = 'ks-reset-btn';
+  ksResetBtn.textContent = '= Fl.';
+  ksResetBtn.addEventListener('click', () => {
+    ksInput._ksManual = false;
+    const fl = computeCardFlaeche(card);
+    ksInput.value = fl > 0 ? fl.toFixed(2) : '';
   });
 
-  // PDF‑Button verknüpfen
-  const pdfBtn = document.getElementById('pdfBtn');
-  if (pdfBtn) {
-    pdfBtn.addEventListener('click', generatePDF);
+  ksRow.appendChild(ksLabel);
+  ksRow.appendChild(ksInput);
+  ksRow.appendChild(ksUnit);
+  ksRow.appendChild(ksResetBtn);
+
+  // Löschen
+  const footer = document.createElement('div');
+  footer.className = 'seite-footer';
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn btn-danger-ghost btn-sm';
+  removeBtn.textContent = 'Seite entfernen';
+  removeBtn.addEventListener('click', () => {
+    card.remove();
+    renumberSeitenBadges();
+    refreshNoSidesHint();
+    updateSummary();
+  });
+  footer.appendChild(removeBtn);
+
+  body.appendChild(nameRow);
+  body.appendChild(abschnittSection);
+  body.appendChild(ksRow);
+  body.appendChild(accSectionRef);
+  body.appendChild(footer);
+
+  card.appendChild(header);
+  card.appendChild(body);
+
+  header.addEventListener('click', () => {
+    const isOpen = !body.classList.contains('collapsed');
+    body.classList.toggle('collapsed', isOpen);
+    chevron.classList.toggle('open', !isOpen);
+  });
+
+  // Initialer KS-Sync
+  if (ksInputRef && !ksInputRef._ksManual) {
+    const fl = computeCardFlaeche(card);
+    if (fl > 0) ksInputRef.value = fl.toFixed(2);
   }
 
-  // Projekt speichern / laden
-  const saveBtn = document.getElementById('saveProjectBtn');
-  const loadBtn = document.getElementById('loadProjectBtn');
-  const fileInput = document.getElementById('loadFileInput');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
-      const data = serializeProject();
-      if (!data) return;
-      const json = JSON.stringify(data, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      // Verwende den Projektnamen als Dateinamen, ansonsten generisch
-      const name = data.projectName && data.projectName.trim() !== '' ? data.projectName.trim().replace(/\s+/g, '_') : 'projekt';
-      a.href = url;
-      a.download = `${name}.json`;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+  updateCardPreview(card, previewEl);
+  return card;
+}
+
+// ============================================================
+//  Abschnitt-Sektion (DIN 18451)
+// ============================================================
+
+function createAbschnittSection(seiteData, onChange) {
+  const section = document.createElement('div');
+  section.className = 'abschnitt-section';
+
+  const label = document.createElement('div');
+  label.className = 'meas-section-label';
+  label.textContent = 'Abschnitte';
+  section.appendChild(label);
+
+  const rowsContainer = document.createElement('div');
+  rowsContainer.className = 'abschnitt-rows';
+
+  const initData = (seiteData.abschnitte && seiteData.abschnitte.length > 0)
+    ? seiteData.abschnitte
+    : [{ bezeichnung: '', einzelfeld: false, giebel: false, messungen: [] }];
+
+  initData.forEach(a => rowsContainer.appendChild(createAbschnittRow(a, rowsContainer, onChange)));
+
+  section.appendChild(rowsContainer);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'meas-add-btn';
+  addBtn.textContent = '+ Abschnitt';
+  addBtn.addEventListener('click', () => {
+    rowsContainer.appendChild(
+      createAbschnittRow({ bezeichnung: '', einzelfeld: false, giebel: false, messungen: [] }, rowsContainer, onChange)
+    );
+    onChange();
+  });
+  section.appendChild(addBtn);
+
+  return section;
+}
+
+function createAbschnittRow(data, container, onChange) {
+  const row = document.createElement('div');
+  row.className = 'abschnitt-row';
+
+  // Zeile 1: Bezeichnung + Einzelfeld + Remove
+  const topLine = document.createElement('div');
+  topLine.className = 'abschnitt-top-line';
+
+  const bezInp = document.createElement('input');
+  bezInp.type = 'text';
+  bezInp.className = 'abschnitt-bez';
+  bezInp.placeholder = 'Bezeichnung (optional)';
+  bezInp.value = data.bezeichnung || '';
+  bezInp.addEventListener('input', onChange);
+
+  const efBtn = document.createElement('button');
+  efBtn.type = 'button';
+  efBtn.className = 'einzelfeld-btn' + (data.einzelfeld ? ' active' : '');
+  efBtn.textContent = 'Einzelfeld';
+  efBtn.addEventListener('click', () => {
+    efBtn.classList.toggle('active');
+    refreshAbschnittCalc();
+    onChange();
+  });
+
+  const giebelBtn = document.createElement('button');
+  giebelBtn.type = 'button';
+  giebelBtn.className = 'giebel-btn' + (data.giebel ? ' active' : '');
+  giebelBtn.title = 'Giebel: Rechteck + Dreieck  →  L × (H1 + H2) / 2';
+  giebelBtn.textContent = 'Giebel';
+  giebelBtn.addEventListener('click', () => {
+    giebelBtn.classList.toggle('active');
+    const isGiebel = giebelBtn.classList.contains('active');
+    row.classList.toggle('giebel-active', isGiebel);
+    messungenList.querySelectorAll('.messung-hoehe').forEach(el => {
+      el.placeholder = isGiebel ? 'H1 (Rinne)' : 'H';
     });
-  }
-  if (loadBtn && fileInput) {
-    loadBtn.addEventListener('click', () => {
-      fileInput.value = '';
-      fileInput.click();
-    });
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(ev) {
-        try {
-          const obj = JSON.parse(ev.target.result);
-          loadProject(obj);
-        } catch (err) {
-          alert('Die Projektdatei konnte nicht gelesen werden. Bitte stellen Sie sicher, dass es sich um eine gültige JSON-Datei handelt.');
+    refreshAbschnittCalc();
+    onChange();
+  });
+
+  const removeAbBtn = document.createElement('button');
+  removeAbBtn.type = 'button';
+  removeAbBtn.className = 'meas-remove-btn';
+  removeAbBtn.innerHTML = '&times;';
+  removeAbBtn.addEventListener('click', () => {
+    if (container.querySelectorAll('.abschnitt-row').length > 1) {
+      row.remove();
+      onChange();
+    }
+  });
+
+  topLine.appendChild(bezInp);
+  topLine.appendChild(efBtn);
+  topLine.appendChild(giebelBtn);
+  topLine.appendChild(removeAbBtn);
+
+  // Messpaare (L × H)
+  const messungenList = document.createElement('div');
+  messungenList.className = 'messungen-list';
+
+  // Abschnitt-Summe
+  const abTotalLine = document.createElement('div');
+  abTotalLine.className = 'abschnitt-total';
+
+  function refreshAbschnittCalc() {
+    const ef       = efBtn.classList.contains('active');
+    const isGiebel = giebelBtn.classList.contains('active');
+    let total = 0;
+    messungenList.querySelectorAll('.messung-row').forEach(mRow => {
+      const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      const calcEl = mRow.querySelector('.messung-calc');
+      let lEff = (l || 0) + (lP2 ? 2 : 0);
+      if (ef) lEff = Math.max(lEff, 2.5);
+      let f = 0;
+      if (!isNaN(l) && lEff > 0) {
+        if (isGiebel) {
+          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
+          const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          if (!isNaN(h) && !isNaN(h2)) {
+            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
+            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            if (h2Eff >= h1Eff && h1Eff >= 0) f = round2(lEff * (h1Eff + h2Eff) / 2);
+          }
+        } else {
+          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          if (!isNaN(h)) {
+            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            if (hEff > 0) f = round2(lEff * hEff);
+          }
         }
-      };
-      reader.readAsText(file);
+      }
+      total += f;
+      if (calcEl) calcEl.textContent = f > 0 ? '= ' + fmtNum(f) + ' m²' : '';
+    });
+    total = round2(total);
+    abTotalLine.textContent = total > 0 ? 'Σ ' + fmtNum(total) + ' m²' : '';
+  }
+
+  function createMessungRow(mData) {
+    const mRow = document.createElement('div');
+    mRow.className = 'messung-row';
+
+    const isGiebelNow = giebelBtn.classList.contains('active');
+
+    const laengeInp = document.createElement('input');
+    laengeInp.type = 'number';
+    laengeInp.className = 'messung-laenge';
+    laengeInp.step = '0.01';
+    laengeInp.min = '0';
+    laengeInp.inputMode = 'decimal';
+    laengeInp.placeholder = 'L';
+    if (mData?.laenge != null && !isNaN(mData.laenge)) laengeInp.value = mData.laenge;
+
+    const laengePlus2 = document.createElement('button');
+    laengePlus2.type = 'button';
+    laengePlus2.className = 'plus2-btn messung-laenge-plus2' + (mData?.laengePlus2 ? ' active' : '');
+    laengePlus2.textContent = '+2m';
+    laengePlus2.addEventListener('click', () => {
+      laengePlus2.classList.toggle('active');
+      refreshAbschnittCalc();
+      onChange();
+    });
+
+    const mulSign = document.createElement('span');
+    mulSign.className = 'messung-mul';
+    mulSign.textContent = '×';
+
+    const hoeheInp = document.createElement('input');
+    hoeheInp.type = 'number';
+    hoeheInp.className = 'messung-hoehe';
+    hoeheInp.step = '0.01';
+    hoeheInp.min = '0';
+    hoeheInp.inputMode = 'decimal';
+    hoeheInp.placeholder = isGiebelNow ? 'H1 (Rinne)' : 'H';
+    if (mData?.hoehe != null && !isNaN(mData.hoehe)) hoeheInp.value = mData.hoehe;
+
+    const hoehePlus2 = document.createElement('button');
+    hoehePlus2.type = 'button';
+    hoehePlus2.className = 'plus2-btn messung-hoehe-plus2' + (mData?.hoehePlus2 ? ' active' : '');
+    hoehePlus2.textContent = '+2m';
+    hoehePlus2.addEventListener('click', () => {
+      hoehePlus2.classList.toggle('active');
+      refreshAbschnittCalc();
+      onChange();
+    });
+
+    // Giebel-spezifisch: H2 (Spitze)
+    const giebelSep = document.createElement('span');
+    giebelSep.className = 'giebel-sep giebel-part';
+    giebelSep.textContent = '△';
+
+    const hoehe2Inp = document.createElement('input');
+    hoehe2Inp.type = 'number';
+    hoehe2Inp.className = 'messung-hoehe2 giebel-part';
+    hoehe2Inp.step = '0.01';
+    hoehe2Inp.min = '0';
+    hoehe2Inp.inputMode = 'decimal';
+    hoehe2Inp.placeholder = 'H2 (Spitze)';
+    if (mData?.hoehe2 != null && !isNaN(mData.hoehe2)) hoehe2Inp.value = mData.hoehe2;
+
+    const hoehe2Plus2 = document.createElement('button');
+    hoehe2Plus2.type = 'button';
+    hoehe2Plus2.className = 'plus2-btn messung-hoehe2-plus2 giebel-part' + (mData?.hoehe2Plus2 ? ' active' : '');
+    hoehe2Plus2.textContent = '+2m';
+    hoehe2Plus2.addEventListener('click', () => {
+      hoehe2Plus2.classList.toggle('active');
+      refreshAbschnittCalc();
+      onChange();
+    });
+    hoehe2Inp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
+
+    const calcSpan = document.createElement('span');
+    calcSpan.className = 'messung-calc';
+
+    const removeMBtn = document.createElement('button');
+    removeMBtn.type = 'button';
+    removeMBtn.className = 'meas-remove-btn';
+    removeMBtn.innerHTML = '&times;';
+    removeMBtn.addEventListener('click', () => {
+      if (messungenList.querySelectorAll('.messung-row').length > 1) {
+        mRow.remove();
+        refreshAbschnittCalc();
+        onChange();
+      }
+    });
+
+    laengeInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
+    hoeheInp.addEventListener('input',  () => { refreshAbschnittCalc(); onChange(); });
+
+    mRow.appendChild(laengeInp);
+    mRow.appendChild(laengePlus2);
+    mRow.appendChild(mulSign);
+    mRow.appendChild(hoeheInp);
+    mRow.appendChild(hoehePlus2);
+    mRow.appendChild(giebelSep);
+    mRow.appendChild(hoehe2Inp);
+    mRow.appendChild(hoehe2Plus2);
+    mRow.appendChild(calcSpan);
+    mRow.appendChild(removeMBtn);
+    return mRow;
+  }
+
+  const initMessungen = (data.messungen && data.messungen.length > 0)
+    ? data.messungen
+    : [{ laenge: null, laengePlus2: false, hoehe: null, hoehePlus2: false }];
+
+  initMessungen.forEach(m => messungenList.appendChild(createMessungRow(m)));
+
+  const addMessBtn = document.createElement('button');
+  addMessBtn.type = 'button';
+  addMessBtn.className = 'meas-add-btn meas-add-btn-sm';
+  addMessBtn.textContent = '+ Maß';
+  addMessBtn.addEventListener('click', () => {
+    messungenList.appendChild(createMessungRow({}));
+    onChange();
+  });
+
+  // Giebel-Startzustand anwenden
+  if (data.giebel) row.classList.add('giebel-active');
+
+  row.appendChild(topLine);
+  row.appendChild(messungenList);
+  row.appendChild(addMessBtn);
+  row.appendChild(abTotalLine);
+
+  refreshAbschnittCalc();
+  return row;
+}
+
+// ============================================================
+//  Vorschau-Text
+// ============================================================
+
+function updateCardPreview(card, previewEl) {
+  const totalFl = computeCardFlaeche(card);
+  previewEl.textContent = totalFl > 0 ? fmtNum(totalFl) + ' m²' : '';
+}
+
+function renumberSeitenBadges() {
+  document.querySelectorAll('#seitenContainer .seite-card').forEach((card, i) => {
+    const badge = card.querySelector('.seite-number');
+    if (badge) badge.textContent = i + 1;
+  });
+}
+
+// ============================================================
+//  Neue Seite hinzufügen
+// ============================================================
+
+function addSide() {
+  const container = document.getElementById('seitenContainer');
+  const newSide = {
+    id:             genId('side'),
+    name:           'Straßenseite',
+    manualName:     '',
+    abschnitte:     [{ bezeichnung: '', einzelfeld: false, giebel: false, messungen: [] }],
+    konsolen:          [],
+    innengelaender:    [],
+    dachfang:          null,
+    gittertraeger:     null,
+    fussgaengertunnel: null,
+    treppenturm:       null,
+    netze:             null,
+    ks:                null,
+    ksManual:          false
+  };
+  const el = createSeiteCard(newSide);
+  container.appendChild(el);
+  renumberSeitenBadges();
+  refreshNoSidesHint();
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  updateSummary();
+}
+
+// ============================================================
+//  Zusatzpositionen
+// ============================================================
+
+function renderZusatzpositionen(list) {
+  const container = document.getElementById('zusatzContainer');
+  container.innerHTML = '';
+  (list || []).forEach(z => container.appendChild(createZusatzRow(z)));
+  refreshNoZusatzHint();
+}
+
+function refreshNoZusatzHint() {
+  const container = document.getElementById('zusatzContainer');
+  const hint = document.getElementById('noZusatzHint');
+  if (hint) hint.classList.toggle('hidden', container.querySelectorAll('.zusatz-row').length > 0);
+}
+
+function createZusatzRow(data) {
+  const row = document.createElement('div');
+  row.className = 'zusatz-row';
+
+  // Art
+  const artSel = document.createElement('select');
+  artSel.className = 'zusatz-art';
+  const optEmpty = document.createElement('option');
+  optEmpty.value = '';
+  optEmpty.textContent = '– Art wählen –';
+  artSel.appendChild(optEmpty);
+  ZUSATZ_ARTEN.forEach(art => {
+    const o = document.createElement('option');
+    o.value = art;
+    o.textContent = art;
+    artSel.appendChild(o);
+  });
+  artSel.value = data?.art || '';
+
+  // Einheit
+  const einheitSel = document.createElement('select');
+  einheitSel.className = 'zusatz-einheit';
+  ZUSATZ_EINHEITEN.forEach(e => {
+    const o = document.createElement('option');
+    o.value = e;
+    o.textContent = e;
+    einheitSel.appendChild(o);
+  });
+  einheitSel.value = data?.einheit || 'm';
+
+  // Menge
+  const mengeInp = document.createElement('input');
+  mengeInp.type = 'number';
+  mengeInp.className = 'zusatz-menge';
+  mengeInp.step = '0.01';
+  mengeInp.min = '0';
+  mengeInp.inputMode = 'decimal';
+  mengeInp.placeholder = '0,00';
+  if (data?.menge !== null && data?.menge !== undefined && !isNaN(data.menge)) mengeInp.value = data.menge;
+
+  // Notiz
+  const notizInp = document.createElement('input');
+  notizInp.type = 'text';
+  notizInp.className = 'zusatz-notiz';
+  notizInp.placeholder = 'Notiz (optional)';
+  notizInp.value = data?.notiz || '';
+
+  // Remove
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'meas-remove-btn';
+  removeBtn.innerHTML = '&times;';
+  removeBtn.addEventListener('click', () => { row.remove(); refreshNoZusatzHint(); });
+
+  const topLine = document.createElement('div');
+  topLine.className = 'zusatz-top';
+  topLine.appendChild(artSel);
+  topLine.appendChild(einheitSel);
+  topLine.appendChild(mengeInp);
+  topLine.appendChild(removeBtn);
+
+  const notizLine = document.createElement('div');
+  notizLine.className = 'zusatz-notiz-row';
+  notizLine.appendChild(notizInp);
+
+  row.appendChild(topLine);
+  row.appendChild(notizLine);
+
+  return row;
+}
+
+// ============================================================
+//  Hilfsfunktionen für Zubehör-Abschnitt
+// ============================================================
+
+function makeAccLabel(text) {
+  const el = document.createElement('span');
+  el.className = 'acc-entry-label';
+  el.textContent = text;
+  return el;
+}
+
+function makeAddBtn(text, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'meas-add-btn';
+  btn.textContent = text;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+// ============================================================
+//  Zubehör-Abschnitt
+// ============================================================
+
+function createAccessoriesSection(seiteData, card, onChange) {
+  const section = document.createElement('div');
+  section.className = 'accessories-section';
+
+  const title = document.createElement('div');
+  title.className = 'accessories-title';
+  title.textContent = 'Positionen';
+  section.appendChild(title);
+
+  // Erste Abschnitt-Länge (für "= L1")
+  function getL1() {
+    const firstAbRow = card.querySelector('.abschnitt-row');
+    if (!firstAbRow) return null;
+    const firstMRow = firstAbRow.querySelector('.messung-row');
+    if (!firstMRow) return null;
+    const l   = parseNum(firstMRow.querySelector('.messung-laenge')?.value);
+    const lP2 = firstMRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+    const ef  = firstAbRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+    if (isNaN(l)) return null;
+    let lEff = (l || 0) + (lP2 ? 2 : 0);
+    if (ef) lEff = Math.max(lEff, 2.5);
+    return lEff > 0 ? round2(lEff) : null;
+  }
+
+  function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel) {
+    const wrap = document.createElement('div');
+    wrap.className = 'acc-inline-length';
+
+    const l1Btn = document.createElement('button');
+    l1Btn.type = 'button';
+    l1Btn.className = 'accessory-l1-btn' + (initAutoL1 ? ' active' : '');
+    l1Btn.dataset.active = initAutoL1 ? '1' : '0';
+    if (accKey) l1Btn.dataset.acc = accKey;
+    l1Btn.textContent = '= L1';
+    l1Btn.title = 'Länge vom ersten Abschnitt übernehmen';
+
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.className = 'accessory-length-input';
+    if (accKey) inp.dataset.acc = accKey;
+    inp.step = '0.01';
+    inp.min = '0';
+    inp.inputMode = 'decimal';
+    inp.placeholder = '0,00';
+    if (initLaenge !== null && initLaenge !== undefined && !isNaN(initLaenge)) inp.value = initLaenge;
+    inp.disabled = initAutoL1;
+    if (initAutoL1) { const v = getL1(); if (v !== null && !isNaN(v)) inp.value = v; }
+
+    l1Btn.addEventListener('click', () => {
+      const nowActive = l1Btn.dataset.active === '1';
+      l1Btn.dataset.active = nowActive ? '0' : '1';
+      l1Btn.classList.toggle('active', !nowActive);
+      inp.disabled = !nowActive;
+      if (!nowActive) { const v = getL1(); if (v !== null && !isNaN(v)) inp.value = v; }
+      onChange();
+    });
+    inp.addEventListener('input', onChange);
+
+    const unit = document.createElement('span');
+    unit.className = 'accessory-length-unit';
+    unit.textContent = unitLabel || 'm';
+
+    wrap.appendChild(l1Btn);
+    wrap.appendChild(inp);
+    wrap.appendChild(unit);
+    return wrap;
+  }
+
+  function createSingleAcc(accKey, labelText, initData, unitLabel) {
+    const row = document.createElement('div');
+    row.className = 'acc-single-row';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'accessory-toggle' + (initData ? ' active' : '');
+    toggleBtn.dataset.acc = accKey;
+    toggleBtn.textContent = labelText;
+
+    const lenWrap = createInlineLength(accKey, initData ? initData.laenge : null, initData ? (initData.autoL1 || false) : false, unitLabel);
+    lenWrap.style.display = initData ? '' : 'none';
+
+    toggleBtn.addEventListener('click', () => {
+      const wasActive = toggleBtn.classList.contains('active');
+      toggleBtn.classList.toggle('active', !wasActive);
+      lenWrap.style.display = wasActive ? 'none' : '';
+      onChange();
+    });
+
+    row.appendChild(toggleBtn);
+    row.appendChild(lenWrap);
+    return row;
+  }
+
+  // Konsolen
+  const konsoleTitleRow = document.createElement('div');
+  konsoleTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
+  const konsoleLbl = document.createElement('span');
+  konsoleLbl.className = 'accessories-title';
+  konsoleLbl.textContent = 'Konsole';
+  konsoleTitleRow.appendChild(konsoleLbl);
+
+  const konsoleList = document.createElement('div');
+  konsoleList.className = 'acc-multi-list acc-konsole-list';
+
+  const konsoleTotalEl = document.createElement('div');
+  konsoleTotalEl.className = 'konsole-total';
+  konsoleTotalEl.style.display = 'none';
+
+  function refreshKonsoleTotal() {
+    let total = 0, hasAny = false;
+    konsoleList.querySelectorAll('.acc-multi-row').forEach(r => {
+      const inp = r.querySelector('.accessory-length-input');
+      const v = inp ? parseNum(inp.value) : NaN;
+      if (!isNaN(v) && v > 0) { total += v; hasAny = true; }
+    });
+    if (hasAny) {
+      konsoleTotalEl.textContent = 'Gesamt: ' + fmtNum(round2(total)) + ' m';
+      konsoleTotalEl.style.display = '';
+    } else {
+      konsoleTotalEl.textContent = '';
+      konsoleTotalEl.style.display = 'none';
+    }
+  }
+
+  konsoleList.addEventListener('input', refreshKonsoleTotal);
+  konsoleList.addEventListener('click', () => requestAnimationFrame(refreshKonsoleTotal));
+
+  function addKonsoleRow(data) {
+    const row = document.createElement('div');
+    row.className = 'acc-multi-row';
+
+    const typeBtns = document.createElement('div');
+    typeBtns.className = 'acc-type-btns';
+    ['0', '30', '50', '70', '109'].forEach(typ => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'konsole-btn' + (data && data.typ === typ ? ' active' : '');
+      btn.dataset.typ = typ;
+      btn.textContent = typ;
+      btn.addEventListener('click', () => {
+        const wasActive = btn.classList.contains('active');
+        typeBtns.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
+        if (!wasActive) btn.classList.add('active');
+        onChange();
+      });
+      typeBtns.appendChild(btn);
+    });
+
+    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'meas-remove-btn';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => { row.remove(); refreshKonsoleTotal(); onChange(); });
+
+    row.appendChild(typeBtns);
+    row.appendChild(lenWrap);
+    row.appendChild(removeBtn);
+    konsoleList.appendChild(row);
+  }
+
+  const konsoleInit = Array.isArray(seiteData.konsolen)
+    ? seiteData.konsolen
+    : (seiteData.konsole ? [seiteData.konsole] : []);
+  konsoleInit.forEach(k => addKonsoleRow(k));
+  refreshKonsoleTotal();
+
+  const addKonsoleBtn = makeAddBtn('+ Ebene', () => { addKonsoleRow(null); refreshKonsoleTotal(); onChange(); });
+  konsoleTitleRow.appendChild(addKonsoleBtn);
+  section.appendChild(konsoleTitleRow);
+  section.appendChild(konsoleList);
+  section.appendChild(konsoleTotalEl);
+
+  // Innengeländer
+  const igTitleRow = document.createElement('div');
+  igTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
+  const igLbl = document.createElement('span');
+  igLbl.className = 'accessories-title';
+  igLbl.textContent = 'Innengeländer';
+  igTitleRow.appendChild(igLbl);
+
+  const igList = document.createElement('div');
+  igList.className = 'acc-multi-list acc-ig-list';
+
+  function addIgRow(data) {
+    const row = document.createElement('div');
+    row.className = 'acc-multi-row';
+    row.appendChild(makeAccLabel('IG'));
+    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 || false) : false);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'meas-remove-btn';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => { row.remove(); onChange(); });
+    row.appendChild(lenWrap);
+    row.appendChild(removeBtn);
+    igList.appendChild(row);
+  }
+
+  const igInit = Array.isArray(seiteData.innengelaender)
+    ? seiteData.innengelaender
+    : (seiteData.innengelaender ? [seiteData.innengelaender] : []);
+  igInit.forEach(ig => addIgRow(ig));
+
+  const addIgBtn = makeAddBtn('+ IG', () => { addIgRow(null); onChange(); });
+  igTitleRow.appendChild(addIgBtn);
+  section.appendChild(igTitleRow);
+  section.appendChild(igList);
+
+  // Einzelne Zubehör
+  section.appendChild(createSingleAcc('df', 'Dachfang (DF)',          seiteData.dachfang          || null));
+  section.appendChild(createSingleAcc('gt', 'Gitterträger (GT)',       seiteData.gittertraeger     || null));
+  section.appendChild(createSingleAcc('ft', 'Fußgängertunnel (FT)',   seiteData.fussgaengertunnel || null));
+
+  // Treppenturm (Höhe)
+  const ttData = seiteData.treppenturm || null;
+  const ttRow  = document.createElement('div');
+  ttRow.className = 'acc-single-row';
+
+  const ttBtn = document.createElement('button');
+  ttBtn.type = 'button';
+  ttBtn.className = 'accessory-toggle' + (ttData ? ' active' : '');
+  ttBtn.dataset.acc = 'tt';
+  ttBtn.textContent = 'Treppenturm (TT)';
+
+  const ttWrap = document.createElement('div');
+  ttWrap.className = 'acc-inline-length';
+  ttWrap.style.display = ttData ? '' : 'none';
+
+  const ttInp = document.createElement('input');
+  ttInp.type = 'number';
+  ttInp.className = 'accessory-length-input';
+  ttInp.dataset.acc = 'tt';
+  ttInp.step = '0.01';
+  ttInp.min = '0';
+  ttInp.inputMode = 'decimal';
+  ttInp.placeholder = '0,00';
+  if (ttData && ttData.hoehe !== null && !isNaN(ttData.hoehe)) ttInp.value = ttData.hoehe;
+  ttInp.addEventListener('input', onChange);
+
+  const ttUnit = document.createElement('span');
+  ttUnit.className = 'accessory-length-unit';
+  ttUnit.textContent = 'm (H)';
+
+  ttWrap.appendChild(ttInp);
+  ttWrap.appendChild(ttUnit);
+  ttBtn.addEventListener('click', () => {
+    const wasActive = ttBtn.classList.contains('active');
+    ttBtn.classList.toggle('active', !wasActive);
+    ttWrap.style.display = wasActive ? 'none' : '';
+    onChange();
+  });
+  ttRow.appendChild(ttBtn);
+  ttRow.appendChild(ttWrap);
+  section.appendChild(ttRow);
+
+  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null, 'm²'));
+
+  // L1-Sync
+  section._syncL1 = function() {
+    section.querySelectorAll('.accessory-l1-btn[data-active="1"]').forEach(l1Btn => {
+      const wrap = l1Btn.closest('.acc-inline-length');
+      if (!wrap) return;
+      const inp = wrap.querySelector('.accessory-length-input');
+      if (!inp) return;
+      const v = getL1();
+      if (v !== null && !isNaN(v)) inp.value = v;
+    });
+  };
+
+  return section;
+}
+
+// ============================================================
+//  Zusammenfassung
+// ============================================================
+
+function updateSummary() {
+  const el    = document.getElementById('summaryContent');
+  const cards = document.querySelectorAll('#seitenContainer .seite-card');
+
+  if (cards.length === 0) {
+    el.innerHTML = '<p class="summary-empty">Noch keine Seiten erfasst.</p>';
+    return;
+  }
+
+  let totalArea = 0;
+  const rows = [];
+
+  cards.forEach(card => {
+    const sel    = card.querySelector('.seite-select');
+    const manual = card.querySelector('.seite-manual-input');
+    const name   = sel && sel.value === '__manual__'
+      ? (manual ? manual.value.trim() || 'Unbenannte Seite' : 'Unbenannte Seite')
+      : (sel ? sel.value : '');
+
+    let seitenFlaeche = 0;
+    const detailParts = [];
+
+    card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+      const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+      const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
+      const bez      = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      let abFlaeche  = 0;
+      abRow.querySelectorAll('.messung-row').forEach(mRow => {
+        const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+        const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+        let lEff  = (l || 0) + (lP2 ? 2 : 0);
+        if (ef) lEff = Math.max(lEff, 2.5);
+        if (isNaN(l) || lEff <= 0) return;
+        const bezPfx = bez ? bez + ': ' : '';
+        const efStr  = ef && (l || 0) < 2.5 ? ' (EF)' : '';
+        if (isGiebel) {
+          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
+          const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          if (!isNaN(h) && !isNaN(h2)) {
+            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
+            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            if (h2Eff >= h1Eff && h1Eff >= 0) {
+              const pair = round2(lEff * (h1Eff + h2Eff) / 2);
+              abFlaeche += pair;
+              detailParts.push(bezPfx + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)');
+            }
+          }
+        } else {
+          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          if (!isNaN(h)) {
+            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            if (hEff > 0) {
+              const pair = round2(lEff * hEff);
+              abFlaeche += pair;
+              detailParts.push(bezPfx + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
+            }
+          }
+        }
+      });
+      seitenFlaeche += abFlaeche;
+    });
+
+    totalArea += seitenFlaeche;
+
+    // Zubehör
+    card.querySelectorAll('.acc-konsole-list .acc-multi-row').forEach(row => {
+      const activeTypBtn = row.querySelector('.konsole-btn.active');
+      if (!activeTypBtn) return;
+      const lenInp = row.querySelector('.accessory-length-input');
+      const v = lenInp ? parseNum(lenInp.value) : NaN;
+      detailParts.push('K ' + activeTypBtn.dataset.typ + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+    });
+    card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
+      const lenInp = row.querySelector('.accessory-length-input');
+      const v = lenInp ? parseNum(lenInp.value) : NaN;
+      detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+    });
+    [{ acc: 'df', label: 'DF', unit: 'm' }, { acc: 'gt', label: 'GT', unit: 'm' }, { acc: 'ft', label: 'FT', unit: 'm' }, { acc: 'ne', label: 'NE', unit: 'm²' }].forEach(({ acc, label, unit }) => {
+      const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
+      if (!toggle || !toggle.classList.contains('active')) return;
+      const lenInp = card.querySelector('.accessory-length-input[data-acc="' + acc + '"]');
+      const v = lenInp ? parseNum(lenInp.value) : NaN;
+      detailParts.push(label + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' ' + unit : ''));
+    });
+    const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
+    if (ttToggle && ttToggle.classList.contains('active')) {
+      const hoeheInp = card.querySelector('.accessory-length-input[data-acc="tt"]');
+      const v = hoeheInp ? parseNum(hoeheInp.value) : NaN;
+      detailParts.push('TT' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m (H)' : ''));
+    }
+
+    rows.push({ name, detailParts, flaeche: seitenFlaeche });
+  });
+
+  let html = '<table class="summary-table">';
+  rows.forEach(row => {
+    const detail = row.detailParts.join('<br>');
+    html += `
+      <tr>
+        <td>
+          <span class="summary-side-name">${row.name}</span>
+          ${detail ? `<span class="summary-side-detail">${detail}</span>` : ''}
+        </td>
+        <td>${row.flaeche > 0 ? fmtNum(row.flaeche) + ' m²' : '–'}</td>
+      </tr>`;
+  });
+
+  // Zusatzpositionen
+  const zusatzRows = document.querySelectorAll('#zusatzContainer .zusatz-row');
+  if (zusatzRows.length > 0) {
+    html += `<tr><td colspan="2" style="padding-top:10px;font-size:0.72rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--color-border);">Positionen</td></tr>`;
+    zusatzRows.forEach(row => {
+      const art     = row.querySelector('.zusatz-art')?.value   || '–';
+      const einheit = row.querySelector('.zusatz-einheit')?.value || '';
+      const menge   = parseNum(row.querySelector('.zusatz-menge')?.value);
+      const notiz   = row.querySelector('.zusatz-notiz')?.value.trim();
+      const mengeStr = !isNaN(menge) ? fmtNum(menge) + ' ' + einheit : '–';
+      html += `<tr>
+        <td><span class="summary-side-name" style="font-size:0.88rem">${art}</span>${notiz ? '<span class="summary-side-detail">' + notiz + '</span>' : ''}</td>
+        <td>${mengeStr}</td>
+      </tr>`;
     });
   }
-});
 
-// Erstellt eine PDF‑Datei mit den erfassten Maßen
+  html += `
+    <tr class="summary-total-row">
+      <td>Gesamtfläche</td>
+      <td>${fmtNum(totalArea)} m²</td>
+    </tr>`;
+
+  const ankerAnzahl = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
+  if (!isNaN(ankerAnzahl) && ankerAnzahl > 0) {
+    html += `<tr><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">Ankeranzahl</td><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">${ankerAnzahl} Stk.</td></tr>`;
+  }
+
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+// ============================================================
+//  Anfahrt-Berechnung (Nominatim + OSRM)
+// ============================================================
+
+async function autoCalcAnfahrt() {
+  const strasse = (document.getElementById('fieldStrasse').value || '').trim();
+  const nummer  = (document.getElementById('fieldNummer').value  || '').trim();
+  const plz     = (document.getElementById('fieldPlz').value     || '').trim();
+  const ort     = (document.getElementById('fieldOrt').value     || '').trim();
+
+  const strasseNr = [strasse, nummer].filter(Boolean).join(' ');
+  const addrLine  = [strasseNr, plz, ort].filter(Boolean).join(', ');
+  if (!addrLine || (!plz && !ort)) {
+    showToast('Bitte zuerst Adresse eingeben.');
+    return;
+  }
+
+  const btn = document.getElementById('calcAnfahrtBtn');
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  // MHP Arena Stuttgart, Mercedesstraße 87, 70372 Stuttgart
+  const MHP_LAT = 48.7924;
+  const MHP_LON = 9.2309;
+
+  try {
+    const geoUrl = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+      + encodeURIComponent(addrLine + ', Deutschland');
+    const geoResp = await fetch(geoUrl, { headers: { 'Accept-Language': 'de' } });
+    const geoData = await geoResp.json();
+
+    if (!geoData.length) {
+      showToast('Adresse nicht gefunden.');
+      return;
+    }
+
+    const lat = parseFloat(geoData[0].lat);
+    const lon = parseFloat(geoData[0].lon);
+
+    const osrmUrl = 'https://router.project-osrm.org/route/v1/driving/'
+      + lon + ',' + lat + ';' + MHP_LON + ',' + MHP_LAT + '?overview=false';
+    const osrmResp = await fetch(osrmUrl);
+    const osrmData = await osrmResp.json();
+
+    if (osrmData.code !== 'Ok' || !osrmData.routes.length) {
+      showToast('Route nicht berechenbar.');
+      return;
+    }
+
+    const distKm = Math.ceil(osrmData.routes[0].distance / 1000);
+    document.getElementById('fieldAnfahrtKm').value = distKm;
+    showToast('Anfahrt: ' + distKm + ' km zur MHP Arena');
+    saveProjects();
+  } catch (e) {
+    showToast('Fehler bei der Berechnung.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Auto';
+  }
+}
+
+// ============================================================
+//  PDF-Erstellung
+// ============================================================
+
 function generatePDF() {
+  const anschrift  = collectAnschrift();
+  const geruesttyp = collectGeruesttyp();
+  const seiten     = collectSeiten();
+  const logistik   = collectLogistik();
+  const zusatz     = collectZusatzpositionen();
+
+  const sonderName = document.getElementById('fieldSonderName').value.trim();
+  const geruesttypLabel = geruesttyp === 'sonder'
+    ? (sonderName || 'Sonder-Gerüst') : getTypeLabel(geruesttyp);
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-  let y = 10;
-  doc.setFontSize(16);
-  doc.text('Aufmaßbericht', 10, y);
-  y += 10;
-  // Projekttitel hinzufügen, falls vorhanden
-  const projectName = document.getElementById('projectName').value.trim();
-  if (projectName) {
-    doc.setFontSize(12);
-    doc.text(`Projekt: ${projectName}`, 10, y);
-    y += 8;
+  const LM  = 14;   // linker Rand
+  const RM  = 196;  // rechter Rand
+  const IND = 18;   // Einzug für Inhalte
+  let y = 16;
+
+  function chk(h = 8) {
+    if (y + h > 272) { doc.addPage(); y = 16; }
   }
-  const wallElements = document.querySelectorAll('#wallsContainer .wall');
-  if (wallElements.length === 0) {
-    doc.setFontSize(12);
-    doc.text('Es wurden keine Wände erfasst.', 10, y);
-    doc.save('aufmass.pdf');
-    return;
+
+  function hline(w = 0.3) {
+    chk(6);
+    doc.setLineWidth(w);
+    doc.line(LM, y, RM, y);
+    y += 5;
   }
-  doc.setFontSize(12);
+
+  function secHead(title) {
+    chk(10);
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'bold');
+    doc.text(title.toUpperCase(), LM, y);
+    doc.setFont(undefined, 'normal');
+    y += 5;
+  }
+
+  function pdfRow(label, value) {
+    chk(6);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(label, IND, y);
+    if (value != null && value !== '') doc.text(String(value), RM, y, { align: 'right' });
+    y += 6;
+  }
+
+  function pdfRowBold(label, value) {
+    chk(7);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(label, IND, y);
+    if (value != null && value !== '') doc.text(String(value), RM, y, { align: 'right' });
+    doc.setFont(undefined, 'normal');
+    y += 7;
+  }
+
+  // ── Kopfzeile ─────────────────────────────────────────────────
+  doc.setFontSize(15);
+  doc.setFont(undefined, 'bold');
+  doc.text('Aufmaß-Bericht', LM, y);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text(new Date().toLocaleDateString('de-DE'), RM, y, { align: 'right' });
+  y += 7;
+
+  hline(0.5);
+
+  // Projektdaten
+  const addrLine = [
+    [anschrift.strasse, anschrift.nummer].filter(Boolean).join(' '),
+    [anschrift.plz, anschrift.ort].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+  if (addrLine)           { doc.setFontSize(10); doc.text(addrLine, LM, y); y += 5; }
+  if (anschrift.bauherr)  { doc.setFontSize(10); doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 5; }
+  doc.setFontSize(10); doc.text(geruesttypLabel, LM, y); y += 5;
+  y += 2;
+
+  // ── Gerüstfläche ──────────────────────────────────────────────
+  hline(0.4);
+  secHead('Gerüstfläche');
+
   let totalArea = 0;
-  let totalTunnel = 0;
-  // Globale Summen für Extras (analog zur HTML-Zusammenfassung)
-  const globalTotalsPDF = {
-    lamp: 0,
-    cage: 0,
-    netArea: 0,
-    dfNet: 0,
-    consoleLen: 0,
-    tunnel: 0,
-    parking: 0,
-    permit: 0
-    , consoles: 0,
-    inner: 0
-  };
-  wallElements.forEach((wall, i) => {
-    // Ermittele den Namen aus Seite (mit optionaler manueller Eingabe) und Typ
-    let name = '';
-    const sideSel = wall.querySelector('.wall-side');
-    const manualSide = wall.querySelector('.wall-side-manual');
-    const typeSel = wall.querySelector('.wall-type');
-    if (sideSel) {
-      if (sideSel.value === '__manual__' && manualSide && manualSide.value.trim()) {
-        name = manualSide.value.trim();
-      } else if (sideSel.value) {
-        name = sideSel.value;
-      }
-    }
-    if (typeSel && typeSel.value) {
-      name = name ? `${name} ${typeSel.value}` : typeSel.value;
-    }
-    if (!name) {
-      name = `Wand ${i + 1}`;
-    }
-    // Sammle Längen und ihre individuellen Zuschläge
-    const lengthRows = wall.querySelectorAll('.length-row');
-    let lengths = [];
-    let lengthExtras = [];
-    let baseLengthSum = 0;
-    let lengthExtraSum = 0;
-    lengthRows.forEach(row => {
-      const lenInput = row.querySelector('.length');
-      const extraSelect = row.querySelector('.length-extra');
-      const val = parseFloat(lenInput?.value);
-      if (!isNaN(val) && val > 0) {
-        lengths.push(val);
-        baseLengthSum += val;
-      } else {
-        lengths.push(0);
-      }
-      let extra = 0;
-      if (extraSelect) {
-        extra = parseFloat(extraSelect.value);
-        if (isNaN(extra)) extra = 0;
-      }
-      lengthExtras.push(extra);
-      lengthExtraSum += extra;
-    });
-    // Sammle Höhen und ihre individuellen Top‑Zuschläge
-    const heightRows = wall.querySelectorAll('.height-row');
-    let heights = [];
-    let heightExtras = [];
-    heightRows.forEach(row => {
-      const hInput = row.querySelector('.height');
-      const topExtChk = row.querySelector('.height-top-extra');
-      const val = parseFloat(hInput?.value);
-      if (!isNaN(val) && val > 0) {
-        heights.push(val);
-      } else {
-        heights.push(0);
-      }
-      const hExt = topExtChk?.checked ? 2 : 0;
-      heightExtras.push(hExt);
-    });
-    // Mittelwertoption
-    const meanCheck = wall.querySelector('.use-mean-height');
-    // Berechne angepasste Höhen
-    const adjustedHeights = heights.map((h, idx) => h + heightExtras[idx]);
-    const validAdjusted = adjustedHeights.filter(h => h > 0);
-    let heightForArea = 0;
-    if (validAdjusted.length > 0) {
-      if (meanCheck?.checked && validAdjusted.length >= 2) {
-        const minH = Math.min(...validAdjusted);
-        const maxH = Math.max(...validAdjusted);
-        heightForArea = (minH + maxH) / 2;
-      } else {
-        heightForArea = Math.max(...validAdjusted);
-      }
-    }
-    const area = (baseLengthSum + lengthExtraSum) * heightForArea;
-    totalArea += area;
-    // Baue die Zeilen für das PDF
-    let lines = [];
-    lines.push(`${name}:`);
-    // Höhen mit Zuschlägen
-    heightRows.forEach((row, idx) => {
-      const hVal = parseFloat(row.querySelector('.height')?.value) || 0;
-      let line = `H${idx + 1}: ${hVal.toFixed(2)} m`;
-      const hExt = heightExtras[idx];
-      if (hVal > 0 && hExt > 0) {
-        line += ` + ${hExt.toFixed(2)} m`;
-      }
-      lines.push(line);
-    });
-    // Der Mittelwert wird im PDF nicht gesondert aufgeführt, die Berechnung erfolgt dennoch.
-    // Längen mit Zuschlägen
-    lengthRows.forEach((row, idx) => {
-      const lVal = parseFloat(row.querySelector('.length')?.value) || 0;
-      let line = `L${idx + 1}: ${lVal.toFixed(2)} m`;
-      const lExt = lengthExtras[idx];
-      if (lVal > 0 && lExt > 0) {
-        line += ` + ${lExt.toFixed(2)} m`;
-      }
-      lines.push(line);
-    });
-    if (lengthExtraSum > 0) {
-      lines.push(`Gesamtlänge: ${baseLengthSum.toFixed(2)} m + ${lengthExtraSum.toFixed(2)} m`);
-    } else {
-      lines.push(`Gesamtlänge: ${baseLengthSum.toFixed(2)} m`);
-    }
-    lines.push(`Fläche: ${area.toFixed(2)} m²`);
-    // Zusätzliche Optionen sammeln
-    const extras = [];
-    const ttCheck = wall.querySelector('.tt-check');
-    const ttHeightInput = wall.querySelector('.tt-height');
-    const ttCage = wall.querySelector('.tt-cage');
-    if (ttCheck && ttCheck.checked) {
-      const ttHeightVal = parseFloat(ttHeightInput?.value) || 0;
-      if (ttHeightVal > 0) {
-        extras.push(`Treppenturm: ${ttHeightVal.toFixed(2)} m`);
-      }
-      if (ttCage && ttCage.checked) {
-        extras.push(`Käfig: 1 x`);
-        globalTotalsPDF.cage += 1;
-      }
-    }
-    const netCheck = wall.querySelector('.net-check');
-    const netInput = wall.querySelector('.net-area');
-    if (netCheck && netCheck.checked) {
-      // Netzfläche: nutze manuelle Eingabe oder Standard (Fläche)
-      let netVal = area;
-      if (netInput) {
-        const manualVal = parseFloat(netInput.value);
-        if (!isNaN(manualVal) && manualVal > 0) {
-          netVal = manualVal;
-        }
-      }
-      extras.push(`Staubschutznetz: ${netVal.toFixed(2)} m²`);
-      globalTotalsPDF.netArea += netVal;
-    }
-    const lampCheck = wall.querySelector('.lamp-check');
-    const lampInput = wall.querySelector('.lamp-count');
-    if (lampCheck && lampCheck.checked && lampInput) {
-      const lampVal = parseFloat(lampInput.value);
-      if (!isNaN(lampVal) && lampVal > 0) {
-        extras.push(`Lampen: ${lampVal.toFixed(0)}`);
-        globalTotalsPDF.lamp += lampVal;
-      }
-    }
-    // Parkplatz und Genehmigung einzeln
-    const parkCheck = wall.querySelector('.parking-check');
-    const permitCheck = wall.querySelector('.permit-check');
-    if (parkCheck && parkCheck.checked) {
-      extras.push(`Parkplatz`);
-      globalTotalsPDF.parking += 1;
-    }
-    if (permitCheck && permitCheck.checked) {
-      extras.push(`Genehmigung`);
-      globalTotalsPDF.permit += 1;
-    }
-    const tunnelCheckField = wall.querySelector('.tunnel-check');
-    const tunnelInputField = wall.querySelector('.tunnel-length');
-    if (tunnelCheckField && tunnelCheckField.checked && tunnelInputField) {
-      const tunnelVal = parseFloat(tunnelInputField.value);
-      if (!isNaN(tunnelVal) && tunnelVal > 0) {
-        extras.push(`Tunnelrahmen: ${tunnelVal.toFixed(2)} m`);
-        totalTunnel += tunnelVal;
-        globalTotalsPDF.tunnel += tunnelVal;
-      }
-    }
-    // DF (Dachfang): Konsolen 0,50 und Netze
-    const dfCheckField = wall.querySelector('.df-check');
-    const dfConsoleField = wall.querySelector('.df-console');
-    const dfNetField = wall.querySelector('.df-net');
-    if (dfCheckField && dfCheckField.checked) {
-      // DF Netze: berechne Länge (manuell oder gesamte Wandlänge)
-      let dfNetVal = 0;
-      if (dfNetField) {
-        const manualNet = parseFloat(dfNetField.value);
-        if (isNaN(manualNet) || manualNet <= 0) {
-          dfNetVal = baseLengthSum + lengthExtraSum;
+  const totals = { konsolen: {}, ig: 0, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
+
+  seiten.forEach((seite, idx) => {
+    const name = seite.name === '__manual__' ? seite.manualName : seite.name;
+
+    chk(10);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(name || ('Seite ' + (idx + 1)), IND, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
+
+    let seitenFlaeche = 0;
+    (seite.abschnitte || []).forEach(a => {
+      const ef = a.einzelfeld || false;
+      const isGiebel = a.giebel || false;
+      (a.messungen || []).forEach(m => {
+        let lEff = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+        if (ef) lEff = Math.max(lEff, 2.5);
+        if (lEff <= 0) return;
+        const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
+        const efStr  = ef ? ' (EF)' : '';
+        if (isGiebel) {
+          const h1Eff = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
+          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+          if (h2Eff < h1Eff || h1Eff < 0) return;
+          const pair = round2(lEff * (h1Eff + h2Eff) / 2);
+          seitenFlaeche += pair;
+          chk(6);
+          doc.setFontSize(9);
+          doc.text(bezStr + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr, IND + 3, y);
+          doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
+          y += 5;
         } else {
-          dfNetVal = manualNet;
+          const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+          if (hEff <= 0) return;
+          const pair = round2(lEff * hEff);
+          seitenFlaeche += pair;
+          chk(6);
+          doc.setFontSize(9);
+          doc.text(bezStr + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr, IND + 3, y);
+          doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
+          y += 5;
         }
-        if (dfNetVal > 0) {
-          extras.push(`DF Netze: ${dfNetVal.toFixed(2)} m`);
-          globalTotalsPDF.dfNet += dfNetVal;
-        }
-      }
-      // DF Konsolen: Standard = gleiche Länge wie DF Netze, sofern keine manuelle Eingabe vorhanden
-      if (dfConsoleField) {
-        let consoleVal = parseFloat(dfConsoleField.value);
-        if (isNaN(consoleVal) || consoleVal <= 0) {
-          consoleVal = dfNetVal;
-        }
-        if (!isNaN(consoleVal) && consoleVal > 0) {
-          extras.push(`Konsole 0,50: ${consoleVal.toFixed(2)} m`);
-          globalTotalsPDF.consoleLen += consoleVal;
-        }
-      }
+      });
+    });
+
+    if (seitenFlaeche > 0) {
+      totalArea += seitenFlaeche;
+      chk(6);
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'bold');
+      doc.text(fmtNum(seitenFlaeche) + ' m²', RM, y, { align: 'right' });
+      doc.setFont(undefined, 'normal');
+      y += 5;
     }
 
-    // Konsolen (mehrere möglich)
-    const consCheck = wall.querySelector('.cons-check');
-    if (consCheck && consCheck.checked) {
-      const consRows = wall.querySelectorAll('.console-row');
-      consRows.forEach(row => {
-        const typeSel = row.querySelector('.console-type');
-        const lenInput = row.querySelector('.console-length');
-        const layersInput = row.querySelector('.console-layers');
-        const lenVal = parseFloat(lenInput?.value);
-        const layVal = parseInt(layersInput?.value) || 1;
-        if (!isNaN(lenVal) && lenVal > 0) {
-          const totalLen = lenVal * layVal;
-          extras.push(`${typeSel && typeSel.value ? typeSel.value : 'Konsole'}: ${totalLen.toFixed(2)} m (${layVal} Lagen)`);
-          globalTotalsPDF.consoles += totalLen;
-        }
+    // Zubehör-Totals sammeln
+    if (Array.isArray(seite.konsolen)) {
+      seite.konsolen.forEach(k => {
+        if (k.laenge !== null && !isNaN(k.laenge))
+          totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + k.laenge;
       });
     }
-    // Innengeländer – mehrere Zeilen möglich
-    const innerCheck = wall.querySelector('.inner-check');
-    if (innerCheck && innerCheck.checked) {
-      const innerRows = wall.querySelectorAll('.inner-row');
-      innerRows.forEach(row => {
-        const lenInput = row.querySelector('.inner-length');
-        const layersInput = row.querySelector('.inner-layers');
-        const lenVal = parseFloat(lenInput?.value);
-        const layVal = parseInt(layersInput?.value) || 1;
-        if (!isNaN(lenVal) && lenVal > 0) {
-          const totalLen = lenVal * layVal;
-          extras.push(`Innengeländer: ${totalLen.toFixed(2)} m (${layVal} Lagen)`);
-          globalTotalsPDF.inner += totalLen;
-        }
+    if (Array.isArray(seite.innengelaender)) {
+      seite.innengelaender.forEach(ig => {
+        if (ig.laenge !== null && !isNaN(ig.laenge)) totals.ig += ig.laenge;
       });
     }
-    // Leere Zeile zwischen Hauptteil und Extras
-    if (extras.length > 0) {
-      lines.push('');
-      extras.forEach(ex => lines.push(ex));
-    }
-    // Gib die Zeilen aus
-    const pdfLines = doc.splitTextToSize(lines.join('\n'), 190);
-    pdfLines.forEach(l => {
-      if (y > 280) {
-        doc.addPage();
-        y = 10;
+    if (seite.dachfang          && seite.dachfang.laenge          != null) totals.df += seite.dachfang.laenge          || 0;
+    if (seite.gittertraeger     && seite.gittertraeger.laenge     != null) totals.gt += seite.gittertraeger.laenge     || 0;
+    if (seite.fussgaengertunnel && seite.fussgaengertunnel.laenge != null) totals.ft += seite.fussgaengertunnel.laenge || 0;
+    if (seite.treppenturm       && seite.treppenturm.hoehe        != null) totals.tt += seite.treppenturm.hoehe        || 0;
+    if (seite.netze             && seite.netze.laenge             != null) totals.ne += seite.netze.laenge             || 0;
+
+    y += 2;
+  });
+
+  // Gesamtfläche
+  chk(8);
+  doc.setLineWidth(0.4);
+  doc.line(LM, y, RM, y);
+  y += 5;
+  pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
+
+  // ── Positionen ─────────────────────────────────────────────────
+  const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
+  const hasAcc = kTypen.length > 0 || totals.ig > 0 || totals.df > 0 ||
+    totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
+
+  if (hasAcc || zusatz.length > 0) {
+    y += 1;
+    hline(0.3);
+    secHead('Positionen');
+    kTypen.forEach(t => pdfRow('Konsole ' + t + ' cm', fmtNum(round2(totals.konsolen[t])) + ' m'));
+    if (totals.ig > 0) pdfRow('Innengeländer',   fmtNum(round2(totals.ig)) + ' m');
+    if (totals.df > 0) pdfRow('Dachfang',        fmtNum(round2(totals.df)) + ' m');
+    if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
+    if (totals.ft > 0) pdfRow('Fußgängertunnel', fmtNum(round2(totals.ft)) + ' m');
+    if (totals.tt > 0) pdfRow('Treppenturm',     fmtNum(round2(totals.tt)) + ' m (H)');
+    if (totals.ne > 0) pdfRow('Netze',           fmtNum(round2(totals.ne)) + ' m²');
+    zusatz.forEach(z => {
+      const mengeStr = z.menge !== null ? fmtNum(z.menge) + ' ' + z.einheit : '–';
+      const label    = (z.art || '–') + (z.notiz ? '  (' + z.notiz + ')' : '');
+      pdfRow(label, mengeStr);
+    });
+  }
+
+  // ── Baustelle / Logistik ──────────────────────────────────────
+  const logParts = [
+    logistik.anfahrtKm             ? logistik.anfahrtKm + ' km Anfahrt' : '',
+    logistik.untergrund             ? 'Untergrund: ' + logistik.untergrund : '',
+    logistik.stellflaecheNotiz      ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
+    logistik.oeffentlicherGrund     ? 'Öffentlicher Grund' : '',
+    logistik.verkehrssicherung      ? 'Verkehrssicherung' : '',
+    logistik.genehmigungErforderlich? 'Genehmigung erforderlich' : ''
+  ].filter(Boolean);
+
+  if (logParts.length > 0) {
+    y += 1;
+    hline(0.3);
+    secHead('Baustelle / Logistik');
+    logParts.forEach(f => pdfRow(f, ''));
+  }
+
+  const proj = getCurrentProject();
+  const base = proj ? getProjectLabel(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmaß';
+  doc.save((base || 'Aufmaß') + '.pdf');
+}
+
+// ============================================================
+//  JSON-Export / Import
+// ============================================================
+
+function exportJson() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  proj.anschrift        = collectAnschrift();
+  proj.geruesttyp       = collectGeruesttyp();
+  proj.geruesttypName   = document.getElementById('fieldSonderName').value.trim();
+  proj.seiten           = collectSeiten();
+  proj.technik          = collectTechnik();
+  proj.logistik         = collectLogistik();
+  proj.zusatzpositionen = collectZusatzpositionen();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+  saveProjects();
+
+  const blob = new Blob([JSON.stringify(proj, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = (getProjectLabel(proj).replace(/[^a-z0-9]/gi, '_') || 'Aufmaß') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function handleImportFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      const data = JSON.parse(evt.target.result);
+      if (!data.seiten) { alert('Unbekanntes Dateiformat.'); return; }
+      const existing = projects.findIndex(p => p.id === data.id);
+      if (existing >= 0) {
+        projects[existing] = data;
+      } else {
+        data.id = genId('proj');
+        projects.push(data);
       }
-      doc.text(l, 10, y);
-      y += 6;
+      saveProjects();
+      openProject(data.id);
+    } catch (err) {
+      alert('Fehler beim Lesen der Datei: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// ============================================================
+//  Event-Listener & App-Start
+// ============================================================
+
+function initApp() {
+  loadProjects();
+  renderProjectList();
+  showScreen('homeScreen');
+
+  document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
+
+  document.getElementById('backBtn').addEventListener('click', () => {
+    saveCurrentProject();
+    renderProjectList();
+    showScreen('homeScreen');
+  });
+
+  document.getElementById('deleteProjectBtn').addEventListener('click', deleteCurrentProject);
+  document.getElementById('addSideBtn').addEventListener('click', addSide);
+  document.getElementById('saveProjectBtn').addEventListener('click', saveCurrentProject);
+  document.getElementById('exportPdfBtn').addEventListener('click', generatePDF);
+  document.getElementById('calcAnfahrtBtn').addEventListener('click', autoCalcAnfahrt);
+  document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+  document.getElementById('importJsonBtn').addEventListener('click', () => {
+    document.getElementById('importFileInput').click();
+  });
+  document.getElementById('importFileInput').addEventListener('change', handleImportFile);
+
+  document.getElementById('addZusatzBtn').addEventListener('click', () => {
+    const container = document.getElementById('zusatzContainer');
+    container.appendChild(createZusatzRow({}));
+    refreshNoZusatzHint();
+  });
+
+  // Logistik-Toggles
+  ['toggleOeffentlich', 'toggleVerkehr', 'toggleGenehmigung'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const nowActive = btn.dataset.active !== '1';
+      btn.dataset.active = nowActive ? '1' : '0';
+      btn.classList.toggle('active', nowActive);
     });
   });
-  // Gesamtsumme der Fläche ausgeben
-  if (y > 280) {
-    doc.addPage();
-    y = 10;
-  }
-  doc.setFontSize(12);
-  doc.text('---', 10, y);
-  y += 6;
-  doc.text(`Gesamt Fläche: ${totalArea.toFixed(2)} m²`, 10, y);
-  // Ausgabe der summierten Extras
-  let extrasLines = [];
-  if (globalTotalsPDF.lamp > 0) {
-    extrasLines.push(`Lampen: ${globalTotalsPDF.lamp.toFixed(0)} ×`);
-  }
-  if (globalTotalsPDF.cage > 0) {
-    extrasLines.push(`Käfig: ${globalTotalsPDF.cage.toFixed(0)} ×`);
-  }
-  if (globalTotalsPDF.netArea > 0) {
-    extrasLines.push(`Staubschutznetz: ${globalTotalsPDF.netArea.toFixed(2)} m²`);
-  }
-  if (globalTotalsPDF.dfNet > 0) {
-    extrasLines.push(`DF Netze: ${globalTotalsPDF.dfNet.toFixed(2)} m`);
-  }
-  if (globalTotalsPDF.consoleLen > 0) {
-    extrasLines.push(`Konsole 0,50: ${globalTotalsPDF.consoleLen.toFixed(2)} m`);
-  }
-  if (globalTotalsPDF.tunnel > 0) {
-    extrasLines.push(`Tunnelrahmen: ${globalTotalsPDF.tunnel.toFixed(2)} m`);
-  }
-  if (globalTotalsPDF.parking > 0) {
-    extrasLines.push(`Parkplatz: ${globalTotalsPDF.parking.toFixed(0)}`);
-  }
-  if (globalTotalsPDF.permit > 0) {
-    extrasLines.push(`Genehmigung: ${globalTotalsPDF.permit.toFixed(0)}`);
-  }
-  // Konsolen und Innengeländer (Summe aller Wände)
-  if (globalTotalsPDF.consoles > 0) {
-    extrasLines.push(`Konsolen: ${globalTotalsPDF.consoles.toFixed(2)} m`);
-  }
-  if (globalTotalsPDF.inner > 0) {
-    extrasLines.push(`Innengeländer: ${globalTotalsPDF.inner.toFixed(2)} m`);
-  }
-  if (extrasLines.length > 0) {
-    y += 6;
-    doc.text('Gesamt Extras:', 10, y);
-    y += 6;
-    extrasLines.forEach(line => {
-      if (y > 280) {
-        doc.addPage();
-        y = 10;
-      }
-      doc.text(line, 10, y);
-      y += 6;
+
+  // Gerüsttyp-Toggle
+  document.querySelectorAll('.type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('sonderNameRow').style.display =
+        btn.dataset.type === 'sonder' ? '' : 'none';
     });
-  }
-  doc.save('aufmass.pdf');
+  });
+
+  // Anschrift Auto-Save
+  ['fieldStrasse', 'fieldNummer', 'fieldPlz', 'fieldOrt', 'fieldBauherr'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      const proj = getCurrentProject();
+      if (!proj) return;
+      proj.anschrift = collectAnschrift();
+      proj.geaendert = new Date().toISOString().slice(0, 10);
+      document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
+      saveProjects();
+    });
+  });
 }
+
+document.addEventListener('DOMContentLoaded', initApp);

@@ -2,97 +2,221 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fassaden‑Aufmaß‑App</title>
-  <!--
-    Diese Web‑App dient zur Aufnahme von Fassadenmaßen eines Gebäudes.
-    Sie unterstützt beliebig viele Wände mit jeweils Länge und Höhe sowie
-    beliebig viele Öffnungen (z. B. Fenster oder Türen) pro Wand. Im Sinne
-    der Gerüststellung wird die gesamte Fassadenfläche berücksichtigt, es findet
-    keine Abzugsregel für Fenster und Türen statt. Die Gesamtsummen
-    werden in einer Zusammenfassung dargestellt.
-  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Aufmaß-App</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <h1>Fassaden‑Aufmaß</h1>
-    <p>
-      Erfassen Sie die Außenmaße Ihres Gebäudes. Geben Sie die Länge und
-      Höhe jeder Wand ein. Öffnungen wie Fenster oder Türen können
-      optional erfasst werden, beeinflussen aber nicht die Flächenberechnung,
-      da für die Gerüststellung die gesamte Fassadenfläche maßgeblich ist.
-    </p>
-    <a href="viewer2d.html" class="btn-2d-link">
-      📐 Gerüst 2D-Ansicht öffnen
-    </a>
-  </header>
-  <style>
-    .btn-2d-link {
-      display: inline-block;
-      margin-top: 0.6rem;
-      background: #007aff;
-      color: #fff;
-      border-radius: 8px;
-      padding: 0.7rem 1.3rem;
-      font-size: 1rem;
-      font-weight: 600;
-      text-decoration: none;
-      transition: background 0.2s;
-    }
-    .btn-2d-link:hover { background: #005bb5; }
-  </style>
 
-  <main>
-    <section id="projectInfo" class="card">
-      <h2>Projekt</h2>
-      <label for="projectName">Projektname:</label>
-      <input type="text" id="projectName" placeholder="z. B. Haus Meier" />
-    </section>
-
-    <section id="wallsSection" class="card">
-      <div class="section-header">
-        <h2>Wände</h2>
-        <button id="addWallBtn" class="primary">Wand hinzufügen</button>
+  <!-- Startseite: Projektliste -->
+  <div id="homeScreen" class="screen">
+    <header class="app-header">
+      <div class="header-title">
+        <h1>Aufmaß-App</h1>
       </div>
-      <p>
-        Jede Wand kann mehrere Längen und Höhen enthalten (z.&nbsp;B. für
-        Balkone, Giebel oder umlaufende Terrassen). Öffnungen können
-        optional hinzugefügt werden. Zusätzlich lassen sich pro Wand
-        verschiedene Gerüst‑Extras festlegen, etwa ein Treppenturm mit
-        Käfig, ein Staubschutznetz, die Anzahl der Lampen, ein
-        Parkplatz/Genehmigung oder ein Tunnelrahmen. Diese Optionen
-        berücksichtigen automatisch die erfassten Maße, können bei
-        Bedarf aber manuell angepasst werden.
-      </p>
-      <div id="wallsContainer"></div>
-    </section>
-
-    <section id="summarySection" class="card">
-      <h2>Zusammenfassung</h2>
-      <div id="summary">
-        <p>Noch keine Wände erfasst.</p>
+      <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
+    </header>
+    <main class="screen-content">
+      <div id="projectList" class="project-list"></div>
+      <div id="emptyState" class="empty-state hidden">
+        <div class="empty-icon-box"></div>
+        <h2>Keine Projekte</h2>
+        <p>Tippen Sie auf &bdquo;+ Neues Projekt&ldquo; um zu beginnen.</p>
       </div>
-      <!-- Schaltflächen zum Speichern/Laden und PDF-Erstellung -->
-      <div class="summary-buttons">
-        <button id="saveProjectBtn" class="primary" type="button">Projekt&nbsp;speichern</button>
-        <button id="loadProjectBtn" class="primary" type="button">Projekt&nbsp;laden</button>
-        <button id="pdfBtn" class="primary" type="button">PDF&nbsp;erstellen</button>
-      </div>
-      <!-- verstecktes Datei-Input für das Laden von JSON-Dateien -->
-      <input type="file" id="loadFileInput" accept="application/json" style="display:none;" />
-    </section>
-  </main>
+    </main>
+  </div>
 
-  <footer>
-    <p class="footnote">
-      Hinweis: Für die Gerüststellung wird die gesamte Fassadenfläche betrachtet.
-      Öffnungen wie Fenster und Türen werden nicht von der Fläche abgezogen,
-      da das Gerüst vor der gesamten Wand steht.
-    </p>
-  </footer>
+  <!-- Projektansicht -->
+  <div id="projectScreen" class="screen hidden">
+    <header class="app-header">
+      <button id="backBtn" class="btn btn-ghost">&#8592; Zurück</button>
+      <h1 id="projectScreenTitle">Projekt</h1>
+      <button id="deleteProjectBtn" class="btn btn-danger-ghost">Löschen</button>
+    </header>
+    <main class="screen-content">
 
-  <!-- jsPDF Bibliothek für die PDF‑Erstellung -->
+      <!-- 1. Anschrift -->
+      <section class="card">
+        <h2 class="card-title">Anschrift</h2>
+        <div class="form-row">
+          <div class="form-group" style="flex: 3">
+            <label class="form-label">Straße</label>
+            <input class="form-input" type="text" id="fieldStrasse" placeholder="Musterstraße" autocomplete="street-address" />
+          </div>
+          <div class="form-group" style="flex: 1">
+            <label class="form-label">Nr.</label>
+            <input class="form-input" type="text" id="fieldNummer" placeholder="1a" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex: 1">
+            <label class="form-label">PLZ</label>
+            <input class="form-input" type="text" id="fieldPlz" placeholder="12345" inputmode="numeric" maxlength="5" />
+          </div>
+          <div class="form-group" style="flex: 2">
+            <label class="form-label">Ort</label>
+            <input class="form-input" type="text" id="fieldOrt" placeholder="Musterstadt" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Bauherr / Auftraggeber</label>
+          <input class="form-input" type="text" id="fieldBauherr" placeholder="Herr Muster GmbH" />
+        </div>
+      </section>
+
+      <!-- 2. Gerüsttyp -->
+      <section class="card">
+        <h2 class="card-title">Gerüsttyp</h2>
+        <div class="type-selector" id="geruesttypSelector">
+          <button class="type-btn active" data-type="fassade">Fassaden-Gerüst</button>
+          <button class="type-btn" data-type="dach">Dach-Gerüst</button>
+          <button class="type-btn" data-type="sonder">Sonder-Gerüst</button>
+        </div>
+        <div id="sonderNameRow" style="margin-top:10px; display:none;">
+          <input class="form-input" type="text" id="fieldSonderName" placeholder="Bezeichnung für Sonder-Gerüst" />
+        </div>
+      </section>
+
+      <!-- 3. Technik (DIN 18451) -->
+      <section class="card">
+        <h2 class="card-title">Technik (DIN 18451)</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Lastklasse</label>
+            <select class="form-input" id="fieldLastklasse">
+              <option value="">– wählen –</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Breitenklasse</label>
+            <select class="form-input" id="fieldBreitenklasse">
+              <option value="">– wählen –</option>
+              <option value="W06">W06</option>
+              <option value="W09">W09</option>
+              <option value="W12">W12</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Verwendungszweck</label>
+            <select class="form-input" id="fieldVerwendungszweck">
+              <option value="">– wählen –</option>
+              <option value="Maler">Maler</option>
+              <option value="Putz">Putz</option>
+              <option value="Klempner">Klempner</option>
+              <option value="Dach">Dach</option>
+              <option value="WDVS">WDVS</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Verankerungsgrund</label>
+            <select class="form-input" id="fieldVerankerungsgrund">
+              <option value="">– wählen –</option>
+              <option value="Mauerwerk">Mauerwerk</option>
+              <option value="Beton">Beton</option>
+              <option value="WDVS">WDVS</option>
+              <option value="Denkmal">Denkmal</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ankeranzahl</label>
+          <input class="form-input" type="number" id="fieldAnkerAnzahl" placeholder="0" min="0" inputmode="numeric" style="max-width:160px;" />
+        </div>
+      </section>
+
+      <!-- 4. Logistik -->
+      <section class="card">
+        <h2 class="card-title">Baustelle / Logistik</h2>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Anfahrt (km)</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input class="form-input" type="number" id="fieldAnfahrtKm" placeholder="0" min="0" inputmode="decimal" style="flex:1;min-width:0;" />
+              <button type="button" id="calcAnfahrtBtn" class="btn btn-ghost btn-sm" title="Entfernung zur MHP Arena Stuttgart automatisch berechnen">Auto</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex:2">
+            <label class="form-label">Untergrund</label>
+            <select class="form-input" id="fieldUntergrund">
+              <option value="">– wählen –</option>
+              <option value="Asphalt">Asphalt</option>
+              <option value="Pflaster">Pflaster</option>
+              <option value="Rasen">Rasen</option>
+              <option value="Schotter">Schotter</option>
+              <option value="Beton">Beton</option>
+              <option value="Sonstiges">Sonstiges</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stellfläche-Notiz</label>
+          <input class="form-input" type="text" id="fieldStellflaecheNotiz" placeholder="z. B. Gehweg gesperrt" />
+        </div>
+        <div class="logistik-toggles">
+          <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Öffentlicher Grund</button>
+          <button type="button" class="logistik-toggle-btn" id="toggleVerkehr" data-active="0">Verkehrssicherung</button>
+          <button type="button" class="logistik-toggle-btn" id="toggleGenehmigung" data-active="0">Genehmigung erforderlich</button>
+        </div>
+      </section>
+
+      <!-- 5. Hausseiten -->
+      <section class="card">
+        <div class="section-header">
+          <h2 class="card-title">Hausseiten</h2>
+          <button id="addSideBtn" class="btn btn-primary btn-sm">+ Seite</button>
+        </div>
+        <div id="seitenContainer"></div>
+        <div id="noSidesHint" class="no-sides-hint">
+          Noch keine Seiten erfasst. Tippen Sie auf &bdquo;+ Seite&ldquo;.
+        </div>
+      </section>
+
+      <!-- 6. Zusatzpositionen -->
+      <section class="card">
+        <div class="section-header">
+          <h2 class="card-title">Positionen</h2>
+          <button id="addZusatzBtn" class="btn btn-primary btn-sm">+ Position</button>
+        </div>
+        <div id="zusatzContainer"></div>
+        <div id="noZusatzHint" class="no-sides-hint">
+          Noch keine Zusatzpositionen erfasst.
+        </div>
+      </section>
+
+      <!-- 7. Zusammenfassung -->
+      <section class="card">
+        <h2 class="card-title">Zusammenfassung</h2>
+        <div id="summaryContent">
+          <p class="summary-empty">Noch keine Seiten erfasst.</p>
+        </div>
+      </section>
+
+      <!-- 9. Aktionen -->
+      <section class="card action-card">
+        <div class="action-buttons">
+          <button id="saveProjectBtn" class="btn btn-primary btn-full">Speichern</button>
+          <button id="exportPdfBtn" class="btn btn-secondary btn-full">PDF erstellen</button>
+        </div>
+        <div class="action-buttons-secondary">
+          <button id="exportJsonBtn" class="btn btn-ghost btn-sm">JSON exportieren</button>
+          <button id="importJsonBtn" class="btn btn-ghost btn-sm">JSON laden</button>
+        </div>
+        <input type="file" id="importFileInput" accept="application/json" style="display:none;" />
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toastEl" class="toast"></div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="script.js"></script>
 </body>
