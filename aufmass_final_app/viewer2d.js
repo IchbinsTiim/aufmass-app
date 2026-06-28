@@ -319,10 +319,10 @@ function renderSvg() {
   });
 
   // 6. Junction "+" buttons (green circles at every section endpoint)
-  const ADD_R = Math.round(HANDLE_R * 1.1);
+  const ADD_R = Math.round(HANDLE_R * 1.4);
   els.filter(e => e.type === 'junctionBtn').forEach(el => {
     const hit = svgEl('circle', {
-      cx: el.x, cy: el.y, r: ADD_R * 2.2, fill: 'transparent', style: 'cursor:pointer',
+      cx: el.x, cy: el.y, r: ADD_R * 3.0, fill: 'transparent', style: 'cursor:pointer',
       'data-jx': el.x.toFixed(1), 'data-jy': el.y.toFixed(1)
     });
     hit.addEventListener('click', ev => {
@@ -513,10 +513,13 @@ function openAddSheet() {
 /** Add a new bay at the current addCtx position (or last section's end). */
 function commitAddField(dir, len) {
   const newBay = mkBay(len);
+  const d = DIR_META[dir];
+  const pxLen = len * PX_PER_M;
 
   if (addCtx) {
     const jx = addCtx.x, jy = addCtx.y;
-    // Try to extend an existing section in this direction starting/ending here
+
+    // Case 1: extend a section that ENDS here in the same direction
     const matchEnd = state.sections.find(s => {
       if (s.dir !== dir) return false;
       const e = sectionEnd(s);
@@ -524,11 +527,22 @@ function commitAddField(dir, len) {
     });
     if (matchEnd) {
       matchEnd.bays.push(newBay);
-    } else {
-      const sec = mkSection(dir, jx, jy);
-      sec.bays.push(newBay);
-      state.sections.push(sec);
+      addCtx = null;
+      renderAll();
+      return;
     }
+
+    // Case 2: a section STARTS here in the same direction → place new field BEFORE it
+    const matchStart = state.sections.find(s => {
+      if (s.dir !== dir) return false;
+      return Math.abs(s.x0 - jx) < 2 && Math.abs(s.y0 - jy) < 2;
+    });
+    const startX = matchStart ? jx - d.dx * pxLen : jx;
+    const startY = matchStart ? jy - d.dy * pxLen : jy;
+
+    const sec = mkSection(dir, startX, startY);
+    sec.bays.push(newBay);
+    state.sections.push(sec);
     addCtx = null;
 
   } else if (state.sections.length === 0) {
