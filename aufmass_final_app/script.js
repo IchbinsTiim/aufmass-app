@@ -113,32 +113,40 @@ function berechneAbschnitt(abschnitt) {
 }
 
 // Gesamt-Flache einer Karte (Summe aller Abschnitte)
+function getExtraVal(mRow, cls) {
+  const btn = mRow.querySelector(cls);
+  if (!btn || !btn.classList.contains('active')) return 0;
+  const inp = btn.nextElementSibling;
+  if (inp && inp.classList.contains('plus-extra-input')) return parseNum(inp.value) || 2;
+  return 2;
+}
+
 function computeCardFlaeche(card) {
   let total = 0;
   card.querySelectorAll('.abschnitt-row').forEach(abRow => {
     const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
     const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
     abRow.querySelectorAll('.messung-row').forEach(mRow => {
-      const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-      let lEff  = (l || 0) + (lP2 ? 2 : 0);
+      const l    = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lExt = getExtraVal(mRow, '.messung-laenge-plus2');
+      let lEff   = (l || 0) + lExt;
       if (ef) lEff = Math.max(lEff, 2.5);
       if (isNaN(l) || lEff <= 0) return;
       if (isGiebel) {
-        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
-        const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+        const h    = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const h2   = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+        const hExt = getExtraVal(mRow, '.messung-hoehe-plus2');
+        const h2Ext= getExtraVal(mRow, '.messung-hoehe2-plus2');
         if (!isNaN(h) && !isNaN(h2)) {
-          const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-          const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+          const h1Eff = (h  || 0) + hExt;
+          const h2Eff = (h2 || 0) + h2Ext;
           if (h2Eff >= h1Eff && h1Eff >= 0) total += lEff * (h1Eff + h2Eff) / 2;
         }
       } else {
-        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        const h    = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+        const hExt = getExtraVal(mRow, '.messung-hoehe-plus2');
         if (!isNaN(h)) {
-          const hEff = (h || 0) + (hP2 ? 2 : 0);
+          const hEff = (h || 0) + hExt;
           if (hEff > 0) total += lEff * hEff;
         }
       }
@@ -313,6 +321,17 @@ function openProject(projectId) {
   loadTechnik(proj.technik);
   loadLogistik(proj.logistik);
 
+  // PDF-Technik-Toggles laden
+  const ptt = proj.pdfTechnikToggles || {};
+  ['pdfToggleLastklasse', 'pdfToggleBreitenklasse', 'pdfToggleVerwendungszweck'].forEach(id => {
+    const key = id.replace('pdfToggle', '').replace(/^./, c => c.toLowerCase());
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const active = !!(ptt[key]);
+    btn.dataset.active = active ? '1' : '0';
+    btn.classList.toggle('active', active);
+  });
+
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
   updateSummary();
@@ -340,10 +359,14 @@ function collectGeruesttyp() {
 
 function collectTechnik() {
   const ankerVal = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
+  const vzArr = [];
+  document.querySelectorAll('.verwendungszweck-btn').forEach(btn => {
+    if (btn.dataset.active === '1') vzArr.push(btn.dataset.vz);
+  });
   return {
     lastklasse:        document.getElementById('fieldLastklasse')?.value        || '',
     breitenklasse:     document.getElementById('fieldBreitenklasse')?.value     || '',
-    verwendungszweck:  document.getElementById('fieldVerwendungszweck')?.value  || '',
+    verwendungszweck:  vzArr,
     verankerungsgrund: document.getElementById('fieldVerankerungsgrund')?.value || '',
     ankerAnzahl:       isNaN(ankerVal) ? null : ankerVal
   };
@@ -353,9 +376,16 @@ function loadTechnik(t) {
   if (!t) return;
   document.getElementById('fieldLastklasse').value        = t.lastklasse        || '';
   document.getElementById('fieldBreitenklasse').value     = t.breitenklasse     || '';
-  document.getElementById('fieldVerwendungszweck').value  = t.verwendungszweck  || '';
   document.getElementById('fieldVerankerungsgrund').value = t.verankerungsgrund || '';
   document.getElementById('fieldAnkerAnzahl').value       = t.ankerAnzahl != null ? t.ankerAnzahl : '';
+  // Verwendungszweck – Backward-compat: string oder Array
+  let vzList = t.verwendungszweck || [];
+  if (typeof vzList === 'string') vzList = vzList ? [vzList] : [];
+  document.querySelectorAll('.verwendungszweck-btn').forEach(btn => {
+    const active = vzList.includes(btn.dataset.vz);
+    btn.dataset.active = active ? '1' : '0';
+    btn.classList.toggle('active', active);
+  });
 }
 
 function setLogistikToggle(id, active) {
@@ -417,17 +447,26 @@ function collectSeiten() {
         const lV   = parseNum(mRow.querySelector('.messung-laenge')?.value);
         const hV   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
         const h2V  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const lP2  = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active')  || false;
-        const hP2  = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')   || false;
-        const hP22 = mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active')  || false;
+        const lP2Btn  = mRow.querySelector('.messung-laenge-plus2');
+        const hP2Btn  = mRow.querySelector('.messung-hoehe-plus2');
+        const hP22Btn = mRow.querySelector('.messung-hoehe2-plus2');
+        const lP2  = lP2Btn?.classList.contains('active')  || false;
+        const hP2  = hP2Btn?.classList.contains('active')   || false;
+        const hP22 = hP22Btn?.classList.contains('active')  || false;
+        const lExt  = lP2  ? (parseNum(lP2Btn?.nextElementSibling?.value)  || 2) : 2;
+        const hExt  = hP2  ? (parseNum(hP2Btn?.nextElementSibling?.value)  || 2) : 2;
+        const h2Ext = hP22 ? (parseNum(hP22Btn?.nextElementSibling?.value) || 2) : 2;
         messungen.push({
           id:           genId('m'),
           laenge:       isNaN(lV)  ? null : lV,
           laengePlus2:  lP2,
+          laengeExtra:  lExt,
           hoehe:        isNaN(hV)  ? null : hV,
           hoehePlus2:   hP2,
+          hoeheExtra:   hExt,
           hoehe2:       isNaN(h2V) ? null : h2V,
-          hoehe2Plus2:  hP22
+          hoehe2Plus2:  hP22,
+          hoehe2Extra:  h2Ext
         });
       });
       abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
@@ -489,7 +528,13 @@ function collectSeiten() {
       treppenturm: (ttToggle && ttToggle.classList.contains('active'))
         ? { hoehe: isNaN(ttVal) ? null : ttVal }
         : null,
-      netze:    collectSingleToggle('ne'),
+      netze:    (function() {
+        const r = collectSingleToggle('ne');
+        if (!r) return null;
+        const fBtn = card.querySelector('.netze-auto-btn');
+        r.autoFlaeche = fBtn ? fBtn.dataset.active === '1' : false;
+        return r;
+      })(),
       ks:       isNaN(ksVal) ? null : ksVal,
       ksManual: ksInp ? !!ksInp._ksManual : false
     });
@@ -512,6 +557,11 @@ function saveCurrentProject() {
   proj.technik          = collectTechnik();
   proj.logistik         = collectLogistik();
   proj.zusatzpositionen = collectZusatzpositionen();
+  proj.pdfTechnikToggles = {
+    lastklasse:       document.getElementById('pdfToggleLastklasse')?.dataset.active    === '1',
+    breitenklasse:    document.getElementById('pdfToggleBreitenklasse')?.dataset.active === '1',
+    verwendungszweck: document.getElementById('pdfToggleVerwendungszweck')?.dataset.active === '1'
+  };
   proj.geaendert = new Date().toISOString().slice(0, 10);
   document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
   saveProjects();
@@ -543,8 +593,11 @@ function renderSeiten(seitenData) {
 
 function refreshNoSidesHint() {
   const container = document.getElementById('seitenContainer');
+  const hasCards = container.querySelectorAll('.seite-card').length > 0;
   const hint = document.getElementById('noSidesHint');
-  hint.classList.toggle('hidden', container.querySelectorAll('.seite-card').length > 0);
+  hint.classList.toggle('hidden', hasCards);
+  const bottomWrap = document.getElementById('addSideBottomWrap');
+  if (bottomWrap) bottomWrap.style.display = hasCards ? '' : 'none';
 }
 
 // ============================================================
@@ -842,28 +895,28 @@ function createAbschnittRow(data, container, onChange) {
     const isGiebel = giebelBtn.classList.contains('active');
     let total = 0;
     messungenList.querySelectorAll('.messung-row').forEach(mRow => {
-      const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      const l    = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lExt = getExtraVal(mRow, '.messung-laenge-plus2');
       const calcEl = mRow.querySelector('.messung-calc');
-      let lEff = (l || 0) + (lP2 ? 2 : 0);
+      let lEff = (l || 0) + lExt;
       if (ef) lEff = Math.max(lEff, 2.5);
       let f = 0;
       if (!isNaN(l) && lEff > 0) {
         if (isGiebel) {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
-          const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          const h    = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const h2   = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+          const hExt = getExtraVal(mRow, '.messung-hoehe-plus2');
+          const h2Ext= getExtraVal(mRow, '.messung-hoehe2-plus2');
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            const h1Eff = (h  || 0) + hExt;
+            const h2Eff = (h2 || 0) + h2Ext;
             if (h2Eff >= h1Eff && h1Eff >= 0) f = round2(lEff * (h1Eff + h2Eff) / 2);
           }
         } else {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          const h    = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const hExt = getExtraVal(mRow, '.messung-hoehe-plus2');
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            const hEff = (h || 0) + hExt;
             if (hEff > 0) f = round2(lEff * hEff);
           }
         }
@@ -875,11 +928,45 @@ function createAbschnittRow(data, container, onChange) {
     abTotalLine.textContent = total > 0 ? 'Σ ' + fmtNum(total) + ' m²' : '';
   }
 
+  function makePlusBtn(cls, isActive, extraVal) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'plus2-btn ' + cls + (isActive ? ' active' : '');
+    btn.textContent = isActive ? '+m' : '+2m';
+
+    const extraInp = document.createElement('input');
+    extraInp.type = 'number';
+    extraInp.className = 'plus-extra-input';
+    extraInp.step = '0.5';
+    extraInp.min = '0';
+    extraInp.max = '9';
+    extraInp.inputMode = 'decimal';
+    extraInp.value = extraVal || 2;
+    extraInp.style.display = isActive ? '' : 'none';
+
+    btn.addEventListener('click', () => {
+      const nowActive = btn.classList.toggle('active');
+      btn.textContent = nowActive ? '+m' : '+2m';
+      extraInp.style.display = nowActive ? '' : 'none';
+      if (nowActive && !extraInp.value) extraInp.value = 2;
+      refreshAbschnittCalc();
+      onChange();
+    });
+    extraInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
+
+    return { btn, extraInp };
+  }
+
   function createMessungRow(mData) {
     const mRow = document.createElement('div');
     mRow.className = 'messung-row';
 
     const isGiebelNow = giebelBtn.classList.contains('active');
+
+    // L label + input
+    const lblL = document.createElement('span');
+    lblL.className = 'meas-field-lbl';
+    lblL.textContent = 'L';
 
     const laengeInp = document.createElement('input');
     laengeInp.type = 'number';
@@ -890,19 +977,18 @@ function createAbschnittRow(data, container, onChange) {
     laengeInp.placeholder = 'L';
     if (mData?.laenge != null && !isNaN(mData.laenge)) laengeInp.value = mData.laenge;
 
-    const laengePlus2 = document.createElement('button');
-    laengePlus2.type = 'button';
-    laengePlus2.className = 'plus2-btn messung-laenge-plus2' + (mData?.laengePlus2 ? ' active' : '');
-    laengePlus2.textContent = '+2m';
-    laengePlus2.addEventListener('click', () => {
-      laengePlus2.classList.toggle('active');
-      refreshAbschnittCalc();
-      onChange();
-    });
+    const { btn: laengePlus2, extraInp: laengeExtra } = makePlusBtn(
+      'messung-laenge-plus2', !!(mData?.laengePlus2), mData?.laengeExtra || 2
+    );
 
     const mulSign = document.createElement('span');
     mulSign.className = 'messung-mul';
     mulSign.textContent = '×';
+
+    // H label + input
+    const lblH = document.createElement('span');
+    lblH.className = 'meas-field-lbl';
+    lblH.textContent = 'H';
 
     const hoeheInp = document.createElement('input');
     hoeheInp.type = 'number';
@@ -910,23 +996,21 @@ function createAbschnittRow(data, container, onChange) {
     hoeheInp.step = '0.01';
     hoeheInp.min = '0';
     hoeheInp.inputMode = 'decimal';
-    hoeheInp.placeholder = isGiebelNow ? 'H1 (Rinne)' : 'H';
+    hoeheInp.placeholder = isGiebelNow ? 'H1' : 'H';
     if (mData?.hoehe != null && !isNaN(mData.hoehe)) hoeheInp.value = mData.hoehe;
 
-    const hoehePlus2 = document.createElement('button');
-    hoehePlus2.type = 'button';
-    hoehePlus2.className = 'plus2-btn messung-hoehe-plus2' + (mData?.hoehePlus2 ? ' active' : '');
-    hoehePlus2.textContent = '+2m';
-    hoehePlus2.addEventListener('click', () => {
-      hoehePlus2.classList.toggle('active');
-      refreshAbschnittCalc();
-      onChange();
-    });
+    const { btn: hoehePlus2, extraInp: hoeheExtra } = makePlusBtn(
+      'messung-hoehe-plus2', !!(mData?.hoehePlus2), mData?.hoeheExtra || 2
+    );
 
-    // Giebel-spezifisch: H2 (Spitze)
+    // Giebel: H2
     const giebelSep = document.createElement('span');
     giebelSep.className = 'giebel-sep giebel-part';
     giebelSep.textContent = '△';
+
+    const lblH2 = document.createElement('span');
+    lblH2.className = 'meas-field-lbl giebel-part';
+    lblH2.textContent = 'H';
 
     const hoehe2Inp = document.createElement('input');
     hoehe2Inp.type = 'number';
@@ -934,18 +1018,14 @@ function createAbschnittRow(data, container, onChange) {
     hoehe2Inp.step = '0.01';
     hoehe2Inp.min = '0';
     hoehe2Inp.inputMode = 'decimal';
-    hoehe2Inp.placeholder = 'H2 (Spitze)';
+    hoehe2Inp.placeholder = 'H2';
     if (mData?.hoehe2 != null && !isNaN(mData.hoehe2)) hoehe2Inp.value = mData.hoehe2;
 
-    const hoehe2Plus2 = document.createElement('button');
-    hoehe2Plus2.type = 'button';
+    const { btn: hoehe2Plus2, extraInp: hoehe2Extra } = makePlusBtn(
+      'messung-hoehe2-plus2 giebel-part', !!(mData?.hoehe2Plus2), mData?.hoehe2Extra || 2
+    );
     hoehe2Plus2.className = 'plus2-btn messung-hoehe2-plus2 giebel-part' + (mData?.hoehe2Plus2 ? ' active' : '');
-    hoehe2Plus2.textContent = '+2m';
-    hoehe2Plus2.addEventListener('click', () => {
-      hoehe2Plus2.classList.toggle('active');
-      refreshAbschnittCalc();
-      onChange();
-    });
+    hoehe2Extra.classList.add('giebel-part');
     hoehe2Inp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
 
     const calcSpan = document.createElement('span');
@@ -966,14 +1046,20 @@ function createAbschnittRow(data, container, onChange) {
     laengeInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
     hoeheInp.addEventListener('input',  () => { refreshAbschnittCalc(); onChange(); });
 
+    mRow.appendChild(lblL);
     mRow.appendChild(laengeInp);
     mRow.appendChild(laengePlus2);
+    mRow.appendChild(laengeExtra);
     mRow.appendChild(mulSign);
+    mRow.appendChild(lblH);
     mRow.appendChild(hoeheInp);
     mRow.appendChild(hoehePlus2);
+    mRow.appendChild(hoeheExtra);
     mRow.appendChild(giebelSep);
+    mRow.appendChild(lblH2);
     mRow.appendChild(hoehe2Inp);
     mRow.appendChild(hoehe2Plus2);
+    mRow.appendChild(hoehe2Extra);
     mRow.appendChild(calcSpan);
     mRow.appendChild(removeMBtn);
     return mRow;
@@ -1419,7 +1505,71 @@ function createAccessoriesSection(seiteData, card, onChange) {
   ttRow.appendChild(ttWrap);
   section.appendChild(ttRow);
 
-  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null, 'm²'));
+  // Netze (NE) — mit auto-Flächen-Sync
+  const neData = seiteData.netze || null;
+  const neRow  = document.createElement('div');
+  neRow.className = 'acc-single-row';
+
+  const neToggle = document.createElement('button');
+  neToggle.type = 'button';
+  neToggle.className = 'accessory-toggle' + (neData ? ' active' : '');
+  neToggle.dataset.acc = 'ne';
+  neToggle.textContent = 'Netze (NE)';
+
+  const neWrap = document.createElement('div');
+  neWrap.className = 'acc-inline-length';
+  neWrap.style.display = neData ? '' : 'none';
+
+  const neAutoBtn = document.createElement('button');
+  neAutoBtn.type = 'button';
+  neAutoBtn.className = 'accessory-l1-btn netze-auto-btn' + ((neData?.autoFlaeche !== false) ? ' active' : '');
+  neAutoBtn.dataset.active = (neData?.autoFlaeche !== false) ? '1' : '0';
+  neAutoBtn.textContent = '= F';
+  neAutoBtn.title = 'Gesamtfläche der Seite übernehmen';
+
+  const neInp = document.createElement('input');
+  neInp.type = 'number';
+  neInp.className = 'accessory-length-input';
+  neInp.dataset.acc = 'ne';
+  neInp.step = '0.01';
+  neInp.min = '0';
+  neInp.inputMode = 'decimal';
+  neInp.placeholder = '0,00';
+  if (neData && neData.laenge !== null && !isNaN(neData.laenge)) neInp.value = neData.laenge;
+
+  const neUnit = document.createElement('span');
+  neUnit.className = 'accessory-length-unit';
+  neUnit.textContent = 'm²';
+
+  neAutoBtn.addEventListener('click', () => {
+    const wasActive = neAutoBtn.dataset.active === '1';
+    neAutoBtn.dataset.active = wasActive ? '0' : '1';
+    neAutoBtn.classList.toggle('active', !wasActive);
+    if (!wasActive) {
+      const fl = computeCardFlaeche(card);
+      if (fl > 0) neInp.value = fl;
+    }
+    onChange();
+  });
+  neInp.addEventListener('input', () => { onChange(); });
+
+  neToggle.addEventListener('click', () => {
+    const wasActive = neToggle.classList.contains('active');
+    neToggle.classList.toggle('active', !wasActive);
+    neWrap.style.display = wasActive ? 'none' : '';
+    if (!wasActive && neAutoBtn.dataset.active === '1') {
+      const fl = computeCardFlaeche(card);
+      if (fl > 0) neInp.value = fl;
+    }
+    onChange();
+  });
+
+  neWrap.appendChild(neAutoBtn);
+  neWrap.appendChild(neInp);
+  neWrap.appendChild(neUnit);
+  neRow.appendChild(neToggle);
+  neRow.appendChild(neWrap);
+  section.appendChild(neRow);
 
   // L1-Sync
   section._syncL1 = function() {
@@ -1468,21 +1618,21 @@ function updateSummary() {
       const bez      = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
       let abFlaeche  = 0;
       abRow.querySelectorAll('.messung-row').forEach(mRow => {
-        const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-        const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-        let lEff  = (l || 0) + (lP2 ? 2 : 0);
+        const l    = parseNum(mRow.querySelector('.messung-laenge')?.value);
+        const lExt = getExtraVal(mRow, '.messung-laenge-plus2');
+        let lEff   = (l || 0) + lExt;
         if (ef) lEff = Math.max(lEff, 2.5);
         if (isNaN(l) || lEff <= 0) return;
         const bezPfx = bez ? bez + ': ' : '';
         const efStr  = ef && (l || 0) < 2.5 ? ' (EF)' : '';
         if (isGiebel) {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
-          const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          const h    = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const h2   = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+          const hExt = getExtraVal(mRow, '.messung-hoehe-plus2');
+          const h2Ext= getExtraVal(mRow, '.messung-hoehe2-plus2');
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            const h1Eff = (h  || 0) + hExt;
+            const h2Eff = (h2 || 0) + h2Ext;
             if (h2Eff >= h1Eff && h1Eff >= 0) {
               const pair = round2(lEff * (h1Eff + h2Eff) / 2);
               abFlaeche += pair;
@@ -1490,10 +1640,10 @@ function updateSummary() {
             }
           }
         } else {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          const h    = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+          const hExt = getExtraVal(mRow, '.messung-hoehe-plus2');
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            const hEff = (h || 0) + hExt;
             if (hEff > 0) {
               const pair = round2(lEff * hEff);
               abFlaeche += pair;
@@ -1747,14 +1897,17 @@ function generatePDF() {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
       (a.messungen || []).forEach(m => {
-        let lEff = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+        const lExt = m.laengePlus2 ? (m.laengeExtra || 2) : 0;
+        let lEff = (m.laenge || 0) + lExt;
         if (ef) lEff = Math.max(lEff, 2.5);
         if (lEff <= 0) return;
         const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
         const efStr  = ef ? ' (EF)' : '';
         if (isGiebel) {
-          const h1Eff = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
-          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+          const hExt  = m.hoehePlus2  ? (m.hoeheExtra  || 2) : 0;
+          const h2Ext = m.hoehe2Plus2 ? (m.hoehe2Extra || 2) : 0;
+          const h1Eff = (m.hoehe  || 0) + hExt;
+          const h2Eff = (m.hoehe2 || 0) + h2Ext;
           if (h2Eff < h1Eff || h1Eff < 0) return;
           const pair = round2(lEff * (h1Eff + h2Eff) / 2);
           seitenFlaeche += pair;
@@ -1764,7 +1917,8 @@ function generatePDF() {
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
-          const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+          const hExt = m.hoehePlus2 ? (m.hoeheExtra || 2) : 0;
+          const hEff = (m.hoehe || 0) + hExt;
           if (hEff <= 0) return;
           const pair = round2(lEff * hEff);
           seitenFlaeche += pair;
@@ -1860,6 +2014,22 @@ function generatePDF() {
     hline(0.3);
     secHead('Baustelle / Logistik');
     logParts.forEach(f => pdfRow(f, ''));
+  }
+
+  // ── Technische Daten (optional) ───────────────────────────────
+  const technik = collectTechnik();
+  const pttLK  = document.getElementById('pdfToggleLastklasse')?.dataset.active    === '1';
+  const pttBK  = document.getElementById('pdfToggleBreitenklasse')?.dataset.active === '1';
+  const pttVZ  = document.getElementById('pdfToggleVerwendungszweck')?.dataset.active === '1';
+  if (pttLK || pttBK || pttVZ) {
+    y += 1; hline(0.3); secHead('Technische Daten');
+    if (pttLK) pdfRow('Lastklasse',    technik.lastklasse    || '–');
+    if (pttBK) pdfRow('Breitenklasse', technik.breitenklasse || '–');
+    if (pttVZ) {
+      const vzStr = Array.isArray(technik.verwendungszweck)
+        ? technik.verwendungszweck.join(', ') : (technik.verwendungszweck || '–');
+      pdfRow('Verwendungszweck', vzStr || '–');
+    }
   }
 
   const proj = getCurrentProject();
@@ -1970,6 +2140,29 @@ function initApp() {
       btn.classList.add('active');
       document.getElementById('sonderNameRow').style.display =
         btn.dataset.type === 'sonder' ? '' : 'none';
+    });
+  });
+
+  // Bottom "+ Nächste Seite" button
+  document.getElementById('addSideBtnBottom').addEventListener('click', addSide);
+
+  // PDF-Technik-Toggles
+  ['pdfToggleLastklasse', 'pdfToggleBreitenklasse', 'pdfToggleVerwendungszweck'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const nowActive = btn.dataset.active !== '1';
+      btn.dataset.active = nowActive ? '1' : '0';
+      btn.classList.toggle('active', nowActive);
+    });
+  });
+
+  // Verwendungszweck multi-select toggles
+  document.querySelectorAll('.verwendungszweck-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nowActive = btn.dataset.active !== '1';
+      btn.dataset.active = nowActive ? '1' : '0';
+      btn.classList.toggle('active', nowActive);
     });
   });
 

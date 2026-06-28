@@ -104,16 +104,15 @@
           </div>
         </div>
         <div class="form-row">
-          <div class="form-group">
+          <div class="form-group" style="flex:2">
             <label class="form-label">Verwendungszweck</label>
-            <select class="form-input" id="fieldVerwendungszweck">
-              <option value="">– wählen –</option>
-              <option value="Maler">Maler</option>
-              <option value="Putz">Putz</option>
-              <option value="Klempner">Klempner</option>
-              <option value="Dach">Dach</option>
-              <option value="WDVS">WDVS</option>
-            </select>
+            <div class="verwendungszweck-toggles" id="verwendungszweckToggles">
+              <button type="button" class="verwendungszweck-btn" data-vz="Maler" data-active="0">Maler</button>
+              <button type="button" class="verwendungszweck-btn" data-vz="Putz" data-active="0">Putz</button>
+              <button type="button" class="verwendungszweck-btn" data-vz="Klempner" data-active="0">Klempner</button>
+              <button type="button" class="verwendungszweck-btn" data-vz="Dach" data-active="0">Dach</button>
+              <button type="button" class="verwendungszweck-btn" data-vz="WDVS" data-active="0">WDVS</button>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Verankerungsgrund</label>
@@ -174,6 +173,9 @@
           <button id="addSideBtn" class="btn btn-primary btn-sm">+ Seite</button>
         </div>
         <div id="seitenContainer"></div>
+        <div id="addSideBottomWrap" style="display:none; text-align:right; margin-top:8px;">
+          <button id="addSideBtnBottom" class="btn btn-primary btn-sm">+ Nächste Seite</button>
+        </div>
         <div id="noSidesHint" class="no-sides-hint">
           Noch keine Seiten erfasst. Tippen Sie auf &bdquo;+ Seite&ldquo;.
         </div>
@@ -204,6 +206,12 @@
         <div class="action-buttons">
           <button id="saveProjectBtn" class="btn btn-primary btn-full">Speichern</button>
           <button id="exportPdfBtn" class="btn btn-secondary btn-full">PDF erstellen</button>
+        </div>
+        <div class="pdf-technik-toggles">
+          <span class="pdf-technik-label">Technik in PDF:</span>
+          <button type="button" class="pdf-technik-btn" id="pdfToggleLastklasse" data-active="0">Lastklasse</button>
+          <button type="button" class="pdf-technik-btn" id="pdfToggleBreitenklasse" data-active="0">Breitenklasse</button>
+          <button type="button" class="pdf-technik-btn" id="pdfToggleVerwendungszweck" data-active="0">Verwendungszweck</button>
         </div>
         <div class="action-buttons-secondary">
           <button id="exportJsonBtn" class="btn btn-ghost btn-sm">JSON exportieren</button>

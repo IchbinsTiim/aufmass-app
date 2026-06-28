@@ -1637,3 +1637,107 @@ html, body {
     min-height: 44px;
   }
 }
+
+/* ============================================================
+   Feature: Verwendungszweck Multi-Toggle
+   ============================================================ */
+.verwendungszweck-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.verwendungszweck-btn {
+  padding: 8px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  min-height: 38px;
+}
+
+.verwendungszweck-btn.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+
+/* ============================================================
+   Feature: H/L Labels
+   ============================================================ */
+.meas-field-lbl {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  align-self: center;
+  padding: 0 1px;
+  user-select: none;
+  min-width: 10px;
+  text-align: center;
+}
+
+/* ============================================================
+   Feature: Custom +m extra input
+   ============================================================ */
+.plus-extra-input {
+  width: 38px;
+  padding: 8px 4px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: #eff6ff;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.plus-extra-input::-webkit-outer-spin-button,
+.plus-extra-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+/* ============================================================
+   Feature: PDF-Technik-Toggles
+   ============================================================ */
+.pdf-technik-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.pdf-technik-label {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.pdf-technik-btn {
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border);
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.pdf-technik-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
