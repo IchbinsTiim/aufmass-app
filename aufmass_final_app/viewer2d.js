@@ -35,11 +35,12 @@ let state = {
   // section: { id, name, dir, bays:[{id,len}], x0, y0 }
 };
 
-let drag        = null;
-let rafPending  = false;
-let addCtx      = null;   // null = FAB,  { x, y } = from junction
-let pendingDir  = 'S';
-let pendingLen  = null;
+let drag           = null;
+let rafPending     = false;
+let addCtx         = null;   // null = FAB,  { x, y } = from junction
+let pendingDir     = 'S';
+let pendingLen     = null;
+let addCtxDirFixed = false;  // true when direction already chosen via directional button
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -318,34 +319,49 @@ function renderSvg() {
     }
   });
 
-  // 6. Junction "+" buttons (green circles at every section endpoint)
-  const ADD_R = Math.round(HANDLE_R * 1.4);
-  els.filter(e => e.type === 'junctionBtn').forEach(el => {
-    const hit = svgEl('circle', {
-      cx: el.x, cy: el.y, r: ADD_R * 3.0, fill: 'transparent', style: 'cursor:pointer',
-      'data-jx': el.x.toFixed(1), 'data-jy': el.y.toFixed(1)
-    });
-    hit.addEventListener('click', ev => {
-      ev.stopPropagation();
-      addCtx = { x: el.x, y: el.y };
-      openAddSheet();
-    });
-    g.appendChild(hit);
+  // 6. Junction "+" buttons — 4 directional handles per junction point
+  const ADD_R = Math.round(HANDLE_R * 1.2);   // circle radius
+  const JOFF  = Math.round(HANDLE_R * 3.0);   // offset from junction centre
 
+  els.filter(e => e.type === 'junctionBtn').forEach(el => {
+    // Small dot at the junction itself
     g.appendChild(svgEl('circle', {
-      cx: el.x, cy: el.y, r: ADD_R,
-      fill: '#34c759', stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+      cx: el.x, cy: el.y, r: 5,
+      fill: '#34c759', stroke: '#fff', 'stroke-width': 1.5, 'pointer-events': 'none'
     }));
 
-    const plus = svgEl('text', {
-      x: el.x, y: el.y,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': Math.round(ADD_R * 1.25),
-      'font-family': 'system-ui, sans-serif',
-      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+    // One "+" button for each cardinal direction
+    Object.entries(DIR_META).forEach(([dKey, d]) => {
+      const bx = el.x + d.dx * JOFF;
+      const by = el.y + d.dy * JOFF;
+
+      const hit = svgEl('circle', {
+        cx: bx, cy: by, r: ADD_R * 2.5, fill: 'transparent', style: 'cursor:pointer'
+      });
+      hit.addEventListener('click', ev => {
+        ev.stopPropagation();
+        addCtx         = { x: el.x, y: el.y };
+        pendingDir     = dKey;
+        addCtxDirFixed = true;
+        openAddSheet();
+      });
+      g.appendChild(hit);
+
+      g.appendChild(svgEl('circle', {
+        cx: bx, cy: by, r: ADD_R,
+        fill: '#34c759', stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+      }));
+
+      const plus = svgEl('text', {
+        x: bx, y: by,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': Math.round(ADD_R * 1.2),
+        'font-family': 'system-ui, sans-serif',
+        fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+      });
+      plus.textContent = '+';
+      g.appendChild(plus);
     });
-    plus.textContent = '+';
-    g.appendChild(plus);
   });
 
   // 7. Scale bar
@@ -421,14 +437,16 @@ function openAddSheet() {
   sheet.addEventListener('click', e => e.stopPropagation());
 
   sheet.innerHTML = `
-    <div class="sheet-header">Feld hinzufügen</div>
+    <div class="sheet-header">Feld hinzufügen${addCtxDirFixed ? ' &ndash; ' + DIR_META[pendingDir].label : ''}</div>
 
+    ${!addCtxDirFixed ? `
     <div class="sheet-section-label">Richtung</div>
     <div class="sheet-dir-row" id="sheetDirRow">
       ${Object.entries(DIR_META).map(([d, m]) =>
         `<button class="dir-big-btn${pendingDir === d ? ' active' : ''}" data-dir="${d}">${m.label}</button>`
       ).join('')}
     </div>
+    ` : ''}
 
     <div class="sheet-section-label">Feldlänge</div>
     <div class="sheet-std-btns" id="sheetSizeBtns">
@@ -660,6 +678,7 @@ function openEditSheet(si, bi) {
 }
 
 function closeSheet() {
+  addCtxDirFixed = false;
   document.getElementById('sheetOverlay')?.remove();
   const s = document.getElementById('bottomSheet');
   if (!s) return;
