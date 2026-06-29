@@ -15,6 +15,8 @@ const ZUSATZ_ARTEN = [
   'Bautenschutzmatte','Fleece'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
+// Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
+const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²' };
 
 // ============================================================
 //  localStorage
@@ -1107,6 +1109,12 @@ function createZusatzRow(data) {
     einheitSel.appendChild(o);
   });
   einheitSel.value = data?.einheit || 'm';
+
+  // Beim Wählen einer flächenbasierten Art automatisch die passende Einheit setzen
+  artSel.addEventListener('change', () => {
+    const pref = PREFERRED_EINHEIT[artSel.value];
+    if (pref) einheitSel.value = pref;
+  });
 
   // Menge
   const mengeInp = document.createElement('input');
