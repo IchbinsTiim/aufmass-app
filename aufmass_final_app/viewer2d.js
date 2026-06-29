@@ -43,6 +43,7 @@ let pendingLen     = null;
 let addCtxDirFixed = false;  // true when direction already chosen via directional button
 let selectedSi     = null;   // index of currently selected section (shows + buttons)
 let snapEnabled    = true;   // magnetic grid snapping on/off
+let pdfMode        = false;  // when true: render clean plan (no handles)
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -261,7 +262,7 @@ function renderSvg() {
     if (el.x !== undefined)         track(el.x, el.y !== undefined ? el.y : 0);
   });
 
-  const PAD = depth * 3.5 + HANDLE_R * 5;
+  const PAD = pdfMode ? depth * 1.8 + 20 : depth * 3.5 + HANDLE_R * 5;
   minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
   const vw = maxX - minX, vh = maxY - minY;
   svg.setAttribute('viewBox', `${minX.toFixed(1)} ${minY.toFixed(1)} ${vw.toFixed(1)} ${vh.toFixed(1)}`);
@@ -331,6 +332,8 @@ function renderSvg() {
     txt.textContent = el.text;
     g.appendChild(txt);
   });
+
+  if (pdfMode) { drawScaleBar(g, minX, minY, vw, vh, infoFontSize); return; }
 
   // 5. Drag handles (blue ↕/↔)
   els.filter(e => e.type === 'handle').forEach(el => {
@@ -929,7 +932,7 @@ function renderAll() { renderSections(); renderSvg(); }
 // ── Preset layouts ─────────────────────────────────────────────────────────
 
 function applyLShape() {
-  _sId = 0; _bId = 0;
+  selectedSi = null; _sId = 0; _bId = 0;
   const s1 = mkSection('S', 0, 0); s1.name = 'Ostseite';
   s1.bays = [mkBay(2.57), mkBay(2.57), mkBay(2.57), mkBay(2.57), mkBay(3.07)];
   const e1 = sectionEnd(s1);
@@ -939,7 +942,7 @@ function applyLShape() {
 }
 
 function applyUShape() {
-  _sId = 0; _bId = 0;
+  selectedSi = null; _sId = 0; _bId = 0;
   const s1 = mkSection('S', 0, 0); s1.name = 'Ostseite';
   s1.bays = [mkBay(2.57), mkBay(2.57), mkBay(3.07)];
   const e1 = sectionEnd(s1);
@@ -952,7 +955,7 @@ function applyUShape() {
 }
 
 function applyRect() {
-  _sId = 0; _bId = 0;
+  selectedSi = null; _sId = 0; _bId = 0;
   const dirs  = ['S', 'W', 'N', 'E'];
   const names = ['Straßenseite', 'Rechte Seite', 'Rückseite', 'Linke Seite'];
   let ex = 0, ey = 0;
@@ -1013,6 +1016,12 @@ function onLoadFile(e) {
 // ── PDF Export ─────────────────────────────────────────────────────────────
 
 async function exportPdf() {
+  // Render a clean version (no handles, no + buttons, tighter padding)
+  const prevSelected = selectedSi;
+  selectedSi = null;
+  pdfMode    = true;
+  renderSvg();
+
   const { jsPDF } = window.jspdf;
   const svg = document.getElementById('planSvg');
   const vb  = svg.viewBox.baseVal;
@@ -1059,6 +1068,11 @@ async function exportPdf() {
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
   doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
   doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
+
+  // Restore interactive render
+  pdfMode    = false;
+  selectedSi = prevSelected;
+  renderSvg();
 }
 
 // ── Device mode ────────────────────────────────────────────────────────────
@@ -1149,9 +1163,9 @@ function init() {
   svg.addEventListener('pointerup',     onSvgPointerUp);
   svg.addEventListener('pointercancel', onSvgPointerUp);
   // Tap empty canvas → deselect section (hides + buttons)
-  svg.addEventListener('click', () => {
-    if (selectedSi !== null) { selectedSi = null; renderSvg(); }
-  });
+  const deselect = () => { if (selectedSi !== null) { selectedSi = null; renderSvg(); } };
+  svg.addEventListener('click',       deselect);
+  svg.addEventListener('pointerdown', e => { if (e.target === svg || e.target.id === 'gridBg') deselect(); });
 
   // Device mode: restore saved preference or show picker
   const savedMode = getMode();
