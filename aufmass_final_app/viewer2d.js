@@ -675,6 +675,24 @@ function openEditSheet(si, bi) {
   hdr.className = 'sheet-header';
   hdr.textContent = `Feld ${bi + 1} – ${sec.name}`;
 
+  // Direction row (always shown – essential on iPhone where side panel is hidden)
+  const dirRow = document.createElement('div');
+  dirRow.className = 'sheet-dir-row';
+  Object.entries(DIR_META).forEach(([dk, dm]) => {
+    const btn = document.createElement('button');
+    btn.className = 'dir-big-btn' + (sec.dir === dk ? ' active' : '');
+    btn.dataset.dir = dk;
+    btn.textContent = dm.label;
+    btn.addEventListener('click', () => {
+      sec.dir = dk;
+      dirRow.querySelectorAll('.dir-big-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.dir === dk)
+      );
+      renderSvg();
+    });
+    dirRow.appendChild(btn);
+  });
+
   // Standard size buttons
   const stdDiv = document.createElement('div');
   stdDiv.className = 'sheet-std-btns';
@@ -733,9 +751,19 @@ function openEditSheet(si, bi) {
   okBtn.className = 'sheet-ok'; okBtn.textContent = 'Fertig';
   okBtn.addEventListener('click', () => { renderAll(); closeSheet(); });
 
-  actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
+  const delSecBtn = document.createElement('button');
+  delSecBtn.className = 'sheet-del';
+  delSecBtn.style.cssText = 'font-size:0.78rem;padding:0.9rem 0.55rem;flex:0 0 auto;';
+  delSecBtn.textContent = '🗑 Sektion';
+  delSecBtn.addEventListener('click', () => {
+    state.sections.splice(si, 1);
+    renderAll(); closeSheet();
+  });
+
+  actRow.appendChild(delSecBtn); actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
 
   sheet.appendChild(hdr);
+  sheet.appendChild(dirRow);
   sheet.appendChild(stdDiv);
   sheet.appendChild(adjRow);
   sheet.appendChild(actRow);
@@ -984,6 +1012,49 @@ async function exportPdf() {
   doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
 }
 
+// ── Device mode ────────────────────────────────────────────────────────────
+
+function getMode() { return localStorage.getItem('av_deviceMode'); }
+
+function applyMode(m) {
+  document.body.dataset.mode = m;
+  localStorage.setItem('av_deviceMode', m);
+  const btn = document.getElementById('deviceToggleBtn');
+  if (btn) btn.textContent = m === 'iphone' ? '📱' : '⬜';
+}
+
+function showDevicePicker(onPicked) {
+  const ov = document.createElement('div');
+  ov.id = 'deviceOverlay';
+  ov.innerHTML = `
+    <div class="device-picker">
+      <div class="device-picker-title">Gerät wählen</div>
+      <div class="device-picker-sub">Wie verwenden Sie diese App?</div>
+      <div class="device-picker-btns">
+        <button class="dev-btn" data-m="ipad">
+          <span class="dv-icon">⬜</span>
+          <span class="dv-label">iPad</span>
+          <span class="dv-desc">Mit Seitenleiste</span>
+        </button>
+        <button class="dev-btn" data-m="iphone">
+          <span class="dv-icon">📱</span>
+          <span class="dv-label">iPhone</span>
+          <span class="dv-desc">Vollbild-Plan</span>
+        </button>
+      </div>
+      <div class="device-picker-note">Einstellung wird gespeichert – jederzeit per 📱 ändern</div>
+    </div>
+  `;
+  ov.querySelectorAll('.dev-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      applyMode(btn.dataset.m);
+      ov.remove();
+      if (onPicked) onPicked();
+    });
+  });
+  document.body.appendChild(ov);
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 
 function init() {
@@ -1013,12 +1084,25 @@ function init() {
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
   document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
 
+  document.getElementById('deviceToggleBtn').addEventListener('click', () => {
+    showDevicePicker(() => renderAll());
+  });
+
   const svg = document.getElementById('planSvg');
   svg.addEventListener('pointermove',   onSvgPointerMove);
   svg.addEventListener('pointerup',     onSvgPointerUp);
   svg.addEventListener('pointercancel', onSvgPointerUp);
 
-  // Start empty
+  // Device mode: restore saved preference or show picker
+  const savedMode = getMode();
+  if (savedMode) {
+    applyMode(savedMode);
+  } else {
+    const guess = window.innerWidth <= 430 ? 'iphone' : 'ipad';
+    applyMode(guess);
+    showDevicePicker(() => renderAll());
+  }
+
   renderAll();
 }
 
