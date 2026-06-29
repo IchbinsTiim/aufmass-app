@@ -48,7 +48,8 @@ let pdfMode        = false;  // when true: render clean plan (no handles)
 // ── Factories ──────────────────────────────────────────────────────────────
 
 function mkBay(len = 2.57) {
-  return { id: ++_bId, len: +parseFloat(len).toFixed(2) };
+  // hL / hR = Höhe am linken / rechten Stiel (null = noch nicht erfasst)
+  return { id: ++_bId, len: +parseFloat(len).toFixed(2), hL: null, hR: null };
 }
 
 function mkSection(dir = 'S', x0 = 0, y0 = 0) {
@@ -69,38 +70,140 @@ function snapLen(len) {
   return Math.max(0.25, +g.toFixed(2));
 }
 
-/** Snap a section-start position to grid + existing junction endpoints. */
-function snapMovePos(rawX, rawY, si) {
-  if (!snapEnabled) return { x: rawX, y: rawY };
+/* ──────────────────────────────────────────────────────────────────────────
+   SNAP-ENGINE  –  präzises, CAD-artiges Andocken
+   ──────────────────────────────────────────────────────────────────────────
+   Prinzip:
+   • Jedes Feld ist ein achsparalleles Rechteck mit 4 Eckpunkten.
+   • Beim Verschieben einer Sektion werden ALLE 4 Ecken jedes ihrer Felder
+     gegen ALLE Ecken aller anderen Felder geprüft.
+   • Das nächstgelegene (Quell-Ecke → Ziel-Ecke)-Paar innerhalb des
+     Magnetradius bestimmt die Andockposition – pixelgenau.
+   • Kandidaten, die eine Überlappung erzeugen würden, werden übersprungen.
+   • Während des Ziehens wird die Andockposition als Vorschau angezeigt;
+     erst beim Loslassen rastet das Feld endgültig ein.
+   ────────────────────────────────────────────────────────────────────────── */
 
-  const snapPx = SNAP_STEP * PX_PER_M;
-  let sx = Math.round(rawX / snapPx) * snapPx;
-  let sy = Math.round(rawY / snapPx) * snapPx;
+// Magnetstärke: Andockradius in BILDSCHIRM-Pixeln (zoom-unabhängig, iPad-tauglich).
+const SNAP_SCREEN_PX = 24;
 
-  const sec = state.sections[si];
-  const dir = DIR_META[sec.dir];
-  const totalPx = sec.bays.reduce((a, b) => a + b.len, 0) * PX_PER_M;
-  const endDx = dir.dx * totalPx;
-  const endDy = dir.dy * totalPx;
+// Aktive Andock-Vorschau während des Verschiebens (null = keine).
+//   { polys:[[p,p,p,p],…], anchor:{x,y} }
+let movePreview = null;
 
-  const MAGNET = 28; // px — snap radius for junction magnets
-  let best = MAGNET * MAGNET;
+/** Bildschirm→Welt-Skala (Welt-px je Bildschirm-px) für zoom-stabile Magnetstärke. */
+function worldPerScreenPx() {
+  const svg  = document.getElementById('planSvg');
+  const rect = svg.getBoundingClientRect();
+  const vb   = svg.viewBox.baseVal;
+  if (!rect.width || !vb.width) return 1;
+  return vb.width / rect.width;
+}
 
-  state.sections.forEach((s, i) => {
-    if (i === si) return;
-    const e = sectionEnd(s);
-    [{ x: s.x0, y: s.y0 }, { x: e.x, y: e.y }].forEach(pt => {
-      // Snap section start to this point
-      let d2 = (rawX - pt.x) ** 2 + (rawY - pt.y) ** 2;
-      if (d2 < best) { best = d2; sx = pt.x; sy = pt.y; }
-      // Snap section END to this point (back-compute start)
-      const bx = pt.x - endDx, by = pt.y - endDy;
-      d2 = (rawX - bx) ** 2 + (rawY - by) ** 2;
-      if (d2 < best) { best = d2; sx = bx; sy = by; }
-    });
+/** Die vier Eck-Polygone aller Felder einer Sektion an Position (x0,y0). */
+function sectionBayPolys(sec, x0, y0) {
+  const dir   = DIR_META[sec.dir];
+  const out   = outVec(dir);
+  const depth = state.depth * PX_PER_M;
+  let x = x0, y = y0;
+  const polys = [];
+  sec.bays.forEach(b => {
+    const pxLen = b.len * PX_PER_M;
+    const p0 = { x, y };
+    const p1 = { x: x + dir.dx * pxLen, y: y + dir.dy * pxLen };
+    const p2 = { x: p1.x + out.dx * depth, y: p1.y + out.dy * depth };
+    const p3 = { x: p0.x + out.dx * depth, y: p0.y + out.dy * depth };
+    polys.push([p0, p1, p2, p3]);
+    x = p1.x; y = p1.y;
   });
+  return polys;
+}
 
-  return { x: sx, y: sy };
+/** Alle vier Eckpunkte jedes Feldes – als Offsets relativ zu (x0,y0). */
+function sectionLocalAnchors(sec) {
+  const seen = new Set(), anchors = [];
+  sectionBayPolys(sec, 0, 0).forEach(poly => poly.forEach(p => {
+    const k = `${Math.round(p.x)},${Math.round(p.y)}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    anchors.push({ dx: p.x, dy: p.y });
+  }));
+  return anchors;
+}
+
+/** Alle gültigen Andock-Zielpunkte: Eckpunkte aller ANDEREN Sektionen. */
+function collectTargetAnchors(excludeSi) {
+  const seen = new Set(), anchors = [];
+  state.sections.forEach((s, i) => {
+    if (i === excludeSi || s.bays.length === 0) return;
+    sectionBayPolys(s, s.x0, s.y0).forEach(poly => poly.forEach(p => {
+      const k = `${Math.round(p.x)},${Math.round(p.y)}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      anchors.push({ x: p.x, y: p.y });
+    }));
+  });
+  return anchors;
+}
+
+/** Überlappen zwei achsparallele Feld-Rechtecke mit positiver Fläche?
+    Gemeinsame Kanten/Ecken (Fläche 0) gelten NICHT als Überlappung. */
+function polysOverlap(a, b, eps = 1.0) {
+  const ax0 = Math.min(a[0].x, a[1].x, a[2].x, a[3].x);
+  const ax1 = Math.max(a[0].x, a[1].x, a[2].x, a[3].x);
+  const ay0 = Math.min(a[0].y, a[1].y, a[2].y, a[3].y);
+  const ay1 = Math.max(a[0].y, a[1].y, a[2].y, a[3].y);
+  const bx0 = Math.min(b[0].x, b[1].x, b[2].x, b[3].x);
+  const bx1 = Math.max(b[0].x, b[1].x, b[2].x, b[3].x);
+  const by0 = Math.min(b[0].y, b[1].y, b[2].y, b[3].y);
+  const by1 = Math.max(b[0].y, b[1].y, b[2].y, b[3].y);
+  return ax0 < bx1 - eps && bx0 < ax1 - eps &&
+         ay0 < by1 - eps && by0 < ay1 - eps;
+}
+
+/** Würde die Sektion an (x0,y0) irgendein fremdes Feld überlappen? */
+function sectionOverlaps(sec, x0, y0, excludeSi) {
+  const mine = sectionBayPolys(sec, x0, y0);
+  for (let i = 0; i < state.sections.length; i++) {
+    if (i === excludeSi || state.sections[i].bays.length === 0) continue;
+    const other = sectionBayPolys(state.sections[i], state.sections[i].x0, state.sections[i].y0);
+    for (const m of mine) for (const o of other) if (polysOverlap(m, o)) return true;
+  }
+  return false;
+}
+
+/**
+ * Beste gültige Andockposition für die gezogene Sektion.
+ * Prüft alle (Quell-Ecke → Ziel-Ecke)-Paare, sortiert nach Nähe und nimmt
+ * das erste Paar, das KEINE Überlappung erzeugt → eindeutiges, pixelgenaues
+ * Einrasten an genau einer gültigen Position.
+ * @returns {{x0:number, y0:number, anchor:{x,y}}} | null
+ */
+function findSnap(sec, rawX, rawY, excludeSi, threshold) {
+  const locals  = drag.localAnchors  || sectionLocalAnchors(sec);
+  const targets = drag.targetAnchors || collectTargetAnchors(excludeSi);
+  const thr2 = threshold * threshold;
+
+  const cands = [];
+  for (const la of locals) {
+    for (const ta of targets) {
+      const d2 = (rawX + la.dx - ta.x) ** 2 + (rawY + la.dy - ta.y) ** 2;
+      if (d2 <= thr2) cands.push({ d2, x0: ta.x - la.dx, y0: ta.y - la.dy, anchor: ta });
+    }
+  }
+  cands.sort((p, q) => p.d2 - q.d2);
+  for (const c of cands) {
+    if (!sectionOverlaps(sec, c.x0, c.y0, excludeSi)) {
+      return { x0: c.x0, y0: c.y0, anchor: c.anchor };
+    }
+  }
+  return null;
+}
+
+/** Rohposition aufs 0,25-m-Grundraster runden (sanfte Ausrichtung). */
+function gridSnapPos(x, y) {
+  const g = SNAP_STEP * PX_PER_M;
+  return { x: Math.round(x / g) * g, y: Math.round(y / g) * g };
 }
 
 function screenToSvg(clientX, clientY) {
@@ -180,16 +283,6 @@ function computeLayout() {
         x: (startX + x) / 2,
         y: (startY + y) / 2,
         si
-      });
-
-      const totalLen = sec.bays.reduce((s, b) => s + b.len, 0);
-      const offScale = depth + 14;
-      els.push({
-        type: 'sectionLabel',
-        x: (startX + x) / 2 + out.dx * offScale,
-        y: (startY + y) / 2 + out.dy * offScale,
-        text: `${sec.name}: ${totalLen.toFixed(2)} m`,
-        rotate: isVert ? -90 : 0
       });
     }
   });
@@ -310,28 +403,37 @@ function renderSvg() {
     });
     txt.textContent = el.len.toFixed(2);
     g.appendChild(txt);
+
+    // Höhen links/rechts (nur wenn erfasst) – am jeweiligen Feldrand, Außenseite
+    const bayData = state.sections[el.si].bays[el.bi];
+    const [p0, p1, p2, p3] = el.pts;
+    // Bilineare Position: f = Anteil entlang Lauf, g = Anteil quer (0=innen, 1=außen)
+    const bilerp = (f, g) => ({
+      x: p0.x * (1 - f) * (1 - g) + p1.x * f * (1 - g) + p2.x * f * g + p3.x * (1 - f) * g,
+      y: p0.y * (1 - f) * (1 - g) + p1.y * f * (1 - g) + p2.y * f * g + p3.y * (1 - f) * g
+    });
+    const hFont = Math.max(depth * 0.26, 7);
+    [[bayData.hL, bilerp(0.16, 0.74)], [bayData.hR, bilerp(0.84, 0.74)]].forEach(([h, pos]) => {
+      if (h == null) return;
+      const ht = svgEl('text', {
+        x: pos.x, y: pos.y,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': hFont, 'font-family': 'system-ui, sans-serif',
+        fill: '#1f7a3d', 'font-weight': '700', 'pointer-events': 'none',
+        transform: el.isVert ? `rotate(-90,${pos.x},${pos.y})` : ''
+      });
+      ht.textContent = '↥ ' + h.toFixed(2);
+      g.appendChild(ht);
+    });
   });
 
-  // 3. Wall lines
+  // 3. Wall lines (schlanke Wandkante – zeigt die Gebäudeseite an)
   els.filter(e => e.type === 'wallLine').forEach(el =>
     g.appendChild(svgEl('line', {
       x1: el.x1, y1: el.y1, x2: el.x2, y2: el.y2,
-      stroke: '#111', 'stroke-width': 3.5, 'stroke-linecap': 'square'
+      stroke: '#5a6b7a', 'stroke-width': 1.5, 'stroke-linecap': 'round'
     }))
   );
-
-  // 4. Section labels
-  els.filter(e => e.type === 'sectionLabel').forEach(el => {
-    const txt = svgEl('text', {
-      x: el.x, y: el.y,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': infoFontSize, 'font-family': 'system-ui, sans-serif',
-      fill: '#444', 'pointer-events': 'none',
-      transform: el.rotate ? `rotate(${el.rotate},${el.x},${el.y})` : ''
-    });
-    txt.textContent = el.text;
-    g.appendChild(txt);
-  });
 
   // 5b. Move handles (orange ✥) — always visible, even in PDF mode use pdfMode to skip
   if (!pdfMode) {
@@ -404,13 +506,14 @@ function renderSvg() {
     }
   });
 
-  // 6. Junction "+" buttons — only for the currently selected section
+  // 6. Junction "+" buttons — only for the selected section, hidden while moving
   const ADD_R = Math.round(HANDLE_R * 1.2);
   const JOFF  = Math.round(HANDLE_R * 3.0);
+  const movingNow = drag && drag.type === 'move';
 
   // Deduplicate by position so shared junctions don't render twice
   const shownJunctions = new Set();
-  els.filter(e => e.type === 'junctionBtn' && e.si === selectedSi).forEach(el => {
+  els.filter(e => e.type === 'junctionBtn' && e.si === selectedSi && !movingNow).forEach(el => {
     const k = jKey(el.x, el.y);
     if (shownJunctions.has(k)) return;
     shownJunctions.add(k);
@@ -454,8 +557,37 @@ function renderSvg() {
     });
   });
 
-  // 7. Scale bar
+  // 7. Andock-Vorschau (während des Verschiebens)
+  drawMovePreview(g);
+
+  // 8. Scale bar
   drawScaleBar(g, minX, minY, vw, vh, infoFontSize);
+}
+
+/** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
+function drawMovePreview(g) {
+  if (!movePreview) return;
+
+  movePreview.polys.forEach(poly => {
+    g.appendChild(svgEl('polygon', {
+      points: ptsStr(poly),
+      fill: 'rgba(52,199,89,0.16)',
+      stroke: '#28a745', 'stroke-width': 3,
+      'stroke-dasharray': '9 6', 'stroke-linejoin': 'round',
+      'pointer-events': 'none'
+    }));
+  });
+
+  const a = movePreview.anchor;
+  g.appendChild(svgEl('circle', {
+    cx: a.x, cy: a.y, r: 14,
+    fill: 'rgba(40,167,69,0.20)', stroke: '#28a745', 'stroke-width': 3,
+    'pointer-events': 'none'
+  }));
+  g.appendChild(svgEl('circle', {
+    cx: a.x, cy: a.y, r: 5, fill: '#28a745',
+    stroke: '#fff', 'stroke-width': 1.5, 'pointer-events': 'none'
+  }));
 }
 
 function drawScaleBar(g, minX, minY, vw, vh, fontSize) {
@@ -497,13 +629,19 @@ function onMoveHandleDown(e) {
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
   selectedSi = si;
+  const sec = state.sections[si];
   drag = {
     type: 'move', si,
-    startX0: state.sections[si].x0,
-    startY0: state.sections[si].y0,
+    startX0: sec.x0,
+    startY0: sec.y0,
     startPt: screenToSvg(e.clientX, e.clientY),
-    moved:   false
+    moved:   false,
+    snap:    null,
+    // Andockpunkte einmalig vorberechnen → flüssig & ohne Verzögerung beim Ziehen
+    localAnchors:  sectionLocalAnchors(sec),
+    targetAnchors: collectTargetAnchors(si)
   };
+  movePreview = null;
 }
 
 function onSvgPointerMove(e) {
@@ -514,9 +652,27 @@ function onSvgPointerMove(e) {
     const dx = pt.x - drag.startPt.x;
     const dy = pt.y - drag.startPt.y;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
-    const snapped = snapMovePos(drag.startX0 + dx, drag.startY0 + dy, drag.si);
-    state.sections[drag.si].x0 = snapped.x;
-    state.sections[drag.si].y0 = snapped.y;
+
+    const sec = state.sections[drag.si];
+    let rawX = drag.startX0 + dx, rawY = drag.startY0 + dy;
+
+    if (snapEnabled) {
+      // sanftes Grundraster, dann nächstgelegene gültige Andockstelle suchen
+      const g = gridSnapPos(rawX, rawY);
+      rawX = g.x; rawY = g.y;
+      const threshold = SNAP_SCREEN_PX * worldPerScreenPx();
+      drag.snap = findSnap(sec, rawX, rawY, drag.si, threshold);
+      movePreview = drag.snap
+        ? { polys: sectionBayPolys(sec, drag.snap.x0, drag.snap.y0), anchor: drag.snap.anchor }
+        : null;
+    } else {
+      drag.snap = null;
+      movePreview = null;
+    }
+
+    // Feld folgt frei dem Finger; das endgültige Einrasten passiert erst beim Loslassen.
+    sec.x0 = rawX; sec.y0 = rawY;
+
     if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
     return;
   }
@@ -535,7 +691,18 @@ function onSvgPointerUp(e) {
   if (!drag) return;
   const d = drag; drag = null;
   if (d.type === 'move') {
-    if (d.moved) renderAll();
+    const sec = state.sections[d.si];
+    if (d.moved) {
+      if (d.snap) {
+        // pixelgenau an der hervorgehobenen Andockstelle einrasten
+        sec.x0 = d.snap.x0; sec.y0 = d.snap.y0;
+      } else if (sectionOverlaps(sec, sec.x0, sec.y0, d.si)) {
+        // freie Platzierung würde überlappen → zurück an die Ausgangsposition
+        sec.x0 = d.startX0; sec.y0 = d.startY0;
+      }
+    }
+    movePreview = null;
+    renderAll();
     return;
   }
   if (!d.moved) openEditSheet(d.si, d.bi);
@@ -782,6 +949,57 @@ function openEditSheet(si, bi) {
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
 
+  // ── Höhen (links / rechts) ──────────────────────────────────────────────
+  const hLabel = document.createElement('div');
+  hLabel.className = 'sheet-section-label';
+  hLabel.textContent = 'Höhen (m)';
+
+  const hRow = document.createElement('div');
+  hRow.className = 'sheet-height-row';
+
+  const makeHeightField = (labelTxt, key) => {
+    const field = document.createElement('div');
+    field.className = 'height-field';
+
+    const lab = document.createElement('span');
+    lab.className = 'height-label';
+    lab.textContent = labelTxt;
+
+    const hInp = document.createElement('input');
+    hInp.type = 'number'; hInp.className = 'height-inp';
+    hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
+    hInp.value = bay[key] == null ? '' : bay[key].toFixed(2);
+    hInp.addEventListener('input', () => {
+      const v = parseFloat(hInp.value);
+      bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
+      renderSvg();
+    });
+
+    field.appendChild(lab); field.appendChild(hInp);
+    return { field, input: hInp };
+  };
+
+  const left  = makeHeightField('Links',  'hL');
+  const right = makeHeightField('Rechts', 'hR');
+
+  const eqBtn = document.createElement('button');
+  eqBtn.className = 'height-eq'; eqBtn.type = 'button';
+  eqBtn.title = 'Beide Höhen gleich setzen';
+  eqBtn.textContent = '=';
+  eqBtn.addEventListener('click', () => {
+    // bevorzugt den bereits eingetragenen Wert auf die andere Seite kopieren
+    const src = bay.hL != null ? bay.hL : bay.hR;
+    if (src == null) return;
+    bay.hL = src; bay.hR = src;
+    left.input.value  = src.toFixed(2);
+    right.input.value = src.toFixed(2);
+    renderSvg();
+  });
+
+  hRow.appendChild(left.field);
+  hRow.appendChild(eqBtn);
+  hRow.appendChild(right.field);
+
   // Actions
   const actRow = document.createElement('div');
   actRow.className = 'sheet-actions';
@@ -820,6 +1038,8 @@ function openEditSheet(si, bi) {
   sheet.appendChild(dirRow);
   sheet.appendChild(stdDiv);
   sheet.appendChild(adjRow);
+  sheet.appendChild(hLabel);
+  sheet.appendChild(hRow);
   sheet.appendChild(actRow);
 
   document.body.appendChild(overlay);
@@ -1062,11 +1282,9 @@ async function exportPdf() {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
   doc.text(state.project || 'Gerüst 2D-Ansicht', margin, margin + 6);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  const totals = state.sections.map(s => {
-    const len = s.bays.reduce((a, b) => a + b.len, 0);
-    return `${s.name}: ${len.toFixed(2)} m`;
-  }).join('  |  ');
-  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   ${totals}`, margin, margin + 12);
+  const totalLen = state.sections
+    .reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
+  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   Gesamtlänge: ${totalLen.toFixed(2)} m`, margin, margin + 12);
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
     doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
     doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);

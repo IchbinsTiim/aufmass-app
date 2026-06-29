@@ -333,6 +333,15 @@ html, body {
   letter-spacing: 0.05em;
 }
 
+.form-subhead {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 6px 0 2px;
+}
+
 .form-input {
   padding: 11px 12px;
   border: 1.5px solid var(--color-border);
