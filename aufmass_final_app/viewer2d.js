@@ -333,6 +333,37 @@ function renderSvg() {
     g.appendChild(txt);
   });
 
+  // 5b. Move handles (orange ✥) — always visible, even in PDF mode use pdfMode to skip
+  if (!pdfMode) {
+    const MOVE_R = Math.round(HANDLE_R * 0.85);
+    els.filter(e => e.type === 'moveHandle').forEach(el => {
+      const isActive = drag && drag.type === 'move' && drag.si === el.si;
+
+      const hit = svgEl('circle', {
+        cx: el.x, cy: el.y, r: MOVE_R * 2.8,
+        fill: 'rgba(0,0,0,0.001)', style: 'cursor:move', 'data-si': el.si
+      });
+      hit.addEventListener('pointerdown', onMoveHandleDown);
+      g.appendChild(hit);
+
+      g.appendChild(svgEl('circle', {
+        cx: el.x, cy: el.y, r: MOVE_R,
+        fill: isActive ? '#c85000' : '#ff8800',
+        stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+      }));
+
+      const sym = svgEl('text', {
+        x: el.x, y: el.y,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': Math.round(MOVE_R * 1.1),
+        'font-family': 'system-ui, sans-serif',
+        fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+      });
+      sym.textContent = '✥';
+      g.appendChild(sym);
+    });
+  }
+
   if (pdfMode) { drawScaleBar(g, minX, minY, vw, vh, infoFontSize); return; }
 
   // 5. Drag handles (blue ↕/↔)
@@ -371,35 +402,6 @@ function renderSvg() {
       bt.textContent = len.toFixed(2) + ' m';
       g.appendChild(bt);
     }
-  });
-
-  // 5b. Move handles (orange ✥ on wall-line midpoint — drag to reposition section)
-  const MOVE_R = Math.round(HANDLE_R * 0.85);
-  els.filter(e => e.type === 'moveHandle').forEach(el => {
-    const isActive = drag && drag.type === 'move' && drag.si === el.si;
-
-    const hit = svgEl('circle', {
-      cx: el.x, cy: el.y, r: MOVE_R * 2.4, fill: 'transparent',
-      style: 'cursor:move', 'data-si': el.si
-    });
-    hit.addEventListener('pointerdown', onMoveHandleDown);
-    g.appendChild(hit);
-
-    g.appendChild(svgEl('circle', {
-      cx: el.x, cy: el.y, r: MOVE_R,
-      fill: isActive ? '#c85000' : '#ff8800',
-      stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
-    }));
-
-    const sym = svgEl('text', {
-      x: el.x, y: el.y,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': Math.round(MOVE_R * 1.1),
-      'font-family': 'system-ui, sans-serif',
-      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
-    });
-    sym.textContent = '✥';
-    g.appendChild(sym);
   });
 
   // 6. Junction "+" buttons — only for the currently selected section
@@ -1016,11 +1018,11 @@ function onLoadFile(e) {
 // ── PDF Export ─────────────────────────────────────────────────────────────
 
 async function exportPdf() {
-  // Render a clean version (no handles, no + buttons, tighter padding)
   const prevSelected = selectedSi;
   selectedSi = null;
   pdfMode    = true;
   renderSvg();
+  try {
 
   const { jsPDF } = window.jspdf;
   const svg = document.getElementById('planSvg');
@@ -1066,13 +1068,13 @@ async function exportPdf() {
   }).join('  |  ');
   doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   ${totals}`, margin, margin + 12);
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
-  doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
-  doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
-
-  // Restore interactive render
-  pdfMode    = false;
-  selectedSi = prevSelected;
-  renderSvg();
+    doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
+    doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
+  } finally {
+    pdfMode    = false;
+    selectedSi = prevSelected;
+    renderSvg();
+  }
 }
 
 // ── Device mode ────────────────────────────────────────────────────────────
