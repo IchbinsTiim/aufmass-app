@@ -160,6 +160,21 @@
           <label class="form-label">Stellfläche-Notiz</label>
           <input class="form-input" type="text" id="fieldStellflaecheNotiz" placeholder="z. B. Gehweg gesperrt" />
         </div>
+        <div class="form-subhead">Transport zum Objekt</div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">LKW → Objekt (m)</label>
+            <input class="form-input" type="number" id="fieldTransportM" placeholder="0" min="0" inputmode="decimal" />
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Höhenmeter (m)</label>
+            <input class="form-input" type="number" id="fieldHoehenmeter" placeholder="0" min="0" inputmode="decimal" />
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Treppen / Stockwerke</label>
+            <input class="form-input" type="number" id="fieldTreppen" placeholder="0" min="0" inputmode="numeric" />
+          </div>
+        </div>
         <div class="logistik-toggles">
           <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Öffentlicher Grund</button>
           <button type="button" class="logistik-toggle-btn" id="toggleVerkehr" data-active="0">Verkehrssicherung</button>

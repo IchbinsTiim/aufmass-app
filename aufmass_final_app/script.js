@@ -11,7 +11,8 @@ let currentProjectId = null;
 
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
-  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen'
+  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen',
+  'Bautenschutzmatte','Fleece'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 
@@ -366,11 +367,17 @@ function setLogistikToggle(id, active) {
 }
 
 function collectLogistik() {
-  const anfahrtVal = parseNum(document.getElementById('fieldAnfahrtKm')?.value);
+  const anfahrtVal     = parseNum(document.getElementById('fieldAnfahrtKm')?.value);
+  const transportVal   = parseNum(document.getElementById('fieldTransportM')?.value);
+  const hoehenmeterVal = parseNum(document.getElementById('fieldHoehenmeter')?.value);
+  const treppenVal     = parseNum(document.getElementById('fieldTreppen')?.value);
   return {
     anfahrtKm:              isNaN(anfahrtVal) ? null : anfahrtVal,
     untergrund:             document.getElementById('fieldUntergrund')?.value.trim()         || '',
     stellflaecheNotiz:      document.getElementById('fieldStellflaecheNotiz')?.value.trim()  || '',
+    transportM:             isNaN(transportVal)   ? null : transportVal,
+    hoehenmeter:            isNaN(hoehenmeterVal) ? null : hoehenmeterVal,
+    treppen:                isNaN(treppenVal)     ? null : treppenVal,
     oeffentlicherGrund:     document.getElementById('toggleOeffentlich')?.dataset.active === '1',
     verkehrssicherung:      document.getElementById('toggleVerkehr')?.dataset.active    === '1',
     genehmigungErforderlich:document.getElementById('toggleGenehmigung')?.dataset.active === '1'
@@ -382,6 +389,9 @@ function loadLogistik(l) {
   document.getElementById('fieldAnfahrtKm').value         = l.anfahrtKm != null ? l.anfahrtKm : '';
   document.getElementById('fieldUntergrund').value        = l.untergrund        || '';
   document.getElementById('fieldStellflaecheNotiz').value = l.stellflaecheNotiz || '';
+  document.getElementById('fieldTransportM').value        = l.transportM   != null ? l.transportM   : '';
+  document.getElementById('fieldHoehenmeter').value       = l.hoehenmeter  != null ? l.hoehenmeter  : '';
+  document.getElementById('fieldTreppen').value           = l.treppen      != null ? l.treppen      : '';
   setLogistikToggle('toggleOeffentlich', l.oeffentlicherGrund);
   setLogistikToggle('toggleVerkehr',     l.verkehrssicherung);
   setLogistikToggle('toggleGenehmigung', l.genehmigungErforderlich);
@@ -1296,7 +1306,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
     const typeBtns = document.createElement('div');
     typeBtns.className = 'acc-type-btns';
-    ['0', '30', '50', '70', '109'].forEach(typ => {
+    ['0', '19', '30', '50', '70', '109'].forEach(typ => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'konsole-btn' + (data && data.typ === typ ? ' active' : '');
@@ -1843,6 +1853,9 @@ function generatePDF() {
     logistik.anfahrtKm             ? logistik.anfahrtKm + ' km Anfahrt' : '',
     logistik.untergrund             ? 'Untergrund: ' + logistik.untergrund : '',
     logistik.stellflaecheNotiz      ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
+    logistik.transportM             ? 'Transport LKW → Objekt: ' + logistik.transportM + ' m' : '',
+    logistik.hoehenmeter            ? 'Höhenmeter: ' + logistik.hoehenmeter + ' m' : '',
+    logistik.treppen                ? 'Treppen/Stockwerke: ' + logistik.treppen : '',
     logistik.oeffentlicherGrund     ? 'Öffentlicher Grund' : '',
     logistik.verkehrssicherung      ? 'Verkehrssicherung' : '',
     logistik.genehmigungErforderlich? 'Genehmigung erforderlich' : ''
