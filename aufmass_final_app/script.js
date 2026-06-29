@@ -15,6 +15,8 @@ const ZUSATZ_ARTEN = [
   'Bautenschutzmatte','Fleece'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
+// Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
+const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²' };
 
 // ============================================================
 //  localStorage
@@ -1108,6 +1110,12 @@ function createZusatzRow(data) {
   });
   einheitSel.value = data?.einheit || 'm';
 
+  // Beim Wählen einer flächenbasierten Art automatisch die passende Einheit setzen
+  artSel.addEventListener('change', () => {
+    const pref = PREFERRED_EINHEIT[artSel.value];
+    if (pref) einheitSel.value = pref;
+  });
+
   // Menge
   const mengeInp = document.createElement('input');
   mengeInp.type = 'number';
@@ -1588,6 +1596,20 @@ function updateSummary() {
     html += `<tr><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">Ankeranzahl</td><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">${ankerAnzahl} Stk.</td></tr>`;
   }
 
+  // Transport / Laufaufwand (für die spätere Kalkulation im Büro)
+  const lg = collectLogistik();
+  const effortRows = [
+    lg.transportM  != null ? ['Laufweg LKW → Objekt', fmtNum(lg.transportM) + ' m'] : null,
+    lg.hoehenmeter != null ? ['Höhenmeter',           fmtNum(lg.hoehenmeter) + ' m'] : null,
+    lg.treppen     != null ? ['Treppen / Stockwerke', String(lg.treppen)] : null
+  ].filter(Boolean);
+  if (effortRows.length > 0) {
+    html += `<tr><td colspan="2" style="padding-top:10px;font-size:0.72rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--color-border);">Transport / Laufaufwand</td></tr>`;
+    effortRows.forEach(([label, val]) => {
+      html += `<tr><td><span class="summary-side-name" style="font-size:0.88rem">${label}</span></td><td>${val}</td></tr>`;
+    });
+  }
+
   html += '</table>';
   el.innerHTML = html;
 }
@@ -1853,9 +1875,6 @@ function generatePDF() {
     logistik.anfahrtKm             ? logistik.anfahrtKm + ' km Anfahrt' : '',
     logistik.untergrund             ? 'Untergrund: ' + logistik.untergrund : '',
     logistik.stellflaecheNotiz      ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
-    logistik.transportM             ? 'Transport LKW → Objekt: ' + logistik.transportM + ' m' : '',
-    logistik.hoehenmeter            ? 'Höhenmeter: ' + logistik.hoehenmeter + ' m' : '',
-    logistik.treppen                ? 'Treppen/Stockwerke: ' + logistik.treppen : '',
     logistik.oeffentlicherGrund     ? 'Öffentlicher Grund' : '',
     logistik.verkehrssicherung      ? 'Verkehrssicherung' : '',
     logistik.genehmigungErforderlich? 'Genehmigung erforderlich' : ''
@@ -1866,6 +1885,20 @@ function generatePDF() {
     hline(0.3);
     secHead('Baustelle / Logistik');
     logParts.forEach(f => pdfRow(f, ''));
+  }
+
+  // ── Transport / Laufaufwand (für die Kalkulation) ──────────────
+  const transportParts = [
+    logistik.transportM  ? ['Laufweg LKW → Objekt', logistik.transportM + ' m'] : null,
+    logistik.hoehenmeter ? ['Höhenmeter',           logistik.hoehenmeter + ' m'] : null,
+    logistik.treppen     ? ['Treppen / Stockwerke', String(logistik.treppen)] : null
+  ].filter(Boolean);
+
+  if (transportParts.length > 0) {
+    y += 1;
+    hline(0.3);
+    secHead('Transport / Laufaufwand');
+    transportParts.forEach(([label, val]) => pdfRow(label, val));
   }
 
   const proj = getCurrentProject();
