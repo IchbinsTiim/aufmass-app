@@ -139,6 +139,14 @@ function computeLayout() {
     if (sec.bays.length > 0) {
       els.push({ type: 'wallLine', x1: startX, y1: startY, x2: x, y2: y });
 
+      // Move handle at wall-line midpoint
+      els.push({
+        type: 'moveHandle',
+        x: (startX + x) / 2,
+        y: (startY + y) / 2,
+        si
+      });
+
       const totalLen = sec.bays.reduce((s, b) => s + b.len, 0);
       const offScale = depth + 14;
       els.push({
@@ -319,6 +327,35 @@ function renderSvg() {
     }
   });
 
+  // 5b. Move handles (orange ✥ on wall-line midpoint — drag to reposition section)
+  const MOVE_R = Math.round(HANDLE_R * 0.85);
+  els.filter(e => e.type === 'moveHandle').forEach(el => {
+    const isActive = drag && drag.type === 'move' && drag.si === el.si;
+
+    const hit = svgEl('circle', {
+      cx: el.x, cy: el.y, r: MOVE_R * 2.4, fill: 'transparent',
+      style: 'cursor:move', 'data-si': el.si
+    });
+    hit.addEventListener('pointerdown', onMoveHandleDown);
+    g.appendChild(hit);
+
+    g.appendChild(svgEl('circle', {
+      cx: el.x, cy: el.y, r: MOVE_R,
+      fill: isActive ? '#c85000' : '#ff8800',
+      stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+    }));
+
+    const sym = svgEl('text', {
+      x: el.x, y: el.y,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': Math.round(MOVE_R * 1.1),
+      'font-family': 'system-ui, sans-serif',
+      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+    });
+    sym.textContent = '✥';
+    g.appendChild(sym);
+  });
+
   // 6. Junction "+" buttons — 4 directional handles per junction point
   const ADD_R = Math.round(HANDLE_R * 1.2);   // circle radius
   const JOFF  = Math.round(HANDLE_R * 3.0);   // offset from junction centre
@@ -392,7 +429,7 @@ function onHandleDown(e) {
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
   drag = {
-    si, bi,
+    type: 'resize', si, bi,
     startLen: state.sections[si].bays[bi].len,
     startPt:  screenToSvg(e.clientX, e.clientY),
     dir:      DIR_META[state.sections[si].dir],
@@ -400,9 +437,36 @@ function onHandleDown(e) {
   };
 }
 
+function onMoveHandleDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const si  = parseInt(e.currentTarget.dataset.si);
+  const svg = document.getElementById('planSvg');
+  svg.setPointerCapture(e.pointerId);
+  drag = {
+    type: 'move', si,
+    startX0: state.sections[si].x0,
+    startY0: state.sections[si].y0,
+    startPt: screenToSvg(e.clientX, e.clientY),
+    moved:   false
+  };
+}
+
 function onSvgPointerMove(e) {
   if (!drag) return;
-  const pt  = screenToSvg(e.clientX, e.clientY);
+  const pt = screenToSvg(e.clientX, e.clientY);
+
+  if (drag.type === 'move') {
+    const dx = pt.x - drag.startPt.x;
+    const dy = pt.y - drag.startPt.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+    const snapPx = SNAP_STEP * PX_PER_M;
+    state.sections[drag.si].x0 = Math.round((drag.startX0 + dx) / snapPx) * snapPx;
+    state.sections[drag.si].y0 = Math.round((drag.startY0 + dy) / snapPx) * snapPx;
+    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    return;
+  }
+
   const dPx = (pt.x - drag.startPt.x) * drag.dir.dx
             + (pt.y - drag.startPt.y) * drag.dir.dy;
   if (Math.abs(dPx) > 5) drag.moved = true;
@@ -416,6 +480,10 @@ function onSvgPointerMove(e) {
 function onSvgPointerUp(e) {
   if (!drag) return;
   const d = drag; drag = null;
+  if (d.type === 'move') {
+    if (d.moved) renderAll();
+    return;
+  }
   if (!d.moved) openEditSheet(d.si, d.bi);
   else renderAll();
 }
