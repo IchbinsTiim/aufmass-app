@@ -41,6 +41,8 @@ let addCtx         = null;   // null = FAB,  { x, y } = from junction
 let pendingDir     = 'S';
 let pendingLen     = null;
 let addCtxDirFixed = false;  // true when direction already chosen via directional button
+let selectedSi     = null;   // index of currently selected section (shows + buttons)
+let snapEnabled    = true;   // magnetic grid snapping on/off
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -58,11 +60,46 @@ function mkSection(dir = 'S', x0 = 0, y0 = 0) {
 function outVec(dir) { return { dx: dir.dy, dy: -dir.dx }; }
 
 function snapLen(len) {
+  if (!snapEnabled) return Math.max(0.25, +len.toFixed(2));
   const g = Math.round(len / SNAP_STEP) * SNAP_STEP;
   for (const s of FIELD_PRESETS) {
     if (Math.abs(g - s) <= 0.13) return s;
   }
   return Math.max(0.25, +g.toFixed(2));
+}
+
+/** Snap a section-start position to grid + existing junction endpoints. */
+function snapMovePos(rawX, rawY, si) {
+  if (!snapEnabled) return { x: rawX, y: rawY };
+
+  const snapPx = SNAP_STEP * PX_PER_M;
+  let sx = Math.round(rawX / snapPx) * snapPx;
+  let sy = Math.round(rawY / snapPx) * snapPx;
+
+  const sec = state.sections[si];
+  const dir = DIR_META[sec.dir];
+  const totalPx = sec.bays.reduce((a, b) => a + b.len, 0) * PX_PER_M;
+  const endDx = dir.dx * totalPx;
+  const endDy = dir.dy * totalPx;
+
+  const MAGNET = 28; // px — snap radius for junction magnets
+  let best = MAGNET * MAGNET;
+
+  state.sections.forEach((s, i) => {
+    if (i === si) return;
+    const e = sectionEnd(s);
+    [{ x: s.x0, y: s.y0 }, { x: e.x, y: e.y }].forEach(pt => {
+      // Snap section start to this point
+      let d2 = (rawX - pt.x) ** 2 + (rawY - pt.y) ** 2;
+      if (d2 < best) { best = d2; sx = pt.x; sy = pt.y; }
+      // Snap section END to this point (back-compute start)
+      const bx = pt.x - endDx, by = pt.y - endDy;
+      d2 = (rawX - bx) ** 2 + (rawY - by) ** 2;
+      if (d2 < best) { best = d2; sx = bx; sy = by; }
+    });
+  });
+
+  return { x: sx, y: sy };
 }
 
 function screenToSvg(clientX, clientY) {
@@ -94,7 +131,6 @@ function jKey(x, y) { return `${Math.round(x)},${Math.round(y)}`; }
 function computeLayout() {
   const depth  = state.depth * PX_PER_M;
   const els    = [];
-  const dotSet = new Set(); // deduplicate junction dots
 
   state.sections.forEach((sec, si) => {
     const dir    = DIR_META[sec.dir];
@@ -103,9 +139,8 @@ function computeLayout() {
     let x = sec.x0, y = sec.y0;
     const startX = x, startY = y;
 
-    // ── Start junction ──────────────────────────────────────────────────
-    const sk = jKey(x, y);
-    if (!dotSet.has(sk)) { dotSet.add(sk); els.push({ type: 'junctionBtn', x, y }); }
+    // ── Start junction (tagged with si — only shown when section selected) ──
+    els.push({ type: 'junctionBtn', x, y, si });
 
     // ── Bays ────────────────────────────────────────────────────────────
     sec.bays.forEach((bay, bi) => {
@@ -131,8 +166,7 @@ function computeLayout() {
       x += dir.dx * pxLen;
       y += dir.dy * pxLen;
 
-      const ek = jKey(x, y);
-      if (!dotSet.has(ek)) { dotSet.add(ek); els.push({ type: 'junctionBtn', x, y }); }
+      els.push({ type: 'junctionBtn', x, y, si });
     });
 
     // ── Wall line ───────────────────────────────────────────────────────
@@ -249,11 +283,20 @@ function renderSvg() {
 
   // 2. Bay rectangles
   els.filter(e => e.type === 'bay').forEach(el => {
+    const isSelected = el.si === selectedSi;
     const poly = svgEl('polygon', {
-      points: ptsStr(el.pts), fill: '#deeeff',
-      stroke: '#2c6fa8', 'stroke-width': 2, cursor: 'pointer'
+      points: ptsStr(el.pts),
+      fill: isSelected ? '#c5e3ff' : '#deeeff',
+      stroke: isSelected ? '#005bb5' : '#2c6fa8',
+      'stroke-width': isSelected ? 2.5 : 2,
+      cursor: 'pointer'
     });
-    poly.addEventListener('click', () => openEditSheet(el.si, el.bi));
+    poly.addEventListener('click', ev => {
+      ev.stopPropagation();
+      selectedSi = el.si;
+      renderSvg();
+      openEditSheet(el.si, el.bi);
+    });
     g.appendChild(poly);
 
     const txt = svgEl('text', {
@@ -356,11 +399,16 @@ function renderSvg() {
     g.appendChild(sym);
   });
 
-  // 6. Junction "+" buttons — 4 directional handles per junction point
-  const ADD_R = Math.round(HANDLE_R * 1.2);   // circle radius
-  const JOFF  = Math.round(HANDLE_R * 3.0);   // offset from junction centre
+  // 6. Junction "+" buttons — only for the currently selected section
+  const ADD_R = Math.round(HANDLE_R * 1.2);
+  const JOFF  = Math.round(HANDLE_R * 3.0);
 
-  els.filter(e => e.type === 'junctionBtn').forEach(el => {
+  // Deduplicate by position so shared junctions don't render twice
+  const shownJunctions = new Set();
+  els.filter(e => e.type === 'junctionBtn' && e.si === selectedSi).forEach(el => {
+    const k = jKey(el.x, el.y);
+    if (shownJunctions.has(k)) return;
+    shownJunctions.add(k);
     // Small dot at the junction itself
     g.appendChild(svgEl('circle', {
       cx: el.x, cy: el.y, r: 5,
@@ -443,6 +491,7 @@ function onMoveHandleDown(e) {
   const si  = parseInt(e.currentTarget.dataset.si);
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
+  selectedSi = si;
   drag = {
     type: 'move', si,
     startX0: state.sections[si].x0,
@@ -460,9 +509,9 @@ function onSvgPointerMove(e) {
     const dx = pt.x - drag.startPt.x;
     const dy = pt.y - drag.startPt.y;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
-    const snapPx = SNAP_STEP * PX_PER_M;
-    state.sections[drag.si].x0 = Math.round((drag.startX0 + dx) / snapPx) * snapPx;
-    state.sections[drag.si].y0 = Math.round((drag.startY0 + dy) / snapPx) * snapPx;
+    const snapped = snapMovePos(drag.startX0 + dx, drag.startY0 + dy, drag.si);
+    state.sections[drag.si].x0 = snapped.x;
+    state.sections[drag.si].y0 = snapped.y;
     if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
     return;
   }
@@ -1088,10 +1137,21 @@ function init() {
     showDevicePicker(() => renderAll());
   });
 
+  document.getElementById('snapToggleBtn').addEventListener('click', () => {
+    snapEnabled = !snapEnabled;
+    const btn = document.getElementById('snapToggleBtn');
+    btn.classList.toggle('snap-off', !snapEnabled);
+    btn.title = snapEnabled ? 'Magnetraster: An – tippen zum Ausschalten' : 'Magnetraster: Aus – tippen zum Einschalten';
+  });
+
   const svg = document.getElementById('planSvg');
   svg.addEventListener('pointermove',   onSvgPointerMove);
   svg.addEventListener('pointerup',     onSvgPointerUp);
   svg.addEventListener('pointercancel', onSvgPointerUp);
+  // Tap empty canvas → deselect section (hides + buttons)
+  svg.addEventListener('click', () => {
+    if (selectedSi !== null) { selectedSi = null; renderSvg(); }
+  });
 
   // Device mode: restore saved preference or show picker
   const savedMode = getMode();

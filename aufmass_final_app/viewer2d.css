@@ -605,3 +605,7 @@ body[data-mode="iphone"] #viewerPanel {
   font-size: 1.05rem;
   padding: 0.4rem 0.55rem;
 }
+
+/* snap toggle */
+#snapToggleBtn { font-size: 1.05rem; padding: 0.4rem 0.55rem; }
+#snapToggleBtn.snap-off { opacity: 0.4; text-decoration: line-through; }
