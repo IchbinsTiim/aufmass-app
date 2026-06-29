@@ -465,6 +465,67 @@
 .sheet-inp::-webkit-outer-spin-button,
 .sheet-inp::-webkit-inner-spin-button { -webkit-appearance: none; }
 
+/* Höhen-Eingabe (links / rechts) */
+.sheet-height-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.height-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.height-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1f7a3d;
+  text-align: center;
+}
+
+.height-inp {
+  width: 100%;
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #1a3a2a;
+  padding: 0.6rem 0.4rem;
+  border: 2px solid #cfe6d6;
+  background: #f3fbf5;
+  border-radius: 10px;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+}
+.height-inp:focus {
+  outline: none;
+  border-color: #34c759;
+  background: #fff;
+}
+.height-inp::-webkit-outer-spin-button,
+.height-inp::-webkit-inner-spin-button { -webkit-appearance: none; }
+.height-inp::placeholder { color: #9bbfa6; font-weight: 600; }
+
+.height-eq {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 52px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  border: 2px solid #34c759;
+  border-radius: 10px;
+  background: #f3fbf5;
+  color: #34c759;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.height-eq:active { background: #34c759; color: #fff; }
+
 /* Action row */
 .sheet-actions {
   display: flex;

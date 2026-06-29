@@ -48,7 +48,8 @@ let pdfMode        = false;  // when true: render clean plan (no handles)
 // ── Factories ──────────────────────────────────────────────────────────────
 
 function mkBay(len = 2.57) {
-  return { id: ++_bId, len: +parseFloat(len).toFixed(2) };
+  // hL / hR = Höhe am linken / rechten Stiel (null = noch nicht erfasst)
+  return { id: ++_bId, len: +parseFloat(len).toFixed(2), hL: null, hR: null };
 }
 
 function mkSection(dir = 'S', x0 = 0, y0 = 0) {
@@ -181,16 +182,6 @@ function computeLayout() {
         y: (startY + y) / 2,
         si
       });
-
-      const totalLen = sec.bays.reduce((s, b) => s + b.len, 0);
-      const offScale = depth + 14;
-      els.push({
-        type: 'sectionLabel',
-        x: (startX + x) / 2 + out.dx * offScale,
-        y: (startY + y) / 2 + out.dy * offScale,
-        text: `${sec.name}: ${totalLen.toFixed(2)} m`,
-        rotate: isVert ? -90 : 0
-      });
     }
   });
 
@@ -310,28 +301,37 @@ function renderSvg() {
     });
     txt.textContent = el.len.toFixed(2);
     g.appendChild(txt);
+
+    // Höhen links/rechts (nur wenn erfasst) – am jeweiligen Feldrand, Außenseite
+    const bayData = state.sections[el.si].bays[el.bi];
+    const [p0, p1, p2, p3] = el.pts;
+    // Bilineare Position: f = Anteil entlang Lauf, g = Anteil quer (0=innen, 1=außen)
+    const bilerp = (f, g) => ({
+      x: p0.x * (1 - f) * (1 - g) + p1.x * f * (1 - g) + p2.x * f * g + p3.x * (1 - f) * g,
+      y: p0.y * (1 - f) * (1 - g) + p1.y * f * (1 - g) + p2.y * f * g + p3.y * (1 - f) * g
+    });
+    const hFont = Math.max(depth * 0.26, 7);
+    [[bayData.hL, bilerp(0.16, 0.74)], [bayData.hR, bilerp(0.84, 0.74)]].forEach(([h, pos]) => {
+      if (h == null) return;
+      const ht = svgEl('text', {
+        x: pos.x, y: pos.y,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': hFont, 'font-family': 'system-ui, sans-serif',
+        fill: '#1f7a3d', 'font-weight': '700', 'pointer-events': 'none',
+        transform: el.isVert ? `rotate(-90,${pos.x},${pos.y})` : ''
+      });
+      ht.textContent = '↥ ' + h.toFixed(2);
+      g.appendChild(ht);
+    });
   });
 
-  // 3. Wall lines
+  // 3. Wall lines (schlanke Wandkante – zeigt die Gebäudeseite an)
   els.filter(e => e.type === 'wallLine').forEach(el =>
     g.appendChild(svgEl('line', {
       x1: el.x1, y1: el.y1, x2: el.x2, y2: el.y2,
-      stroke: '#111', 'stroke-width': 3.5, 'stroke-linecap': 'square'
+      stroke: '#5a6b7a', 'stroke-width': 1.5, 'stroke-linecap': 'round'
     }))
   );
-
-  // 4. Section labels
-  els.filter(e => e.type === 'sectionLabel').forEach(el => {
-    const txt = svgEl('text', {
-      x: el.x, y: el.y,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': infoFontSize, 'font-family': 'system-ui, sans-serif',
-      fill: '#444', 'pointer-events': 'none',
-      transform: el.rotate ? `rotate(${el.rotate},${el.x},${el.y})` : ''
-    });
-    txt.textContent = el.text;
-    g.appendChild(txt);
-  });
 
   // 5b. Move handles (orange ✥) — always visible, even in PDF mode use pdfMode to skip
   if (!pdfMode) {
@@ -782,6 +782,57 @@ function openEditSheet(si, bi) {
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
 
+  // ── Höhen (links / rechts) ──────────────────────────────────────────────
+  const hLabel = document.createElement('div');
+  hLabel.className = 'sheet-section-label';
+  hLabel.textContent = 'Höhen (m)';
+
+  const hRow = document.createElement('div');
+  hRow.className = 'sheet-height-row';
+
+  const makeHeightField = (labelTxt, key) => {
+    const field = document.createElement('div');
+    field.className = 'height-field';
+
+    const lab = document.createElement('span');
+    lab.className = 'height-label';
+    lab.textContent = labelTxt;
+
+    const hInp = document.createElement('input');
+    hInp.type = 'number'; hInp.className = 'height-inp';
+    hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
+    hInp.value = bay[key] == null ? '' : bay[key].toFixed(2);
+    hInp.addEventListener('input', () => {
+      const v = parseFloat(hInp.value);
+      bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
+      renderSvg();
+    });
+
+    field.appendChild(lab); field.appendChild(hInp);
+    return { field, input: hInp };
+  };
+
+  const left  = makeHeightField('Links',  'hL');
+  const right = makeHeightField('Rechts', 'hR');
+
+  const eqBtn = document.createElement('button');
+  eqBtn.className = 'height-eq'; eqBtn.type = 'button';
+  eqBtn.title = 'Beide Höhen gleich setzen';
+  eqBtn.textContent = '=';
+  eqBtn.addEventListener('click', () => {
+    // bevorzugt den bereits eingetragenen Wert auf die andere Seite kopieren
+    const src = bay.hL != null ? bay.hL : bay.hR;
+    if (src == null) return;
+    bay.hL = src; bay.hR = src;
+    left.input.value  = src.toFixed(2);
+    right.input.value = src.toFixed(2);
+    renderSvg();
+  });
+
+  hRow.appendChild(left.field);
+  hRow.appendChild(eqBtn);
+  hRow.appendChild(right.field);
+
   // Actions
   const actRow = document.createElement('div');
   actRow.className = 'sheet-actions';
@@ -820,6 +871,8 @@ function openEditSheet(si, bi) {
   sheet.appendChild(dirRow);
   sheet.appendChild(stdDiv);
   sheet.appendChild(adjRow);
+  sheet.appendChild(hLabel);
+  sheet.appendChild(hRow);
   sheet.appendChild(actRow);
 
   document.body.appendChild(overlay);
@@ -1062,11 +1115,9 @@ async function exportPdf() {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
   doc.text(state.project || 'Gerüst 2D-Ansicht', margin, margin + 6);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  const totals = state.sections.map(s => {
-    const len = s.bays.reduce((a, b) => a + b.len, 0);
-    return `${s.name}: ${len.toFixed(2)} m`;
-  }).join('  |  ');
-  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   ${totals}`, margin, margin + 12);
+  const totalLen = state.sections
+    .reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
+  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   Gesamtlänge: ${totalLen.toFixed(2)} m`, margin, margin + 12);
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
     doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
     doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
