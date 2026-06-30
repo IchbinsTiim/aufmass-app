@@ -465,16 +465,28 @@ function renderSvg() {
     txt.textContent = el.len.toFixed(2);
     g.appendChild(txt);
 
-    // Höhen links/rechts (nur wenn erfasst) – am jeweiligen Feldrand, Außenseite
+    // Höhen links/rechts (nur wenn erfasst).
+    // Die Höhe wird IMMER an der bildschirm-unteren Kante des Feldes angezeigt:
+    // bei waagerechtem Feld unten, bei senkrechtem (90° gedreht) Feld rechts –
+    // konsistent, egal wie das Feld gedreht ist.
     const bayData = state.sections[el.si].bays[el.bi];
-    const [p0, p1, p2, p3] = el.pts;
-    // Bilineare Position: f = Anteil entlang Lauf, g = Anteil quer (0=innen, 1=außen)
-    const bilerp = (f, g) => ({
-      x: p0.x * (1 - f) * (1 - g) + p1.x * f * (1 - g) + p2.x * f * g + p3.x * (1 - f) * g,
-      y: p0.y * (1 - f) * (1 - g) + p1.y * f * (1 - g) + p2.y * f * g + p3.y * (1 - f) * g
-    });
+    const [p0, p1, p2, p3] = el.pts;          // p0,p1 = Innenkante (Wand), p3,p2 = Außenkante
+    // Lauf eher waagerecht? → untere Kante (größeres y), sonst rechte Kante (größeres x).
+    const runHoriz  = Math.abs(p1.x - p0.x) >= Math.abs(p1.y - p0.y);
+    const innerMidY = (p0.y + p1.y) / 2, outerMidY = (p2.y + p3.y) / 2;
+    const innerMidX = (p0.x + p1.x) / 2, outerMidX = (p2.x + p3.x) / 2;
+    const useOuter  = runHoriz ? (outerMidY >= innerMidY) : (outerMidX >= innerMidX);
+    const A = useOuter ? p3 : p0;             // gewählte Kante: Anfang (Startseite)
+    const B = useOuter ? p2 : p1;             //                  Ende  (Endseite)
+    // Einwärts-Normale (zur Feldmitte) – Text leicht ins Feld hineinrücken.
+    const ecx = (p0.x + p1.x + p2.x + p3.x) / 4, ecy = (p0.y + p1.y + p2.y + p3.y) / 4;
+    const emx = (A.x + B.x) / 2,                 emy = (A.y + B.y) / 2;
+    let inx = ecx - emx, iny = ecy - emy;
+    const ilen = Math.hypot(inx, iny) || 1; inx /= ilen; iny /= ilen;
+    const inset = depth * 0.26;
+    const hPos = f => ({ x: A.x + (B.x - A.x) * f + inx * inset, y: A.y + (B.y - A.y) * f + iny * inset });
     const hFont = Math.max(depth * 0.26, 7);
-    [[bayData.hL, bilerp(0.16, 0.74)], [bayData.hR, bilerp(0.84, 0.74)]].forEach(([h, pos]) => {
+    [[bayData.hL, hPos(0.16)], [bayData.hR, hPos(0.84)]].forEach(([h, pos]) => {
       if (h == null) return;
       const ht = svgEl('text', {
         x: pos.x, y: pos.y,
@@ -596,14 +608,18 @@ function renderSvg() {
         y: end.y      + out.dy * depth / 2 + dir.dy * axOff, side: 'fwd'  }
     ];
     addPts.forEach(pt => {
+      // Klickfläche: rgba mit minimaler Deckkraft fängt Pointer-Events zuverlässig
+      // (transparent-fill ist auf manchen Touch-Geräten unzuverlässig).
       const hit = svgEl('circle', {
-        cx: pt.x, cy: pt.y, r: EXT_R * 2.2,
-        fill: 'transparent', style: 'cursor:pointer'
+        cx: pt.x, cy: pt.y, r: EXT_R * 2.4,
+        fill: 'rgba(0,0,0,0.001)', style: 'cursor:pointer', 'data-side': pt.side
       });
-      hit.addEventListener('click', ev => {
+      const fireAdd = ev => {
+        ev.preventDefault();
         ev.stopPropagation();
         quickExtend(selectedSi, pt.side);
-      });
+      };
+      hit.addEventListener('click', fireAdd);
       g.appendChild(hit);
 
       g.appendChild(svgEl('circle', {
@@ -623,56 +639,8 @@ function renderSvg() {
     });
   }
 
-  // 6. Junction "+" buttons — only for the selected section, hidden while moving
-  const ADD_R = Math.round(HANDLE_R * 1.2);
-  const JOFF  = Math.round(HANDLE_R * 3.0);
-  const movingNow = drag && drag.type === 'move';
-
-  // Deduplicate by position so shared junctions don't render twice
-  const shownJunctions = new Set();
-  els.filter(e => e.type === 'junctionBtn' && e.si === selectedSi && !movingNow).forEach(el => {
-    const k = jKey(el.x, el.y);
-    if (shownJunctions.has(k)) return;
-    shownJunctions.add(k);
-    // Small dot at the junction itself
-    g.appendChild(svgEl('circle', {
-      cx: el.x, cy: el.y, r: 5,
-      fill: '#34c759', stroke: '#fff', 'stroke-width': 1.5, 'pointer-events': 'none'
-    }));
-
-    // One "+" button for each cardinal direction
-    Object.entries(DIR_META).forEach(([dKey, d]) => {
-      const bx = el.x + d.dx * JOFF;
-      const by = el.y + d.dy * JOFF;
-
-      const hit = svgEl('circle', {
-        cx: bx, cy: by, r: ADD_R * 2.5, fill: 'transparent', style: 'cursor:pointer'
-      });
-      hit.addEventListener('click', ev => {
-        ev.stopPropagation();
-        addCtx         = { x: el.x, y: el.y };
-        pendingDir     = dKey;
-        addCtxDirFixed = true;
-        openAddSheet();
-      });
-      g.appendChild(hit);
-
-      g.appendChild(svgEl('circle', {
-        cx: bx, cy: by, r: ADD_R,
-        fill: '#34c759', stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
-      }));
-
-      const plus = svgEl('text', {
-        x: bx, y: by,
-        'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': Math.round(ADD_R * 1.2),
-        'font-family': 'system-ui, sans-serif',
-        fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
-      });
-      plus.textContent = '+';
-      g.appendChild(plus);
-    });
-  });
+  // (Die früheren grünen „+"-Buttons an den Verbindungsstellen wurden entfernt.
+  //  Neue Felder werden über die blauen „+"-Punkte links/rechts hinzugefügt.)
 
   // 7. Andock-Vorschau (während des Verschiebens)
   drawMovePreview(g);
@@ -1125,6 +1093,28 @@ function openEditSheet(si, bi) {
 
   rotRow.appendChild(rotMinus); rotRow.appendChild(rotSlider); rotRow.appendChild(rotPlus);
 
+  // Drei feste Drehoptionen (90° / 180° / 270°): drehen das Feld in festen
+  // Schritten weiter und rasten sauber auf ein Vielfaches von 90° ein. Die freie
+  // Drehung bleibt über Schieberegler/Drehgriff möglich (Snapping wie beim Magnet).
+  const rotPresets = document.createElement('div');
+  rotPresets.className = 'sheet-rot-presets';
+  const rotateBy = step => {
+    let a = normDeg(secAngle(sec) + step);
+    a = (Math.round(a / 90) * 90) % 360;   // sauber auf 90°-Schritt einrasten
+    setSectionAngle(sec, a);
+    syncRotSheet(sec);
+    renderSvg();
+  };
+  [90, 180, 270].forEach(step => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rot-preset';
+    b.textContent = '↻ ' + step + '°';
+    b.title = 'Feld um ' + step + '° drehen';
+    b.addEventListener('click', () => rotateBy(step));
+    rotPresets.appendChild(b);
+  });
+
   // ── Höhen (links / rechts) ──────────────────────────────────────────────
   const hLabel = document.createElement('div');
   hLabel.className = 'sheet-section-label';
@@ -1212,6 +1202,7 @@ function openEditSheet(si, bi) {
   sheet.appendChild(adjRow);
   sheet.appendChild(rotLabel);
   sheet.appendChild(rotRow);
+  sheet.appendChild(rotPresets);
   sheet.appendChild(hLabel);
   sheet.appendChild(hRow);
   sheet.appendChild(actRow);
