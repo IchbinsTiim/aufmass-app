@@ -146,8 +146,32 @@
 
 .bay-row {
   display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+.bay-row-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.bay-row-bottom {
+  display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+.bay-cat-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.28rem 0.4rem;
+  border: 1.5px solid #ccc;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  background: #fff;
+  cursor: pointer;
 }
 .bay-num {
   font-size: 0.72rem;
@@ -375,6 +399,50 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 0.35rem;
+}
+
+/* Kategorie-Auswahl im Bearbeiten-Sheet */
+.sheet-cat-select {
+  width: 100%;
+  padding: 0.6rem 0.6rem;
+  font-size: 1rem;
+  font-weight: 700;
+  border: 2px solid #007aff;
+  border-radius: 9px;
+  background: #f0f7ff;
+  color: #0a2f58;
+  cursor: pointer;
+  margin-bottom: 0.7rem;
+}
+
+/* Kategorie-spezifische Maße */
+.sheet-measures {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.7rem;
+}
+.measure-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.measure-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #333;
+}
+.measure-inp {
+  width: 7rem;
+  padding: 0.5rem 0.6rem;
+  border: 2px solid #1f7a3d;
+  border-radius: 9px;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: right;
+  color: #0a2f58;
+  background: #f3fbf5;
 }
 
 /* Direction button row */
