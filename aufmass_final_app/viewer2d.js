@@ -27,24 +27,51 @@ const FIELD_PRESETS = [0.73, 1.09, 1.57, 2.07, 2.57, 3.07];
 const KONSOLE_TYPES = ['0,19', '0,30', '0,50', '0,70', '1,09'];
 
 // Verfügbare Positions-Arten. `konsole:true` → mit Typ + Lagen, mehrfach möglich.
+// `unit` = voreingestellte Mengeneinheit ('m' | 'stk' | 'lagen'); pro Position
+// im Editor änderbar.
 const POSITIONS = [
   { key: 'konsole',       label: 'Konsole',          short: 'K',    color: '#cc7a00', konsole: true },
-  { key: 'innengelaender',label: 'Innengeländer',    short: 'IG',   color: '#2f9e44' },
-  { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a' },
-  { key: 'dachfang',      label: 'Dachfang',         short: 'DF',   color: '#b08900' },
-  { key: 'treppenturm',   label: 'Treppenturm',      short: 'TT',   color: '#8e44ec' },
-  { key: 'durchgang',     label: 'Durchgang',        short: 'DG',   color: '#1f5f9e' },
-  { key: 'geruesttreppe', label: 'Gerüsttreppe',     short: 'GT',   color: '#4659c9' },
-  { key: 'verbreiterung', label: 'Verbreiterung',    short: 'VB',   color: '#0f9b8e' },
-  { key: 'ueberbrueckung',label: 'Überbrückung',     short: 'ÜB',   color: '#a5612c' },
-  { key: 'bekleidung',    label: 'Bekleidung',       short: 'BK',   color: '#a52c7e' },
-  { key: 'schutzdach',    label: 'Schutzdach',       short: 'SD',   color: '#c0392b' },
-  { key: 'aufzug',        label: 'Aufzug',           short: 'AZ',   color: '#1f5f9e' },
-  { key: 'lampen',        label: 'Lampen',           short: 'LA',   color: '#b59a00' },
-  { key: 'bautenschutz',  label: 'Bautenschutzmatte',short: 'BS',   color: '#7a6a2c' },
-  { key: 'fleece',        label: 'Fleece',           short: 'FL',   color: '#6a2ca5' }
+  { key: 'innengelaender',label: 'Innengeländer',    short: 'IG',   color: '#2f9e44', unit: 'lagen' },
+  { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a', unit: 'm' },
+  { key: 'dachfang',      label: 'Dachfang',         short: 'DF',   color: '#b08900', unit: 'm' },
+  { key: 'treppenturm',   label: 'Treppenturm',      short: 'TT',   color: '#8e44ec', unit: 'stk' },
+  { key: 'durchgang',     label: 'Durchgang',        short: 'DG',   color: '#1f5f9e', unit: 'stk' },
+  { key: 'geruesttreppe', label: 'Gerüsttreppe',     short: 'GT',   color: '#4659c9', unit: 'stk' },
+  { key: 'verbreiterung', label: 'Verbreiterung',    short: 'VB',   color: '#0f9b8e', unit: 'lagen' },
+  { key: 'ueberbrueckung',label: 'Überbrückung',     short: 'ÜB',   color: '#a5612c', unit: 'stk' },
+  { key: 'bekleidung',    label: 'Bekleidung',       short: 'BK',   color: '#a52c7e', unit: 'm' },
+  { key: 'schutzdach',    label: 'Schutzdach',       short: 'SD',   color: '#c0392b', unit: 'm' },
+  { key: 'aufzug',        label: 'Aufzug',           short: 'AZ',   color: '#1f5f9e', unit: 'stk' },
+  { key: 'lampen',        label: 'Lampen',           short: 'LA',   color: '#b59a00', unit: 'stk' },
+  { key: 'bautenschutz',  label: 'Bautenschutzmatte',short: 'BS',   color: '#7a6a2c', unit: 'm' },
+  { key: 'fleece',        label: 'Fleece',           short: 'FL',   color: '#6a2ca5', unit: 'm' }
 ];
 const POS_BY_KEY = Object.fromEntries(POSITIONS.map(p => [p.key, p]));
+
+// Mengeneinheiten für (Nicht-Konsolen-)Positionen.
+const UNIT_DEFS  = [['m', 'm'], ['stk', 'Stk'], ['lagen', 'Lagen']];
+const UNIT_LABEL = { m: 'm', stk: 'Stk', lagen: 'Lagen' };
+
+/** Voreingestellte Einheit einer Positionsart. */
+function defaultUnit(cat) {
+  const p = POS_BY_KEY[cat];
+  return (p && p.unit) || 'stk';
+}
+
+/** Zahl ohne überflüssige Nullen, deutsches Dezimalkomma. */
+function fmtQty(n) {
+  return (Math.round(n * 100) / 100).toString().replace('.', ',');
+}
+
+/** Lesbare Mengenangabe einer Position, z.B. "3 Lagen" / "12,5 m" / "4 Stk". */
+function qtyLabel(pos) {
+  if (pos.qty == null || pos.qty === '') return '';
+  const v = parseFloat(pos.qty);
+  if (isNaN(v)) return '';
+  const u = pos.unit || defaultUnit(pos.cat);
+  if (u === 'lagen') return v === 1 ? '1 Lage' : fmtQty(v) + ' Lagen';
+  return fmtQty(v) + ' ' + (UNIT_LABEL[u] || u);
+}
 
 /** Lagen-Beschriftung: 'alle' | '1' | '2' | freie Zahl → lesbarer Text. */
 function lagenLabel(lagen) {
@@ -59,7 +86,8 @@ function posTitle(pos) {
   const p = POS_BY_KEY[pos.cat];
   if (!p) return '?';
   if (p.konsole) return 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · ' + lagenLabel(pos.lagen);
-  return p.label;
+  const q = qtyLabel(pos);
+  return q ? p.label + ' · ' + q : p.label;
 }
 
 /** Kompakte Positions-Beschriftung für den Plan (Badge). */
@@ -70,6 +98,11 @@ function posBadge(pos) {
     const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '')
       ? '' : '×' + (parseInt(pos.lagen, 10) || '');
     return 'K' + (pos.typ || '') + lg;
+  }
+  if (pos.qty != null && pos.qty !== '' && !isNaN(parseFloat(pos.qty))) {
+    const u = pos.unit || defaultUnit(pos.cat);
+    const suf = u === 'lagen' ? 'L' : (u === 'm' ? 'm' : '×');
+    return p.short + ' ' + fmtQty(parseFloat(pos.qty)) + suf;
   }
   return p.short;
 }
@@ -1281,7 +1314,8 @@ function openEditSheet(si, bi) {
   const togglePos = key => {
     const i = bay.positions.findIndex(p => p.cat === key);
     if (i >= 0) bay.positions.splice(i, 1);
-    else bay.positions.push({ id: ++_bId, cat: key });
+    else bay.positions.push({ id: ++_bId, cat: key, qty: null, unit: defaultUnit(key) });
+    buildPosDetails();
     renderSvg();
   };
 
@@ -1300,6 +1334,58 @@ function openEditSheet(si, bi) {
     });
     posToggle.appendChild(chip);
   });
+
+  // Mengen-Detail (Anzahl + Einheit) für jede aktive einfache Position
+  const posDetailWrap = document.createElement('div');
+  posDetailWrap.className = 'pos-detail-list';
+
+  const makePosDetailRow = pos => {
+    const p = POS_BY_KEY[pos.cat];
+    const row = document.createElement('div');
+    row.className = 'pos-detail-row';
+
+    const name = document.createElement('span');
+    name.className = 'pos-detail-name';
+    name.textContent = p.label;
+    name.style.color = p.color;
+
+    const qtyInp = document.createElement('input');
+    qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
+    qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
+    qtyInp.placeholder = 'Anz.';
+    qtyInp.value = (pos.qty != null) ? pos.qty : '';
+    qtyInp.addEventListener('input', () => {
+      const v = parseFloat(qtyInp.value);
+      pos.qty = (qtyInp.value === '' || isNaN(v)) ? null : v;
+      renderSvg();
+    });
+
+    const unitRow = document.createElement('div');
+    unitRow.className = 'pos-unit-row';
+    UNIT_DEFS.forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'punit-btn' + ((pos.unit || defaultUnit(pos.cat)) === val ? ' active' : '');
+      b.textContent = lbl;
+      b.addEventListener('click', () => {
+        pos.unit = val;
+        unitRow.querySelectorAll('.punit-btn').forEach(x => x.classList.toggle('active', x === b));
+        renderSvg();
+      });
+      unitRow.appendChild(b);
+    });
+
+    row.appendChild(name); row.appendChild(qtyInp); row.appendChild(unitRow);
+    return row;
+  };
+
+  function buildPosDetails() {
+    posDetailWrap.innerHTML = '';
+    bay.positions
+      .filter(pos => { const p = POS_BY_KEY[pos.cat]; return p && !p.konsole; })
+      .forEach(pos => posDetailWrap.appendChild(makePosDetailRow(pos)));
+  }
+  buildPosDetails();
 
   // Konsolen-Bereich: Typ + Lagen, mehrfach möglich
   const konsLabel = document.createElement('div');
@@ -1434,6 +1520,7 @@ function openEditSheet(si, bi) {
   sheet.appendChild(hRow);
   sheet.appendChild(posLabel);
   sheet.appendChild(posToggle);
+  sheet.appendChild(posDetailWrap);
   sheet.appendChild(konsLabel);
   sheet.appendChild(konsWrap);
   sheet.appendChild(addKonsBtn);
@@ -1760,11 +1847,17 @@ async function exportPdf() {
         if (!p) return;
         const key = p.konsole ? 'konsole|' + (pos.typ || '') : pos.cat;
         const label = p.konsole ? 'Konsole ' + (pos.typ || '') : p.label;
-        const a = posAgg[key] || (posAgg[key] = { color: p.color, label, n: 0, lagen: 0 });
+        const a = posAgg[key] || (posAgg[key] = { color: p.color, label, n: 0, lagen: 0, qtyByUnit: {} });
         a.n++;
         if (p.konsole) {
           const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
           a.lagen += lg;
+        } else {
+          const v = parseFloat(pos.qty);
+          if (!isNaN(v)) {
+            const u = pos.unit || defaultUnit(pos.cat);
+            a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
+          }
         }
       });
     }));
@@ -1783,6 +1876,10 @@ async function exportPdf() {
         doc.rect(margin, ly - 4, 5, 5, 'FD');
         let txt = `${a.label}:  ${a.n}×`;
         if (a.lagen) txt += `  ·  ${a.lagen} Lagen gesamt`;
+        const qparts = UNIT_DEFS
+          .filter(([u]) => a.qtyByUnit[u])
+          .map(([u]) => `${fmtQty(a.qtyByUnit[u])} ${UNIT_LABEL[u]}`);
+        if (qparts.length) txt += `  ·  ${qparts.join(' / ')} gesamt`;
         doc.setTextColor(20, 20, 20);
         doc.text(txt, margin + 8, ly);
         ly += 8;

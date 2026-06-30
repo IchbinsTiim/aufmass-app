@@ -478,6 +478,62 @@
   color: #fff;
 }
 
+/* Mengen-Detail (Anzahl + Einheit) je aktiver einfacher Position */
+.pos-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+.pos-detail-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border: 1.5px solid #e2e6ea;
+  background: #fafbfc;
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+}
+.pos-detail-name {
+  font-size: 0.88rem;
+  font-weight: 800;
+  flex: 1 1 7rem;
+  min-width: 6rem;
+}
+.pos-detail-qty {
+  width: 4rem;
+  padding: 0.45rem 0.4rem;
+  border: 2px solid #c8ccd2;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+  color: #0a2f58;
+  background: #fff;
+}
+.pos-unit-row {
+  display: flex;
+  gap: 0.3rem;
+}
+.punit-btn {
+  padding: 0.4rem 0.55rem;
+  border: 2px solid #c8ccd2;
+  border-radius: 8px;
+  background: #fff;
+  color: #667;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 2.4rem;
+  -webkit-tap-highlight-color: transparent;
+}
+.punit-btn.active {
+  background: #0a2f58;
+  border-color: #0a2f58;
+  color: #fff;
+}
+
 .pos-konsole-list {
   display: flex;
   flex-direction: column;
