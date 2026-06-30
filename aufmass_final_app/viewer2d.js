@@ -679,6 +679,7 @@ function renderSvg() {
       const badgeFont = Math.max(depth * 0.22, 7);
       const lineH     = badgeFont * 1.45;
       const startDist = depth * 0.5 + lineH * 0.85;   // knapp außerhalb der Außenkante
+      const maxBadgeW = el.len * PX_PER_M * 0.96;      // Badge nie breiter als das Feld
       positions.forEach((pos, i) => {
         const d  = startDist + i * lineH;
         const px = ecx + outx * d;
@@ -686,7 +687,12 @@ function renderSvg() {
         const p  = POS_BY_KEY[pos.cat];
         const label = posBadge(pos, bayData.len);
         const col   = (p && p.color) || '#333';
-        const w = label.length * badgeFont * 0.6 + badgeFont * 0.9;
+        // Lange Labels (z. B. Konsolen „K0,30×2 5,14m") werden so weit
+        // verkleinert, dass die Pille innerhalb der Feldbreite bleibt und nicht
+        // in Nachbarfelder ragt.
+        let font = badgeFont;
+        let w = label.length * font * 0.6 + font * 0.9;
+        if (w > maxBadgeW) { font *= maxBadgeW / w; w = maxBadgeW; }
         const rot = labelRot ? `rotate(${labelRot.toFixed(1)},${px},${py})` : '';
         g.appendChild(svgEl('rect', {
           x: px - w / 2, y: py - lineH / 2, width: w, height: lineH * 0.92,
@@ -695,7 +701,7 @@ function renderSvg() {
         }));
         const t = svgEl('text', {
           x: px, y: py, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
-          'font-size': badgeFont, 'font-family': 'system-ui, sans-serif',
+          'font-size': font, 'font-family': 'system-ui, sans-serif',
           'font-weight': '700', fill: col, 'pointer-events': 'none', transform: rot
         });
         t.textContent = label;
@@ -1868,6 +1874,93 @@ function onLoadFile(e) {
   e.target.value = '';
 }
 
+// ── Seiten-Zuordnung (Auswertung nach Gerüstseite) ──────────────────────────
+// Jedes Feld wird einer von vier Gebäudeseiten zugeordnet: Oben/Rechts/Unten/
+// Links. Waagerechte Felder liegen ober- oder unterhalb des Schwerpunkts,
+// senkrechte links oder rechts davon. So entsteht aus einem beliebigen Plan
+// eine saubere Gliederung nach Seite – wie auf dem Aufmaßblatt gewünscht.
+
+const SIDE_ORDER = ['top', 'right', 'bottom', 'left'];
+const SIDE_LABEL = {
+  top:    'Seite 1 · Oben (Straßenseite)',
+  right:  'Seite 2 · Rechts',
+  bottom: 'Seite 3 · Unten',
+  left:   'Seite 4 · Links'
+};
+
+/** Alle Felder mit Welt-Mittelpunkt + Ausrichtung (waagerecht/senkrecht). */
+function collectFields() {
+  const depth = state.depth * PX_PER_M;
+  const list  = [];
+  state.sections.forEach(sec => {
+    const dir = secVec(sec), o = outVec(dir);
+    let x = sec.x0, y = sec.y0;
+    sec.bays.forEach(bay => {
+      const pxLen = bay.len * PX_PER_M;
+      const cx = x + dir.dx * pxLen / 2 + o.dx * depth / 2;
+      const cy = y + dir.dy * pxLen / 2 + o.dy * depth / 2;
+      list.push({ bay, cx, cy, horiz: Math.abs(dir.dx) >= Math.abs(dir.dy) });
+      x += dir.dx * pxLen; y += dir.dy * pxLen;
+    });
+  });
+  return list;
+}
+
+/** Ordnet alle Felder den vier Seiten zu → { top:[bay,…], right:[…], … }. */
+function fieldsBySide() {
+  const groups = { top: [], right: [], bottom: [], left: [] };
+  const fields = collectFields();
+  if (!fields.length) return groups;
+  const mx = fields.reduce((s, f) => s + f.cx, 0) / fields.length;
+  const my = fields.reduce((s, f) => s + f.cy, 0) / fields.length;
+  fields.forEach(f => {
+    const side = f.horiz ? (f.cy <= my ? 'top' : 'bottom')
+                         : (f.cx <= mx ? 'left' : 'right');
+    groups[side].push(f.bay);
+  });
+  return groups;
+}
+
+/** Aggregiert die Positionen einer Feldmenge (Konsolen nach Typ getrennt). */
+function aggregatePositions(bays) {
+  const agg = {};
+  bays.forEach(bay => {
+    (bay.positions || []).forEach(pos => {
+      const p = POS_BY_KEY[pos.cat];
+      if (!p) return;
+      const key   = p.konsole ? 'konsole|' + (pos.typ || '') : pos.cat;
+      const label = p.konsole ? 'Konsole ' + (pos.typ || '') : p.label;
+      const a = agg[key] || (agg[key] = {
+        color: p.color, label, n: 0, lagen: 0, qtyByUnit: {}, meters: 0,
+        sort: POSITIONS.findIndex(x => x.key === pos.cat)
+      });
+      a.n++;
+      if (p.konsole) {
+        const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
+        a.lagen += lg;
+      } else {
+        const u = pos.unit || defaultUnit(pos.cat);
+        const v = effQty(pos, bay.len);
+        if (v != null) {
+          a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
+          if (u === 'm') a.meters += v;   // Meter-Mengen zählen direkt als lfd. Meter
+        }
+      }
+      const m = posMeters(pos, bay.len);   // Lagen × Feldlänge (Lagen-Mengen + Konsolen)
+      if (m != null) a.meters += m;
+    });
+  });
+  return Object.values(agg).sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label));
+}
+
+/** Mengen-Zelle einer aggregierten Position: Lagen + Mengen je Einheit. */
+function aggQtyText(a) {
+  const parts = [];
+  if (a.lagen) parts.push(a.lagen === 1 ? '1 Lage' : a.lagen + ' Lagen');
+  UNIT_DEFS.forEach(([u, lbl]) => { if (a.qtyByUnit[u]) parts.push(fmtQty(a.qtyByUnit[u]) + ' ' + lbl); });
+  return parts.join(' · ') || '–';
+}
+
 // ── PDF Export ─────────────────────────────────────────────────────────────
 
 async function exportPdf() {
@@ -1921,54 +2014,99 @@ async function exportPdf() {
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
     doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
 
-    // ── Positionsübersicht ────────────────────────────────────────────────
-    // Aggregierte Auswertung aller Positionen über alle Felder. Konsolen werden
-    // nach Typ getrennt aufgeführt. Nur ergänzen, wenn Positionen vorhanden sind.
-    const posAgg = {};
-    state.sections.forEach(s => s.bays.forEach(b => {
-      (b.positions || []).forEach(pos => {
-        const p = POS_BY_KEY[pos.cat];
-        if (!p) return;
-        const key = p.konsole ? 'konsole|' + (pos.typ || '') : pos.cat;
-        const label = p.konsole ? 'Konsole ' + (pos.typ || '') : p.label;
-        const a = posAgg[key] || (posAgg[key] = { color: p.color, label, n: 0, lagen: 0, qtyByUnit: {}, meters: 0 });
-        a.n++;
-        if (p.konsole) {
-          const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
-          a.lagen += lg;
-        } else {
-          const u = pos.unit || defaultUnit(pos.cat);
-          const v = effQty(pos, b.len);
-          if (v != null) a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
-        }
-        const m = posMeters(pos, b.len);
-        if (m != null) a.meters += m;
-      });
-    }));
-    const aggList = Object.values(posAgg);
-    if (aggList.length) {
-      const hx = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+    // ── Aufmaß nach Gerüstseite ───────────────────────────────────────────
+    // Statt einer langen Liste wird je Gebäudeseite (Oben/Rechts/Unten/Links)
+    // eine saubere Tabelle ausgegeben; am Ende eine Gesamt-Tabelle über alle
+    // Seiten – übersichtlich als Material-/Bestellgrundlage.
+    const hx = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+    const allBays = state.sections.flatMap(s => s.bays);
+    const anyPos  = allBays.some(b => (b.positions || []).length);
+
+    if (anyPos) {
+      const groups = fieldsBySide();
+      const sideBlocks = SIDE_ORDER
+        .map(side => ({ side, bays: groups[side] }))
+        .filter(b => b.bays.some(bay => (bay.positions || []).length));
+
+      const tableW = availW;
+      const cols = [
+        { title: 'Position',   w: 0.42, align: 'left'   },
+        { title: 'Anzahl',     w: 0.13, align: 'center' },
+        { title: 'Menge',      w: 0.27, align: 'left'   },
+        { title: 'lfd. Meter', w: 0.18, align: 'right'  }
+      ];
+      const colX = []; let acc = margin;
+      cols.forEach(c => { colX.push(acc); acc += c.w * tableW; });
+      const colMid  = i => colX[i] + cols[i].w * tableW / 2;
+      const colRight = i => colX[i] + cols[i].w * tableW - 2.5;
+      const rowH = 7, headH = 7, sideHdrH = 8.5;
+
       doc.addPage();
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
-      doc.text('Positionsübersicht', margin, margin + 6);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-      let ly = margin + 18;
-      aggList.forEach(a => {
-        if (ly > pdfH - margin) { doc.addPage(); ly = margin + 10; }
+      let py = margin + 4;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
+      doc.text('Aufmaß nach Gerüstseite', margin, py);
+      py += 9;
+
+      const drawColHeader = () => {
+        doc.setFillColor(236, 239, 243);
+        doc.rect(margin, py, tableW, headH, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(70, 70, 70);
+        cols.forEach((c, i) => {
+          const tx = c.align === 'right' ? colRight(i) : c.align === 'center' ? colMid(i) : colX[i] + (i === 0 ? 8 : 2);
+          doc.text(c.title, tx, py + headH - 2.2, { align: c.align });
+        });
+        py += headH;
+      };
+
+      const drawRow = (a, shade) => {
+        if (shade) { doc.setFillColor(247, 249, 251); doc.rect(margin, py, tableW, rowH, 'F'); }
         const [r, g2, b2] = hx(a.color);
-        doc.setFillColor(r, g2, b2); doc.setDrawColor(60, 60, 60);
-        doc.rect(margin, ly - 4, 5, 5, 'FD');
-        let txt = `${a.label}:  ${a.n}×`;
-        if (a.lagen) txt += `  ·  ${a.lagen} Lagen gesamt`;
-        const qparts = UNIT_DEFS
-          .filter(([u]) => a.qtyByUnit[u])
-          .map(([u]) => `${fmtQty(a.qtyByUnit[u])} ${UNIT_LABEL[u]}`);
-        if (qparts.length) txt += `  ·  ${qparts.join(' / ')} gesamt`;
-        if (a.meters) txt += `  ·  ${fmtQty(a.meters)} m (lfd.)`;
-        doc.setTextColor(20, 20, 20);
-        doc.text(txt, margin + 8, ly);
-        ly += 8;
+        doc.setFillColor(r, g2, b2); doc.setDrawColor(130, 130, 130); doc.setLineWidth(0.2);
+        doc.rect(colX[0] + 1.5, py + rowH / 2 - 2, 4, 4, 'FD');
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(25, 25, 25);
+        doc.text(a.label, colX[0] + 8, py + rowH - 2.7);
+        doc.text(a.n + '×', colMid(1), py + rowH - 2.7, { align: 'center' });
+        doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+        doc.text(aggQtyText(a), colX[2] + 2, py + rowH - 2.7);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 25, 25);
+        doc.text(a.meters ? fmtQty(a.meters) + ' m' : '–', colRight(3), py + rowH - 2.7, { align: 'right' });
+        py += rowH;
+        doc.setDrawColor(224, 227, 231); doc.setLineWidth(0.1);
+        doc.line(margin, py, margin + tableW, py);
+      };
+
+      const drawTable = (title, subtitle, aggList) => {
+        // Passt die ganze Tabelle nicht mehr auf die Seite, aber auf eine leere
+        // Seite → komplett umbrechen, damit Tabellen nicht zerrissen werden.
+        const tableH = sideHdrH + headH + aggList.length * rowH;
+        if (py + tableH > pdfH - margin && tableH <= pdfH - 2 * margin - 6) { doc.addPage(); py = margin + 6; }
+        else if (py + sideHdrH + headH + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; }
+        doc.setFillColor(31, 78, 121);
+        doc.rect(margin, py, tableW, sideHdrH, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
+        doc.text(title, margin + 3, py + sideHdrH - 2.7);
+        if (subtitle) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+          doc.text(subtitle, margin + tableW - 3, py + sideHdrH - 2.7, { align: 'right' });
+        }
+        py += sideHdrH;
+        drawColHeader();
+        aggList.forEach((a, i) => {
+          if (py + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; drawColHeader(); }
+          drawRow(a, i % 2 === 1);
+        });
+        py += 6;
+      };
+
+      sideBlocks.forEach(({ side, bays }) => {
+        const len = bays.reduce((s, b) => s + b.len, 0);
+        const cnt = bays.filter(bay => (bay.positions || []).length).length;
+        drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m`, aggregatePositions(bays));
       });
+
+      // Gesamt über alle Seiten
+      const totalLenAll = allBays.reduce((s, b) => s + b.len, 0);
+      drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m`, aggregatePositions(allBays));
     }
 
     doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
