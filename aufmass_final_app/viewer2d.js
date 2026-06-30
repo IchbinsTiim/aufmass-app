@@ -18,6 +18,39 @@ const HANDLE_R     = 18;
 const SNAP_STEP    = 0.25;
 const FIELD_PRESETS = [0.73, 1.09, 1.57, 2.07, 2.57, 3.07];
 
+// ── Feld-Kategorien ────────────────────────────────────────────────────────
+// Jedes Feld gehört zu einer Kategorie (Gerüst + alle Positionen aus der
+// Aufmaß-App). Jede Kategorie hat eine eigene Farbe (Wiedererkennung im Plan)
+// und die für sie relevanten Maße. Die Maßwerte werden direkt am Bay gespeichert
+// (bay[key]); die Feldlänge (bay.len) gilt für alle Kategorien.
+const MEASURE_DEFS = {
+  hL:      { label: 'Höhe links',       unit: 'm',    sym: '↥', dec: 2 },
+  hR:      { label: 'Höhe rechts',      unit: 'm',    sym: '↥', dec: 2 },
+  breite:  { label: 'Breite / Auslage', unit: 'm',    sym: 'B', dec: 2 },
+  flaeche: { label: 'Fläche',           unit: 'm²',   sym: '▦', dec: 2 },
+  anzahl:  { label: 'Anzahl',           unit: 'Stk.', sym: '×', dec: 0 }
+};
+
+const FIELD_CATEGORIES = [
+  { key: 'geruest',      label: 'Gerüst',           fill: '#deeeff', stroke: '#2c6fa8', measures: ['hL', 'hR'] },
+  { key: 'konsole',      label: 'Konsole',          fill: '#ffe9cc', stroke: '#cc7a00', measures: ['breite', 'hL', 'hR'] },
+  { key: 'gelaender',    label: 'Geländer',         fill: '#e3f6e3', stroke: '#2f9e44', measures: ['hL', 'hR'] },
+  { key: 'treppenturm',  label: 'Treppenturm',      fill: '#ece1fb', stroke: '#8e44ec', measures: ['hL', 'hR'] },
+  { key: 'geruesttreppe',label: 'Gerüsttreppe',     fill: '#e0e7ff', stroke: '#4659c9', measures: ['hL', 'hR'] },
+  { key: 'netz',         label: 'Netz',             fill: '#eceff1', stroke: '#5a6b7a', measures: ['flaeche'] },
+  { key: 'dachfang',     label: 'Dachfang',         fill: '#fff3c4', stroke: '#b08900', measures: ['hL', 'hR'] },
+  { key: 'verbreiterung',label: 'Verbreiterung',    fill: '#d8f3f0', stroke: '#0f9b8e', measures: ['breite', 'hL', 'hR'] },
+  { key: 'ueberbrueckung',label: 'Überbrückung',    fill: '#f3e1d8', stroke: '#a5612c', measures: ['hL', 'hR'] },
+  { key: 'bekleidung',   label: 'Bekleidung',       fill: '#f6e2ef', stroke: '#a52c7e', measures: ['flaeche'] },
+  { key: 'schutzdach',   label: 'Schutzdach',       fill: '#fde2e2', stroke: '#c0392b', measures: ['flaeche', 'hL', 'hR'] },
+  { key: 'aufzug',       label: 'Aufzug',           fill: '#e2ecf6', stroke: '#1f5f9e', measures: ['hL', 'hR', 'anzahl'] },
+  { key: 'lampen',       label: 'Lampen',           fill: '#fff6cc', stroke: '#b59a00', measures: ['anzahl'] },
+  { key: 'bautenschutz', label: 'Bautenschutzmatte',fill: '#e7e2d8', stroke: '#7a6a2c', measures: ['flaeche'] },
+  { key: 'fleece',       label: 'Fleece',           fill: '#eae2f6', stroke: '#6a2ca5', measures: ['flaeche'] }
+];
+const CAT_BY_KEY = Object.fromEntries(FIELD_CATEGORIES.map(c => [c.key, c]));
+function catOf(bay) { return CAT_BY_KEY[bay && bay.category] || FIELD_CATEGORIES[0]; }
+
 const DIR_META = {
   N: { dx:  0, dy: -1, label: 'N ↑' },
   E: { dx:  1, dy:  0, label: 'O →' },
@@ -55,8 +88,14 @@ let pdfMode        = false;  // when true: render clean plan (no handles)
 // ── Factories ──────────────────────────────────────────────────────────────
 
 function mkBay(len = 2.57) {
-  // hL / hR = Höhe am linken / rechten Stiel (null = noch nicht erfasst)
-  return { id: ++_bId, len: +parseFloat(len).toFixed(2), hL: null, hR: null };
+  // category = Feld-Kategorie (Gerüst/Konsole/…). hL/hR = Höhe am linken/rechten
+  // Stiel. breite/flaeche/anzahl = kategorie-spezifische Maße (null = nicht erfasst).
+  return {
+    id: ++_bId, len: +parseFloat(len).toFixed(2),
+    category: 'geruest',
+    hL: null, hR: null, breite: null, flaeche: null, anzahl: null,
+    notiz: ''
+  };
 }
 
 function mkSection(dir = 'S', x0 = 0, y0 = 0) {
@@ -435,14 +474,16 @@ function renderSvg() {
     }))
   );
 
-  // 2. Bay rectangles
+  // 2. Bay rectangles (farbcodiert nach Kategorie)
   els.filter(e => e.type === 'bay').forEach(el => {
+    const bayData    = state.sections[el.si].bays[el.bi];
+    const cat        = catOf(bayData);
     const isSelected = el.si === selectedSi;
     const poly = svgEl('polygon', {
       points: ptsStr(el.pts),
-      fill: isSelected ? '#c5e3ff' : '#deeeff',
-      stroke: isSelected ? '#005bb5' : '#2c6fa8',
-      'stroke-width': isSelected ? 2.5 : 2,
+      fill: cat.fill,
+      stroke: isSelected ? '#0a2f58' : cat.stroke,
+      'stroke-width': isSelected ? 3.5 : 2,
       cursor: 'pointer'
     });
     poly.addEventListener('click', ev => {
@@ -454,50 +495,76 @@ function renderSvg() {
     g.appendChild(poly);
 
     const labelRot = uprightDeg(el.ang);
-    const txt = svgEl('text', {
-      x: el.cx, y: el.cy,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': bayFontSize, 'font-family': 'system-ui, sans-serif',
-      fill: '#0a2f58', 'font-weight': '700',
-      transform: labelRot ? `rotate(${labelRot.toFixed(1)},${el.cx},${el.cy})` : '',
-      'pointer-events': 'none'
-    });
-    txt.textContent = el.len.toFixed(2);
-    g.appendChild(txt);
 
-    // Höhen links/rechts (nur wenn erfasst).
-    // Die Höhe wird IMMER an der bildschirm-unteren Kante des Feldes angezeigt:
+    // ── Geometrie für Maß-Beschriftungen ──────────────────────────────────
+    // Maße werden IMMER an der bildschirm-unteren Kante des Feldes angezeigt:
     // bei waagerechtem Feld unten, bei senkrechtem (90° gedreht) Feld rechts –
     // konsistent, egal wie das Feld gedreht ist.
-    const bayData = state.sections[el.si].bays[el.bi];
     const [p0, p1, p2, p3] = el.pts;          // p0,p1 = Innenkante (Wand), p3,p2 = Außenkante
-    // Lauf eher waagerecht? → untere Kante (größeres y), sonst rechte Kante (größeres x).
     const runHoriz  = Math.abs(p1.x - p0.x) >= Math.abs(p1.y - p0.y);
     const innerMidY = (p0.y + p1.y) / 2, outerMidY = (p2.y + p3.y) / 2;
     const innerMidX = (p0.x + p1.x) / 2, outerMidX = (p2.x + p3.x) / 2;
     const useOuter  = runHoriz ? (outerMidY >= innerMidY) : (outerMidX >= innerMidX);
     const A = useOuter ? p3 : p0;             // gewählte Kante: Anfang (Startseite)
     const B = useOuter ? p2 : p1;             //                  Ende  (Endseite)
-    // Einwärts-Normale (zur Feldmitte) – Text leicht ins Feld hineinrücken.
     const ecx = (p0.x + p1.x + p2.x + p3.x) / 4, ecy = (p0.y + p1.y + p2.y + p3.y) / 4;
     const emx = (A.x + B.x) / 2,                 emy = (A.y + B.y) / 2;
-    let inx = ecx - emx, iny = ecy - emy;
+    let inx = ecx - emx, iny = ecy - emy;             // Unterkante → Mitte
     const ilen = Math.hypot(inx, iny) || 1; inx /= ilen; iny /= ilen;
-    const inset = depth * 0.26;
+    const inset = depth * 0.24;
     const hPos = f => ({ x: A.x + (B.x - A.x) * f + inx * inset, y: A.y + (B.y - A.y) * f + iny * inset });
-    const hFont = Math.max(depth * 0.26, 7);
-    [[bayData.hL, hPos(0.16)], [bayData.hR, hPos(0.84)]].forEach(([h, pos]) => {
-      if (h == null) return;
-      const ht = svgEl('text', {
+
+    // Außen-Richtung (Innenkante/Wand → Mitte → Außenkante). Der orange Move-Griff
+    // sitzt auf der Innenkanten-Mitte, daher das Kategorie-Label dorthin NICHT legen.
+    const innerEmX = (p0.x + p1.x) / 2, innerEmY = (p0.y + p1.y) / 2;
+    let outx = ecx - innerEmX, outy = ecy - innerEmY;
+    const olen = Math.hypot(outx, outy) || 1; outx /= olen; outy /= olen;
+
+    const drawEdge = (pos, str, color, font) => {
+      const t = svgEl('text', {
         x: pos.x, y: pos.y,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': hFont, 'font-family': 'system-ui, sans-serif',
-        fill: '#1f7a3d', 'font-weight': '700', 'pointer-events': 'none',
+        'font-size': font, 'font-family': 'system-ui, sans-serif',
+        fill: color, 'font-weight': '700', 'pointer-events': 'none',
         transform: labelRot ? `rotate(${labelRot.toFixed(1)},${pos.x},${pos.y})` : ''
       });
-      ht.textContent = '↥ ' + h.toFixed(2);
-      g.appendChild(ht);
+      t.textContent = str;
+      g.appendChild(t);
+    };
+
+    // Feldlänge mittig.
+    const txt = svgEl('text', {
+      x: ecx, y: ecy,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': bayFontSize, 'font-family': 'system-ui, sans-serif',
+      fill: '#0a2f58', 'font-weight': '700',
+      transform: labelRot ? `rotate(${labelRot.toFixed(1)},${ecx},${ecy})` : '',
+      'pointer-events': 'none'
     });
+    txt.textContent = el.len.toFixed(2);
+    g.appendChild(txt);
+
+    // Höhen an den beiden Enden der Unterkante (nur Kategorien mit Höhen).
+    const hFont = Math.max(depth * 0.24, 7);
+    const hasHeights = cat.measures.includes('hL') && cat.measures.includes('hR');
+    if (hasHeights) {
+      if (bayData.hL != null) drawEdge(hPos(0.12), '↥ ' + bayData.hL.toFixed(2), '#1f7a3d', hFont);
+      if (bayData.hR != null) drawEdge(hPos(0.88), '↥ ' + bayData.hR.toFixed(2), '#1f7a3d', hFont);
+    }
+
+    // Kategorie + Nicht-Höhen-Maße – zur Außenkante hin versetzt (über der Länge),
+    // damit nichts mit Move-Griff oder Höhen kollidiert.
+    const extras = [];
+    cat.measures.forEach(k => {
+      if (k === 'hL' || k === 'hR') return;
+      const v = bayData[k];
+      if (v == null) return;
+      const md = MEASURE_DEFS[k];
+      extras.push(md.sym + ' ' + v.toFixed(md.dec) + ' ' + md.unit);
+    });
+    const catStr  = [cat.label, ...extras].join('   ·   ');
+    const catPos  = { x: ecx + outx * depth * 0.30, y: ecy + outy * depth * 0.30 };
+    drawEdge(catPos, catStr, cat.stroke, Math.max(depth * 0.20, 7));
   });
 
   // 3. Wall lines (schlanke Wandkante – zeigt die Gebäudeseite an)
@@ -588,7 +655,7 @@ function renderSvg() {
     });
   }
 
-  if (pdfMode) { drawScaleBar(g, minX, minY, vw, vh, infoFontSize); return; }
+  if (pdfMode) { return; }   // PDF: kein Maßstabsbalken (auf Wunsch entfernt)
 
   // 5. Blaue Schnell-Hinzufügen-Buttons (links / rechts) am ausgewählten Feld.
   //    Ein Klick fügt sofort ein weiteres Feld (Standard 2,57 m) in dieselbe
@@ -1115,56 +1182,107 @@ function openEditSheet(si, bi) {
     rotPresets.appendChild(b);
   });
 
-  // ── Höhen (links / rechts) ──────────────────────────────────────────────
-  const hLabel = document.createElement('div');
-  hLabel.className = 'sheet-section-label';
-  hLabel.textContent = 'Höhen (m)';
+  // ── Kategorie ───────────────────────────────────────────────────────────
+  const catLabel = document.createElement('div');
+  catLabel.className = 'sheet-section-label';
+  catLabel.textContent = 'Kategorie';
 
-  const hRow = document.createElement('div');
-  hRow.className = 'sheet-height-row';
-
-  const makeHeightField = (labelTxt, key) => {
-    const field = document.createElement('div');
-    field.className = 'height-field';
-
-    const lab = document.createElement('span');
-    lab.className = 'height-label';
-    lab.textContent = labelTxt;
-
-    const hInp = document.createElement('input');
-    hInp.type = 'number'; hInp.className = 'height-inp';
-    hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
-    hInp.value = bay[key] == null ? '' : bay[key].toFixed(2);
-    hInp.addEventListener('input', () => {
-      const v = parseFloat(hInp.value);
-      bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
-      renderSvg();
-    });
-
-    field.appendChild(lab); field.appendChild(hInp);
-    return { field, input: hInp };
-  };
-
-  const left  = makeHeightField('Links',  'hL');
-  const right = makeHeightField('Rechts', 'hR');
-
-  const eqBtn = document.createElement('button');
-  eqBtn.className = 'height-eq'; eqBtn.type = 'button';
-  eqBtn.title = 'Beide Höhen gleich setzen';
-  eqBtn.textContent = '=';
-  eqBtn.addEventListener('click', () => {
-    // bevorzugt den bereits eingetragenen Wert auf die andere Seite kopieren
-    const src = bay.hL != null ? bay.hL : bay.hR;
-    if (src == null) return;
-    bay.hL = src; bay.hR = src;
-    left.input.value  = src.toFixed(2);
-    right.input.value = src.toFixed(2);
-    renderSvg();
+  const catSel = document.createElement('select');
+  catSel.className = 'sheet-cat-select';
+  FIELD_CATEGORIES.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.key; o.textContent = c.label;
+    if ((bay.category || 'geruest') === c.key) o.selected = true;
+    catSel.appendChild(o);
   });
 
-  hRow.appendChild(left.field);
-  hRow.appendChild(eqBtn);
-  hRow.appendChild(right.field);
+  // ── Maße (kategorie-spezifisch) ─────────────────────────────────────────
+  const measLabel = document.createElement('div');
+  measLabel.className = 'sheet-section-label';
+  measLabel.textContent = 'Maße';
+
+  const measWrap = document.createElement('div');
+  measWrap.className = 'sheet-measures';
+
+  const buildMeasures = () => {
+    measWrap.innerHTML = '';
+    const cat = catOf(bay);
+    const hasHeights = cat.measures.includes('hL') && cat.measures.includes('hR');
+
+    if (hasHeights) {
+      const hRow = document.createElement('div');
+      hRow.className = 'sheet-height-row';
+
+      const makeHeightField = (labelTxt, key) => {
+        const field = document.createElement('div');
+        field.className = 'height-field';
+        const lab = document.createElement('span');
+        lab.className = 'height-label';
+        lab.textContent = labelTxt;
+        const hInp = document.createElement('input');
+        hInp.type = 'number'; hInp.className = 'height-inp';
+        hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
+        hInp.value = bay[key] == null ? '' : bay[key].toFixed(2);
+        hInp.addEventListener('input', () => {
+          const v = parseFloat(hInp.value);
+          bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
+          renderSvg();
+        });
+        field.appendChild(lab); field.appendChild(hInp);
+        return { field, input: hInp };
+      };
+
+      const left  = makeHeightField('Höhe links',  'hL');
+      const right = makeHeightField('Höhe rechts', 'hR');
+
+      const eqBtn = document.createElement('button');
+      eqBtn.className = 'height-eq'; eqBtn.type = 'button';
+      eqBtn.title = 'Beide Höhen gleich setzen';
+      eqBtn.textContent = '=';
+      eqBtn.addEventListener('click', () => {
+        const src = bay.hL != null ? bay.hL : bay.hR;
+        if (src == null) return;
+        bay.hL = src; bay.hR = src;
+        left.input.value  = src.toFixed(2);
+        right.input.value = src.toFixed(2);
+        renderSvg();
+      });
+
+      hRow.appendChild(left.field); hRow.appendChild(eqBtn); hRow.appendChild(right.field);
+      measWrap.appendChild(hRow);
+    }
+
+    // Weitere Einzelmaße (Breite / Fläche / Anzahl)
+    cat.measures.forEach(k => {
+      if (k === 'hL' || k === 'hR') return;
+      const md = MEASURE_DEFS[k];
+      const field = document.createElement('div');
+      field.className = 'measure-field';
+      const lab = document.createElement('span');
+      lab.className = 'measure-label';
+      lab.textContent = md.label + ' (' + md.unit + ')';
+      const mInp = document.createElement('input');
+      mInp.type = 'number'; mInp.className = 'measure-inp';
+      mInp.placeholder = '–'; mInp.min = '0';
+      mInp.step = (k === 'anzahl') ? '1' : '0.05';
+      mInp.inputMode = (k === 'anzahl') ? 'numeric' : 'decimal';
+      mInp.value = bay[k] == null ? '' : bay[k].toFixed(md.dec);
+      mInp.addEventListener('input', () => {
+        const v = parseFloat(mInp.value);
+        bay[k] = (isNaN(v) || v < 0) ? null : +v.toFixed(md.dec);
+        renderSvg();
+      });
+      field.appendChild(lab); field.appendChild(mInp);
+      measWrap.appendChild(field);
+    });
+  };
+
+  catSel.addEventListener('change', () => {
+    bay.category = catSel.value;
+    buildMeasures();
+    renderSvg();
+  });
+  buildMeasures();
 
   // Actions
   const actRow = document.createElement('div');
@@ -1197,14 +1315,16 @@ function openEditSheet(si, bi) {
   actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
 
   sheet.appendChild(hdr);
+  sheet.appendChild(catLabel);
+  sheet.appendChild(catSel);
   sheet.appendChild(dirRow);
   sheet.appendChild(stdDiv);
   sheet.appendChild(adjRow);
   sheet.appendChild(rotLabel);
   sheet.appendChild(rotRow);
   sheet.appendChild(rotPresets);
-  sheet.appendChild(hLabel);
-  sheet.appendChild(hRow);
+  sheet.appendChild(measLabel);
+  sheet.appendChild(measWrap);
   sheet.appendChild(actRow);
 
   document.body.appendChild(overlay);
@@ -1286,11 +1406,39 @@ function renderSections() {
     const baysDiv = document.createElement('div');
     baysDiv.className = 'bays-div';
     sec.bays.forEach((bay, bi) => {
+      const cat = catOf(bay);
       const row = document.createElement('div');
       row.className = 'bay-row';
+      // Farbiger Kategorie-Streifen links → Kategorie auf einen Blick erkennbar
+      row.style.borderLeft = `4px solid ${cat.stroke}`;
+
+      // Zeile 1: Nummer · Kategorie-Auswahl · Löschen
+      const top = document.createElement('div');
+      top.className = 'bay-row-top';
 
       const num = document.createElement('span');
       num.className = 'bay-num'; num.textContent = `F${bi + 1}`;
+
+      const catSel = document.createElement('select');
+      catSel.className = 'bay-cat-select';
+      catSel.style.color = cat.stroke;
+      FIELD_CATEGORIES.forEach(c => {
+        const o = document.createElement('option');
+        o.value = c.key; o.textContent = c.label;
+        if ((bay.category || 'geruest') === c.key) o.selected = true;
+        catSel.appendChild(o);
+      });
+      catSel.addEventListener('change', () => { bay.category = catSel.value; renderAll(); });
+
+      const rmBay = document.createElement('button');
+      rmBay.className = 'remove-btn small'; rmBay.textContent = '×';
+      rmBay.addEventListener('click', () => { sec.bays.splice(bi, 1); renderAll(); });
+
+      top.appendChild(num); top.appendChild(catSel); top.appendChild(rmBay);
+
+      // Zeile 2: Längen-Eingabe · Schnellwahl
+      const bottom = document.createElement('div');
+      bottom.className = 'bay-row-bottom';
 
       const inp = document.createElement('input');
       inp.type = 'number'; inp.className = 'bay-inp';
@@ -1306,11 +1454,9 @@ function renderSections() {
         qd.appendChild(qb);
       });
 
-      const rmBay = document.createElement('button');
-      rmBay.className = 'remove-btn small'; rmBay.textContent = '×';
-      rmBay.addEventListener('click', () => { sec.bays.splice(bi, 1); renderAll(); });
+      bottom.appendChild(inp); bottom.appendChild(qd);
 
-      row.appendChild(num); row.appendChild(inp); row.appendChild(qd); row.appendChild(rmBay);
+      row.appendChild(top); row.appendChild(bottom);
       baysDiv.appendChild(row);
     });
 
@@ -1482,6 +1628,41 @@ async function exportPdf() {
   doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   Gesamtlänge: ${totalLen.toFixed(2)} m`, margin, margin + 12);
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
     doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
+
+    // ── Kategorie-Legende / Positionsübersicht ────────────────────────────
+    // Aggregierte Auswertung je Kategorie. Nur ergänzen, wenn mehr als eine
+    // Kategorie verwendet wird (sonst bleibt der Plan einseitig).
+    const catAgg = {};
+    state.sections.forEach(s => s.bays.forEach(b => {
+      const c = catOf(b);
+      const a = catAgg[c.key] || (catAgg[c.key] = { cat: c, n: 0, len: 0, flaeche: 0, anzahl: 0 });
+      a.n++; a.len += b.len;
+      if (b.flaeche) a.flaeche += b.flaeche;
+      if (b.anzahl)  a.anzahl  += b.anzahl;
+    }));
+    const aggList = Object.values(catAgg);
+    if (aggList.length > 1) {
+      const hx = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+      doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+      doc.text('Positionen nach Kategorie', margin, margin + 6);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+      let ly = margin + 18;
+      aggList.forEach(a => {
+        if (ly > pdfH - margin) { doc.addPage(); ly = margin + 10; }
+        const [fr, fg, fb] = hx(a.cat.fill);
+        const [sr, sg, sb] = hx(a.cat.stroke);
+        doc.setFillColor(fr, fg, fb); doc.setDrawColor(sr, sg, sb);
+        doc.rect(margin, ly - 4, 5, 5, 'FD');
+        let txt = `${a.cat.label}:  ${a.n} Feld${a.n !== 1 ? 'er' : ''}  ·  Länge ${a.len.toFixed(2)} m`;
+        if (a.flaeche) txt += `  ·  ${a.flaeche.toFixed(2)} m²`;
+        if (a.anzahl)  txt += `  ·  ${a.anzahl} Stk.`;
+        doc.setTextColor(20, 20, 20);
+        doc.text(txt, margin + 8, ly);
+        ly += 8;
+      });
+    }
+
     doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
   } finally {
     pdfMode    = false;
