@@ -1976,6 +1976,7 @@ function initApp() {
 
   document.getElementById('deleteProjectBtn').addEventListener('click', deleteCurrentProject);
   document.getElementById('addSideBtn').addEventListener('click', addSide);
+  document.getElementById('addSideBtnBottom').addEventListener('click', addSide);
   document.getElementById('saveProjectBtn').addEventListener('click', saveCurrentProject);
   document.getElementById('exportPdfBtn').addEventListener('click', generatePDF);
   document.getElementById('calcAnfahrtBtn').addEventListener('click', autoCalcAnfahrt);
