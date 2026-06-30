@@ -37,7 +37,7 @@ const FIELD_CATEGORIES = [
   { key: 'gelaender',    label: 'Geländer',         fill: '#e3f6e3', stroke: '#2f9e44', measures: ['hL', 'hR'] },
   { key: 'treppenturm',  label: 'Treppenturm',      fill: '#ece1fb', stroke: '#8e44ec', measures: ['hL', 'hR'] },
   { key: 'geruesttreppe',label: 'Gerüsttreppe',     fill: '#e0e7ff', stroke: '#4659c9', measures: ['hL', 'hR'] },
-  { key: 'netz',         label: 'Netz',             fill: '#eceff1', stroke: '#5a6b7a', measures: ['flaeche'] },
+  { key: 'netz',         label: 'Netz',             fill: '#eceff1', stroke: '#5a6b7a', measures: ['hL', 'hR', 'flaeche'] },
   { key: 'dachfang',     label: 'Dachfang',         fill: '#fff3c4', stroke: '#b08900', measures: ['hL', 'hR'] },
   { key: 'verbreiterung',label: 'Verbreiterung',    fill: '#d8f3f0', stroke: '#0f9b8e', measures: ['breite', 'hL', 'hR'] },
   { key: 'ueberbrueckung',label: 'Überbrückung',    fill: '#f3e1d8', stroke: '#a5612c', measures: ['hL', 'hR'] },
