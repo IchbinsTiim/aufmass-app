@@ -317,10 +317,6 @@ function computeLayout() {
         handleX: (p1.x + p2.x) / 2,
         handleY: (p1.y + p2.y) / 2
       });
-      els.push({
-        type: 'handle', x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2,
-        len: bay.len, si, bi, ang, out
-      });
 
       x += dir.dx * pxLen;
       y += dir.dy * pxLen;
@@ -502,12 +498,12 @@ function renderSvg() {
 
   // 5b. Move handles (orange ✥) — always visible, even in PDF mode use pdfMode to skip
   if (!pdfMode) {
-    const MOVE_R = Math.round(HANDLE_R * 0.85);
+    const MOVE_R = Math.round(HANDLE_R * 1.25);
     els.filter(e => e.type === 'moveHandle').forEach(el => {
       const isActive = drag && drag.type === 'move' && drag.si === el.si;
 
       const hit = svgEl('circle', {
-        cx: el.x, cy: el.y, r: MOVE_R * 2.8,
+        cx: el.x, cy: el.y, r: MOVE_R * 1.7,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:move', 'data-si': el.si
       });
       hit.addEventListener('pointerdown', onMoveHandleDown);
@@ -582,45 +578,50 @@ function renderSvg() {
 
   if (pdfMode) { drawScaleBar(g, minX, minY, vw, vh, infoFontSize); return; }
 
-  // 5. Drag handles (blue ↕/↔)
-  els.filter(e => e.type === 'handle').forEach(el => {
-    const isActive = drag && drag.si === el.si && drag.bi === el.bi;
+  // 5. Blaue Schnell-Hinzufügen-Buttons (links / rechts) am ausgewählten Feld.
+  //    Ein Klick fügt sofort ein weiteres Feld (Standard 2,57 m) in dieselbe
+  //    Laufrichtung an – ohne Dialog. Ersetzt die früheren blauen Zieh-Griffe.
+  const busyAdd = drag && (drag.type === 'move' || drag.type === 'rotate' || drag.type === 'resize');
+  const selSec  = selectedSi !== null ? state.sections[selectedSi] : null;
+  if (selSec && selSec.bays.length && !busyAdd) {
+    const dir = secVec(selSec);
+    const out = outVec(dir);
+    const end = sectionEnd(selSec);
+    const EXT_R = Math.round(HANDLE_R * 1.05);
+    const axOff = HANDLE_R * 1.7;
+    const addPts = [
+      { x: selSec.x0 + out.dx * depth / 2 - dir.dx * axOff,
+        y: selSec.y0 + out.dy * depth / 2 - dir.dy * axOff, side: 'back' },
+      { x: end.x      + out.dx * depth / 2 + dir.dx * axOff,
+        y: end.y      + out.dy * depth / 2 + dir.dy * axOff, side: 'fwd'  }
+    ];
+    addPts.forEach(pt => {
+      const hit = svgEl('circle', {
+        cx: pt.x, cy: pt.y, r: EXT_R * 2.2,
+        fill: 'transparent', style: 'cursor:pointer'
+      });
+      hit.addEventListener('click', ev => {
+        ev.stopPropagation();
+        quickExtend(selectedSi, pt.side);
+      });
+      g.appendChild(hit);
 
-    const hit = svgEl('circle', {
-      cx: el.x, cy: el.y, r: HANDLE_R * 2.2, fill: 'transparent',
-      style: 'cursor:grab', 'data-si': el.si, 'data-bi': el.bi
+      g.appendChild(svgEl('circle', {
+        cx: pt.x, cy: pt.y, r: EXT_R,
+        fill: '#007aff', stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+      }));
+
+      const plus = svgEl('text', {
+        x: pt.x, y: pt.y,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': Math.round(EXT_R * 1.25),
+        'font-family': 'system-ui, sans-serif',
+        fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+      });
+      plus.textContent = '+';
+      g.appendChild(plus);
     });
-    hit.addEventListener('pointerdown', onHandleDown);
-    g.appendChild(hit);
-
-    g.appendChild(svgEl('circle', {
-      cx: el.x, cy: el.y, r: HANDLE_R,
-      fill: isActive ? '#005bb5' : '#007aff',
-      stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
-    }));
-
-    const arrow = svgEl('text', {
-      x: el.x, y: el.y,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': Math.round(HANDLE_R * 1.05),
-      'font-family': 'system-ui, sans-serif',
-      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none',
-      transform: `rotate(${(el.ang || 0).toFixed(1)},${el.x},${el.y})`
-    });
-    arrow.textContent = '↔';
-    g.appendChild(arrow);
-
-    if (isActive) {
-      const len = state.sections[el.si].bays[el.bi].len;
-      const out = el.out || { dx: 0, dy: -1 };
-      const bx = el.x + out.dx * HANDLE_R * 2.8;
-      const by = el.y + out.dy * HANDLE_R * 2.8;
-      g.appendChild(svgEl('rect', { x: bx - 34, y: by - 15, width: 68, height: 30, rx: 7, fill: '#111', opacity: '0.88', 'pointer-events': 'none' }));
-      const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 15, 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
-      bt.textContent = len.toFixed(2) + ' m';
-      g.appendChild(bt);
-    }
-  });
+  }
 
   // 6. Junction "+" buttons — only for the selected section, hidden while moving
   const ADD_R = Math.round(HANDLE_R * 1.2);
@@ -722,20 +723,33 @@ function drawScaleBar(g, minX, minY, vw, vh, fontSize) {
 
 // ── Drag handlers ──────────────────────────────────────────────────────────
 
-function onHandleDown(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const si  = parseInt(e.currentTarget.dataset.si);
-  const bi  = parseInt(e.currentTarget.dataset.bi);
-  const svg = document.getElementById('planSvg');
-  svg.setPointerCapture(e.pointerId);
-  drag = {
-    type: 'resize', si, bi,
-    startLen: state.sections[si].bays[bi].len,
-    startPt:  screenToSvg(e.clientX, e.clientY),
-    dir:      secVec(state.sections[si]),
-    moved:    false
-  };
+/**
+ * Schnell-Hinzufügen über die blauen +-Buttons: hängt ein eigenständiges,
+ * einzeln verschiebbares Feld (Standard 2,57 m) in Laufrichtung an das
+ * ausgewählte Feld an – vorwärts (`fwd`) oder rückwärts (`back`).
+ */
+function quickExtend(si, side) {
+  const sec = state.sections[si];
+  if (!sec || !sec.bays.length) return;
+  const len   = 2.57;
+  const dir   = secVec(sec);
+  const pxLen = len * PX_PER_M;
+
+  let x0, y0;
+  if (side === 'fwd') {
+    const end = sectionEnd(sec);
+    x0 = end.x; y0 = end.y;
+  } else {
+    x0 = sec.x0 - dir.dx * pxLen;
+    y0 = sec.y0 - dir.dy * pxLen;
+  }
+
+  const ns = mkSection(sec.dir, x0, y0);
+  setSectionAngle(ns, secAngle(sec));
+  ns.bays.push(mkBay(len));
+  state.sections.push(ns);
+  selectedSi = state.sections.length - 1;   // neues Feld direkt auswählen
+  renderAll();
 }
 
 function onRotateHandleDown(e) {
@@ -963,60 +977,42 @@ function openAddSheet() {
   requestAnimationFrame(() => sheet.classList.add('open'));
 }
 
-/** Add a new bay at the current addCtx position (or last section's end). */
+/**
+ * Fügt ein neues Feld hinzu. Jedes Feld ist eine EIGENSTÄNDIGE Sektion mit
+ * genau einem Bay – es gibt keine fest verbundenen Gruppen mehr, jedes Feld
+ * lässt sich einzeln verschieben, drehen und löschen.
+ */
 function commitAddField(dir, len) {
   const newBay = mkBay(len);
   const d = DIR_META[dir];
   const pxLen = len * PX_PER_M;
 
+  let startX, startY;
+
   if (addCtx) {
-    const jx = addCtx.x, jy = addCtx.y;
+    startX = addCtx.x; startY = addCtx.y;
 
-    // Case 1: extend a section that ENDS here in the same direction
-    const matchEnd = state.sections.find(s => {
-      if (s.dir !== dir) return false;
-      const e = sectionEnd(s);
-      return Math.abs(e.x - jx) < 2 && Math.abs(e.y - jy) < 2;
-    });
-    if (matchEnd) {
-      matchEnd.bays.push(newBay);
-      addCtx = null;
-      renderAll();
-      return;
-    }
-
-    // Case 2: a section STARTS here in the same direction → place new field BEFORE it
-    const matchStart = state.sections.find(s => {
-      if (s.dir !== dir) return false;
-      return Math.abs(s.x0 - jx) < 2 && Math.abs(s.y0 - jy) < 2;
-    });
-    const startX = matchStart ? jx - d.dx * pxLen : jx;
-    const startY = matchStart ? jy - d.dy * pxLen : jy;
-
-    const sec = mkSection(dir, startX, startY);
-    sec.bays.push(newBay);
-    state.sections.push(sec);
-    addCtx = null;
+    // Zeigt die Richtung in ein Feld, das hier STARTET? → neues Feld davor setzen
+    const matchStart = state.sections.find(s =>
+      s.dir === dir &&
+      Math.abs(s.x0 - addCtx.x) < 2 && Math.abs(s.y0 - addCtx.y) < 2
+    );
+    if (matchStart) { startX = addCtx.x - d.dx * pxLen; startY = addCtx.y - d.dy * pxLen; }
 
   } else if (state.sections.length === 0) {
-    // Very first field
-    const sec = mkSection(dir, 0, 0);
-    sec.bays.push(newBay);
-    state.sections.push(sec);
+    startX = 0; startY = 0;
 
   } else {
-    // FAB: append to last section (same dir) or start new section at its end
-    const last = state.sections[state.sections.length - 1];
-    if (last.dir === dir) {
-      last.bays.push(newBay);
-    } else {
-      const end = sectionEnd(last);
-      const sec = mkSection(dir, end.x, end.y);
-      sec.bays.push(newBay);
-      state.sections.push(sec);
-    }
+    // FAB: am Ende des zuletzt angelegten Feldes anhängen (eigenständig)
+    const end = sectionEnd(state.sections[state.sections.length - 1]);
+    startX = end.x; startY = end.y;
   }
 
+  const sec = mkSection(dir, startX, startY);
+  sec.bays.push(newBay);
+  state.sections.push(sec);
+  selectedSi = state.sections.length - 1;
+  addCtx = null;
   renderAll();
 }
 
@@ -1040,7 +1036,7 @@ function openEditSheet(si, bi) {
 
   const hdr = document.createElement('div');
   hdr.className = 'sheet-header';
-  hdr.textContent = `Feld ${bi + 1} – ${sec.name}`;
+  hdr.textContent = `Feld ${sec.name}`;
 
   // Direction row (always shown – essential on iPhone where side panel is hidden)
   const dirRow = document.createElement('div');
@@ -1195,7 +1191,12 @@ function openEditSheet(si, bi) {
   const addAfterBtn = document.createElement('button');
   addAfterBtn.className = 'sheet-add'; addAfterBtn.textContent = '+ Feld danach';
   addAfterBtn.addEventListener('click', () => {
-    sec.bays.splice(bi + 1, 0, mkBay(bay.len));
+    const end = sectionEnd(sec);
+    const ns = mkSection(sec.dir, end.x, end.y);
+    setSectionAngle(ns, secAngle(sec));
+    ns.bays.push(mkBay(bay.len));
+    state.sections.splice(si + 1, 0, ns);
+    selectedSi = si + 1;
     renderAll(); closeSheet();
   });
 
@@ -1203,16 +1204,7 @@ function openEditSheet(si, bi) {
   okBtn.className = 'sheet-ok'; okBtn.textContent = 'Fertig';
   okBtn.addEventListener('click', () => { renderAll(); closeSheet(); });
 
-  const delSecBtn = document.createElement('button');
-  delSecBtn.className = 'sheet-del';
-  delSecBtn.style.cssText = 'font-size:0.78rem;padding:0.9rem 0.55rem;flex:0 0 auto;';
-  delSecBtn.textContent = '🗑 Sektion';
-  delSecBtn.addEventListener('click', () => {
-    state.sections.splice(si, 1);
-    renderAll(); closeSheet();
-  });
-
-  actRow.appendChild(delSecBtn); actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
+  actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
 
   sheet.appendChild(hdr);
   sheet.appendChild(dirRow);
@@ -1336,9 +1328,12 @@ function renderSections() {
     addBayBtn.className = 'add-bay'; addBayBtn.textContent = '+ Feld';
     addBayBtn.addEventListener('click', () => {
       const end = sectionEnd(sec);
-      addCtx = { x: end.x, y: end.y };
-      pendingDir = sec.dir;
-      openAddSheet();
+      const ns = mkSection(sec.dir, end.x, end.y);
+      setSectionAngle(ns, secAngle(sec));
+      ns.bays.push(mkBay(sec.bays[sec.bays.length - 1]?.len ?? 2.57));
+      state.sections.splice(si + 1, 0, ns);
+      selectedSi = si + 1;
+      renderAll();
     });
 
     card.appendChild(hdr); card.appendChild(dirRow); card.appendChild(totEl);
@@ -1351,41 +1346,52 @@ function renderAll() { renderSections(); renderSvg(); }
 
 // ── Preset layouts ─────────────────────────────────────────────────────────
 
-function applyLShape() {
+/**
+ * Baut eine Kette aus EIGENSTÄNDIGEN Feldern (je Feld eine Single-Bay-Sektion).
+ * Jedes Feld bleibt einzeln verschieb- und löschbar; Eckstücke entstehen
+ * automatisch dort, wo zwei Felder einen Außenwinkel bilden.
+ * @param {Array<{dir:string,len:number,name?:string}>} defs
+ */
+function buildFieldChain(defs) {
   selectedSi = null; _sId = 0; _bId = 0;
-  const s1 = mkSection('S', 0, 0); s1.name = 'Ostseite';
-  s1.bays = [mkBay(2.57), mkBay(2.57), mkBay(2.57), mkBay(2.57), mkBay(3.07)];
-  const e1 = sectionEnd(s1);
-  const s2 = mkSection('W', e1.x, e1.y); s2.name = 'Südseite';
-  s2.bays = [mkBay(3.07), mkBay(3.07)];
-  state.sections = [s1, s2]; renderAll();
-}
-
-function applyUShape() {
-  selectedSi = null; _sId = 0; _bId = 0;
-  const s1 = mkSection('S', 0, 0); s1.name = 'Ostseite';
-  s1.bays = [mkBay(2.57), mkBay(2.57), mkBay(3.07)];
-  const e1 = sectionEnd(s1);
-  const s2 = mkSection('W', e1.x, e1.y); s2.name = 'Südseite';
-  s2.bays = [mkBay(3.07), mkBay(2.57), mkBay(3.07)];
-  const e2 = sectionEnd(s2);
-  const s3 = mkSection('N', e2.x, e2.y); s3.name = 'Westseite';
-  s3.bays = [mkBay(3.07), mkBay(2.57), mkBay(2.57)];
-  state.sections = [s1, s2, s3]; renderAll();
-}
-
-function applyRect() {
-  selectedSi = null; _sId = 0; _bId = 0;
-  const dirs  = ['S', 'W', 'N', 'E'];
-  const names = ['Straßenseite', 'Rechte Seite', 'Rückseite', 'Linke Seite'];
-  let ex = 0, ey = 0;
-  state.sections = dirs.map((d, i) => {
-    const s = mkSection(d, ex, ey); s.name = names[i];
-    s.bays = [mkBay(3.07), mkBay(2.57), mkBay(2.57), mkBay(3.07)];
-    const e = sectionEnd(s); ex = e.x; ey = e.y;
+  let x = 0, y = 0;
+  state.sections = defs.map(def => {
+    const s = mkSection(def.dir, x, y);
+    if (def.name) s.name = def.name;
+    s.bays.push(mkBay(def.len));
+    const e = sectionEnd(s); x = e.x; y = e.y;
     return s;
   });
   renderAll();
+}
+
+/** Erzeugt Feld-Definitionen für eine Wand aus mehreren Längen. */
+function wall(dir, lens, prefix) {
+  return lens.map((l, i) => ({ dir, len: l, name: `${prefix} ${i + 1}` }));
+}
+
+function applyLShape() {
+  buildFieldChain([
+    ...wall('S', [2.57, 2.57, 2.57, 2.57, 3.07], 'Ost'),
+    ...wall('W', [3.07, 3.07], 'Süd')
+  ]);
+}
+
+function applyUShape() {
+  buildFieldChain([
+    ...wall('S', [2.57, 2.57, 3.07], 'Ost'),
+    ...wall('W', [3.07, 2.57, 3.07], 'Süd'),
+    ...wall('N', [3.07, 2.57, 2.57], 'West')
+  ]);
+}
+
+function applyRect() {
+  buildFieldChain([
+    ...wall('S', [3.07, 2.57, 2.57, 3.07], 'Vorne'),
+    ...wall('W', [3.07, 2.57, 2.57, 3.07], 'Rechts'),
+    ...wall('N', [3.07, 2.57, 2.57, 3.07], 'Hinten'),
+    ...wall('E', [3.07, 2.57, 2.57, 3.07], 'Links')
+  ]);
 }
 
 // ── Save / Load ────────────────────────────────────────────────────────────
