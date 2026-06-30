@@ -533,6 +533,18 @@
   border-color: #0a2f58;
   color: #fff;
 }
+.pos-detail-calc {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #0a7d34;
+  white-space: nowrap;
+}
+.konsole-row-calc {
+  margin-left: auto;
+  margin-right: 0.5rem;
+  color: #cc7a00;
+}
 
 .pos-konsole-list {
   display: flex;

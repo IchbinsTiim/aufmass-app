@@ -81,27 +81,54 @@ function lagenLabel(lagen) {
   return n === 1 ? '1 Lage' : n + ' Lagen';
 }
 
-/** Vollständiger Positions-Name (für Sheet/Seitenpanel/PDF). */
-function posTitle(pos) {
+/** Konkrete Lagen-Zahl (null bei "alle"/leer/ungültig). */
+function lagenCount(lagen) {
+  if (lagen == null || lagen === 'alle' || lagen === '') return null;
+  const n = parseFloat(lagen);
+  return isNaN(n) ? null : n;
+}
+
+/** Errechnete laufende Meter = Lagen × Feldlänge. Nur für Lagen-Mengen und
+ *  Konsolen sinnvoll; sonst (m / Stk oder ohne konkrete Lagenzahl) → null. */
+function posMeters(pos, bayLen) {
+  const p = POS_BY_KEY[pos.cat];
+  if (!p || !bayLen) return null;
+  let lagen;
+  if (p.konsole) lagen = lagenCount(pos.lagen);
+  else if ((pos.unit || defaultUnit(pos.cat)) === 'lagen') lagen = lagenCount(pos.qty);
+  else return null;
+  if (lagen == null) return null;
+  return lagen * bayLen;
+}
+
+/** Vollständiger Positions-Name (für Sheet/Seitenpanel/PDF).
+ *  Mit bayLen wird bei Lagen-Mengen die errechnete Meterzahl angehängt. */
+function posTitle(pos, bayLen) {
   const p = POS_BY_KEY[pos.cat];
   if (!p) return '?';
-  if (p.konsole) return 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · ' + lagenLabel(pos.lagen);
-  const q = qtyLabel(pos);
-  return q ? p.label + ' · ' + q : p.label;
+  let base;
+  if (p.konsole) base = 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · ' + lagenLabel(pos.lagen);
+  else { const q = qtyLabel(pos); base = q ? p.label + ' · ' + q : p.label; }
+  const m = posMeters(pos, bayLen);
+  if (m != null) base += ' = ' + fmtQty(m) + ' m';
+  return base;
 }
 
 /** Kompakte Positions-Beschriftung für den Plan (Badge). */
-function posBadge(pos) {
+function posBadge(pos, bayLen) {
   const p = POS_BY_KEY[pos.cat];
   if (!p) return '?';
+  const m = posMeters(pos, bayLen);
   if (p.konsole) {
     const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '')
       ? '' : '×' + (parseInt(pos.lagen, 10) || '');
-    return 'K' + (pos.typ || '') + lg;
+    const base = 'K' + (pos.typ || '') + lg;
+    return m != null ? base + ' ' + fmtQty(m) + 'm' : base;
   }
+  if (m != null) return p.short + ' ' + fmtQty(m) + 'm';
   if (pos.qty != null && pos.qty !== '' && !isNaN(parseFloat(pos.qty))) {
     const u = pos.unit || defaultUnit(pos.cat);
-    const suf = u === 'lagen' ? 'L' : (u === 'm' ? 'm' : '×');
+    const suf = u === 'm' ? 'm' : '×';
     return p.short + ' ' + fmtQty(parseFloat(pos.qty)) + suf;
   }
   return p.short;
@@ -642,7 +669,7 @@ function renderSvg() {
         }
         const p  = POS_BY_KEY[pos.cat];
         const ts = svgEl('tspan', { fill: (p && p.color) || '#333' });
-        ts.textContent = posBadge(pos);
+        ts.textContent = posBadge(pos, bayData.len);
         t.appendChild(ts);
       });
       g.appendChild(t);
@@ -1349,6 +1376,14 @@ function openEditSheet(si, bi) {
     name.textContent = p.label;
     name.style.color = p.color;
 
+    // Errechnete Meter (Lagen × Feldlänge) – live aktualisiert.
+    const calc = document.createElement('span');
+    calc.className = 'pos-detail-calc';
+    const updateCalc = () => {
+      const m = posMeters(pos, bay.len);
+      calc.textContent = m != null ? '= ' + fmtQty(m) + ' m' : '';
+    };
+
     const qtyInp = document.createElement('input');
     qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
     qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
@@ -1357,6 +1392,7 @@ function openEditSheet(si, bi) {
     qtyInp.addEventListener('input', () => {
       const v = parseFloat(qtyInp.value);
       pos.qty = (qtyInp.value === '' || isNaN(v)) ? null : v;
+      updateCalc();
       renderSvg();
     });
 
@@ -1370,12 +1406,14 @@ function openEditSheet(si, bi) {
       b.addEventListener('click', () => {
         pos.unit = val;
         unitRow.querySelectorAll('.punit-btn').forEach(x => x.classList.toggle('active', x === b));
+        updateCalc();
         renderSvg();
       });
       unitRow.appendChild(b);
     });
 
-    row.appendChild(name); row.appendChild(qtyInp); row.appendChild(unitRow);
+    updateCalc();
+    row.appendChild(name); row.appendChild(qtyInp); row.appendChild(unitRow); row.appendChild(calc);
     return row;
   };
 
@@ -1413,7 +1451,13 @@ function openEditSheet(si, bi) {
       if (i >= 0) bay.positions.splice(i, 1);
       buildKonsole(); renderSvg();
     });
-    head.appendChild(title); head.appendChild(rm);
+    const calc = document.createElement('span');
+    calc.className = 'pos-detail-calc konsole-row-calc';
+    const updateCalc = () => {
+      const m = posMeters(pos, bay.len);
+      calc.textContent = m != null ? '= ' + fmtQty(m) + ' m' : '';
+    };
+    head.appendChild(title); head.appendChild(calc); head.appendChild(rm);
 
     // Typ-Auswahl
     const typeRow = document.createElement('div');
@@ -1444,6 +1488,7 @@ function openEditSheet(si, bi) {
       b.addEventListener('click', () => {
         pos.lagen = val; freeInp.value = '';
         lagenRow.querySelectorAll('.klagen-btn').forEach(x => x.classList.toggle('active', x === b));
+        updateCalc();
         renderSvg();
       });
       lagenRow.appendChild(b);
@@ -1457,10 +1502,12 @@ function openEditSheet(si, bi) {
         pos.lagen = String(v);
         lagenRow.querySelectorAll('.klagen-btn').forEach(x => x.classList.remove('active'));
       }
+      updateCalc();
       renderSvg();
     });
     lagenRow.appendChild(freeInp);
 
+    updateCalc();
     row.appendChild(head); row.appendChild(typeRow); row.appendChild(lagenRow);
     return row;
   };
@@ -1649,7 +1696,7 @@ function renderSections() {
           const p = POS_BY_KEY[pos.cat];
           const chip = document.createElement('span');
           chip.className = 'bay-pos-chip';
-          chip.textContent = posTitle(pos);
+          chip.textContent = posTitle(pos, bay.len);
           if (p) { chip.style.color = p.color; chip.style.borderColor = p.color; }
           posLine.appendChild(chip);
         });
@@ -1847,7 +1894,7 @@ async function exportPdf() {
         if (!p) return;
         const key = p.konsole ? 'konsole|' + (pos.typ || '') : pos.cat;
         const label = p.konsole ? 'Konsole ' + (pos.typ || '') : p.label;
-        const a = posAgg[key] || (posAgg[key] = { color: p.color, label, n: 0, lagen: 0, qtyByUnit: {} });
+        const a = posAgg[key] || (posAgg[key] = { color: p.color, label, n: 0, lagen: 0, qtyByUnit: {}, meters: 0 });
         a.n++;
         if (p.konsole) {
           const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
@@ -1859,6 +1906,8 @@ async function exportPdf() {
             a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
           }
         }
+        const m = posMeters(pos, b.len);
+        if (m != null) a.meters += m;
       });
     }));
     const aggList = Object.values(posAgg);
@@ -1880,6 +1929,7 @@ async function exportPdf() {
           .filter(([u]) => a.qtyByUnit[u])
           .map(([u]) => `${fmtQty(a.qtyByUnit[u])} ${UNIT_LABEL[u]}`);
         if (qparts.length) txt += `  ·  ${qparts.join(' / ')} gesamt`;
+        if (a.meters) txt += `  ·  ${fmtQty(a.meters)} m (lfd.)`;
         doc.setTextColor(20, 20, 20);
         doc.text(txt, margin + 8, ly);
         ly += 8;
