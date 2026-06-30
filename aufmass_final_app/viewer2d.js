@@ -25,6 +25,13 @@ const DIR_META = {
   W: { dx: -1, dy:  0, label: 'W ←' }
 };
 
+// Cardinal direction ↔ rotation angle (degrees, clockwise from East / +x, y-down).
+const DIR_TO_ANGLE = { E: 0, S: 90, W: 180, N: 270 };
+
+// Rotation snap tolerance (degrees) – field rastet bei 0/90/180/270 ein.
+const ROT_SNAP_DEG = 7;
+const ROT_SNAP_ANGLES = [0, 90, 180, 270];
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 let _sId = 0, _bId = 0;
@@ -54,12 +61,60 @@ function mkBay(len = 2.57) {
 
 function mkSection(dir = 'S', x0 = 0, y0 = 0) {
   const id = ++_sId;
-  return { id, name: `A${id}`, dir, bays: [], x0, y0 };
+  return { id, name: `A${id}`, dir, angle: DIR_TO_ANGLE[dir] ?? 90, bays: [], x0, y0 };
 }
 
 // ── Geometry helpers ───────────────────────────────────────────────────────
 
 function outVec(dir) { return { dx: dir.dy, dy: -dir.dx }; }
+
+// ── Section rotation ─────────────────────────────────────────────────────────
+// Eine Sektion besitzt einen stufenlosen Winkel `angle` (Grad). Die kardinale
+// `dir`-Eigenschaft bleibt für Labels & Hinzufügen erhalten und folgt dem Winkel.
+
+function normDeg(deg) { return ((deg % 360) + 360) % 360; }
+
+/** Aktueller Winkel einer Sektion in Grad (Fallback auf kardinale Richtung). */
+function secAngle(sec) {
+  return sec.angle != null ? sec.angle : (DIR_TO_ANGLE[sec.dir] ?? 90);
+}
+
+/** Einheits-Laufrichtung der Sektion aus ihrem Winkel. */
+function secVec(sec) {
+  const r = secAngle(sec) * Math.PI / 180;
+  return { dx: Math.cos(r), dy: Math.sin(r) };
+}
+
+/** Label-Drehung, die der Laufrichtung folgt, aber lesbar (nicht kopfüber) bleibt. */
+function uprightDeg(deg) {
+  let la = normDeg(deg);
+  if (la >= 90 && la < 270) la -= 180;
+  return la;
+}
+
+/** Nächstgelegene kardinale Richtung zu einem Winkel. */
+function nearestCardinal(deg) {
+  const idx = Math.round(normDeg(deg) / 90) % 4;     // 0→E,1→S,2→W,3→N
+  return ['E', 'S', 'W', 'N'][idx];
+}
+
+/** Winkel auf 0/90/180/270 einrasten (innerhalb Toleranz), sonst frei lassen. */
+function snapAngle(deg) {
+  const a = normDeg(deg);
+  for (const c of ROT_SNAP_ANGLES) {
+    if (Math.abs(a - c) <= ROT_SNAP_DEG || Math.abs(a - 360) <= ROT_SNAP_DEG) {
+      return Math.abs(a - 360) <= ROT_SNAP_DEG ? 0 : c;
+    }
+  }
+  return a;
+}
+
+/** Setzt den Winkel einer Sektion und hält die kardinale `dir` synchron. */
+function setSectionAngle(sec, deg) {
+  const a = normDeg(deg);
+  sec.angle = a;
+  sec.dir   = nearestCardinal(a);
+}
 
 function snapLen(len) {
   if (!snapEnabled) return Math.max(0.25, +len.toFixed(2));
@@ -102,7 +157,7 @@ function worldPerScreenPx() {
 
 /** Die vier Eck-Polygone aller Felder einer Sektion an Position (x0,y0). */
 function sectionBayPolys(sec, x0, y0) {
-  const dir   = DIR_META[sec.dir];
+  const dir   = secVec(sec);
   const out   = outVec(dir);
   const depth = state.depth * PX_PER_M;
   let x = x0, y = y0;
@@ -218,7 +273,7 @@ function screenToSvg(clientX, clientY) {
 
 /** Returns the SVG endpoint (x, y) of a section. */
 function sectionEnd(sec) {
-  const dir = DIR_META[sec.dir];
+  const dir = secVec(sec);
   let x = sec.x0, y = sec.y0;
   sec.bays.forEach(b => {
     x += dir.dx * b.len * PX_PER_M;
@@ -237,9 +292,9 @@ function computeLayout() {
   const els    = [];
 
   state.sections.forEach((sec, si) => {
-    const dir    = DIR_META[sec.dir];
+    const dir    = secVec(sec);
     const out    = outVec(dir);
-    const isVert = sec.dir === 'N' || sec.dir === 'S';
+    const ang    = secAngle(sec);
     let x = sec.x0, y = sec.y0;
     const startX = x, startY = y;
 
@@ -258,13 +313,13 @@ function computeLayout() {
 
       els.push({
         type: 'bay', pts: [p0, p1, p2, p3], cx, cy, len: bay.len,
-        si, bi, dir: sec.dir, isVert,
+        si, bi, dir: sec.dir, ang,
         handleX: (p1.x + p2.x) / 2,
         handleY: (p1.y + p2.y) / 2
       });
       els.push({
         type: 'handle', x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2,
-        len: bay.len, si, bi, isVert
+        len: bay.len, si, bi, ang, out
       });
 
       x += dir.dx * pxLen;
@@ -284,17 +339,26 @@ function computeLayout() {
         y: (startY + y) / 2,
         si
       });
+
+      // Rotation handle – sitzt jenseits des Sektionsendes in Laufrichtung
+      const rotOff = HANDLE_R * 3.4;
+      els.push({
+        type: 'rotateHandle',
+        x: x + dir.dx * rotOff,
+        y: y + dir.dy * rotOff,
+        si, ang
+      });
     }
   });
 
   // ── Corner pieces between connected sections ────────────────────────────
   state.sections.forEach((sec, si) => {
     const end = sectionEnd(sec);
-    const out = outVec(DIR_META[sec.dir]);
+    const out = outVec(secVec(sec));
     state.sections.forEach((next, ni) => {
       if (ni === si) return;
       if (Math.abs(next.x0 - end.x) < 2 && Math.abs(next.y0 - end.y) < 2) {
-        const nOut  = outVec(DIR_META[next.dir]);
+        const nOut  = outVec(secVec(next));
         const cross = out.dx * nOut.dy - out.dy * nOut.dx;
         if (cross > 0) {
           const c0 = { x: end.x, y: end.y };
@@ -393,12 +457,13 @@ function renderSvg() {
     });
     g.appendChild(poly);
 
+    const labelRot = uprightDeg(el.ang);
     const txt = svgEl('text', {
       x: el.cx, y: el.cy,
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
       'font-size': bayFontSize, 'font-family': 'system-ui, sans-serif',
       fill: '#0a2f58', 'font-weight': '700',
-      transform: el.isVert ? `rotate(-90,${el.cx},${el.cy})` : '',
+      transform: labelRot ? `rotate(${labelRot.toFixed(1)},${el.cx},${el.cy})` : '',
       'pointer-events': 'none'
     });
     txt.textContent = el.len.toFixed(2);
@@ -420,7 +485,7 @@ function renderSvg() {
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
         'font-size': hFont, 'font-family': 'system-ui, sans-serif',
         fill: '#1f7a3d', 'font-weight': '700', 'pointer-events': 'none',
-        transform: el.isVert ? `rotate(-90,${pos.x},${pos.y})` : ''
+        transform: labelRot ? `rotate(${labelRot.toFixed(1)},${pos.x},${pos.y})` : ''
       });
       ht.textContent = '↥ ' + h.toFixed(2);
       g.appendChild(ht);
@@ -464,6 +529,55 @@ function renderSvg() {
       sym.textContent = '✥';
       g.appendChild(sym);
     });
+
+    // Rotation handles (purple ↻) — nur für die ausgewählte Sektion
+    const ROT_R     = Math.round(HANDLE_R * 0.85);
+    const movingNow0 = drag && (drag.type === 'move' || drag.type === 'resize');
+    els.filter(e => e.type === 'rotateHandle' && e.si === selectedSi && !movingNow0).forEach(el => {
+      const isActive = drag && drag.type === 'rotate' && drag.si === el.si;
+
+      // Verbindungslinie vom Sektionsende zum Drehgriff
+      const sec = state.sections[el.si];
+      const end = sectionEnd(sec);
+      g.appendChild(svgEl('line', {
+        x1: end.x, y1: end.y, x2: el.x, y2: el.y,
+        stroke: '#8e44ec', 'stroke-width': 2, 'stroke-dasharray': '4 4',
+        'pointer-events': 'none'
+      }));
+
+      const hit = svgEl('circle', {
+        cx: el.x, cy: el.y, r: ROT_R * 2.8,
+        fill: 'rgba(0,0,0,0.001)', style: 'cursor:grab', 'data-si': el.si
+      });
+      hit.addEventListener('pointerdown', onRotateHandleDown);
+      g.appendChild(hit);
+
+      g.appendChild(svgEl('circle', {
+        cx: el.x, cy: el.y, r: ROT_R,
+        fill: isActive ? '#6c2bd9' : '#8e44ec',
+        stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+      }));
+
+      const sym = svgEl('text', {
+        x: el.x, y: el.y,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': Math.round(ROT_R * 1.15),
+        'font-family': 'system-ui, sans-serif',
+        fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+      });
+      sym.textContent = '↻';
+      g.appendChild(sym);
+
+      // Winkel-Tooltip während des Drehens
+      if (isActive) {
+        const deg = Math.round(secAngle(sec));
+        const bx = el.x, by = el.y - ROT_R * 2.6;
+        g.appendChild(svgEl('rect', { x: bx - 30, y: by - 14, width: 60, height: 28, rx: 7, fill: '#6c2bd9', 'pointer-events': 'none' }));
+        const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 14, 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
+        bt.textContent = deg + '°';
+        g.appendChild(bt);
+      }
+    });
   }
 
   if (pdfMode) { drawScaleBar(g, minX, minY, vw, vh, infoFontSize); return; }
@@ -490,15 +604,17 @@ function renderSvg() {
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
       'font-size': Math.round(HANDLE_R * 1.05),
       'font-family': 'system-ui, sans-serif',
-      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none',
+      transform: `rotate(${(el.ang || 0).toFixed(1)},${el.x},${el.y})`
     });
-    arrow.textContent = el.isVert ? '↕' : '↔';
+    arrow.textContent = '↔';
     g.appendChild(arrow);
 
     if (isActive) {
       const len = state.sections[el.si].bays[el.bi].len;
-      const bx = el.x + (el.isVert ?  HANDLE_R * 2.8 : 0);
-      const by = el.y + (el.isVert ?  0 : -HANDLE_R * 2.8);
+      const out = el.out || { dx: 0, dy: -1 };
+      const bx = el.x + out.dx * HANDLE_R * 2.8;
+      const by = el.y + out.dy * HANDLE_R * 2.8;
       g.appendChild(svgEl('rect', { x: bx - 34, y: by - 15, width: 68, height: 30, rx: 7, fill: '#111', opacity: '0.88', 'pointer-events': 'none' }));
       const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 15, 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
       bt.textContent = len.toFixed(2) + ' m';
@@ -617,8 +733,22 @@ function onHandleDown(e) {
     type: 'resize', si, bi,
     startLen: state.sections[si].bays[bi].len,
     startPt:  screenToSvg(e.clientX, e.clientY),
-    dir:      DIR_META[state.sections[si].dir],
+    dir:      secVec(state.sections[si]),
     moved:    false
+  };
+}
+
+function onRotateHandleDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const si  = parseInt(e.currentTarget.dataset.si);
+  const svg = document.getElementById('planSvg');
+  svg.setPointerCapture(e.pointerId);
+  selectedSi = si;
+  drag = {
+    type: 'rotate', si,
+    startAngle: secAngle(state.sections[si]),
+    moved: false
   };
 }
 
@@ -647,6 +777,18 @@ function onMoveHandleDown(e) {
 function onSvgPointerMove(e) {
   if (!drag) return;
   const pt = screenToSvg(e.clientX, e.clientY);
+
+  if (drag.type === 'rotate') {
+    const sec = state.sections[drag.si];
+    // Winkel vom Sektionsanfang zum Finger – Sektion zeigt zum Finger
+    let deg = Math.atan2(pt.y - sec.y0, pt.x - sec.x0) * 180 / Math.PI;
+    if (snapEnabled) deg = snapAngle(deg);   // bei Magnet aus → frei drehbar
+    setSectionAngle(sec, deg);
+    drag.moved = true;
+    syncRotSheet(sec);
+    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    return;
+  }
 
   if (drag.type === 'move') {
     const dx = pt.x - drag.startPt.x;
@@ -690,6 +832,10 @@ function onSvgPointerMove(e) {
 function onSvgPointerUp(e) {
   if (!drag) return;
   const d = drag; drag = null;
+  if (d.type === 'rotate') {
+    renderAll();
+    return;
+  }
   if (d.type === 'move') {
     const sec = state.sections[d.si];
     if (d.moved) {
@@ -905,10 +1051,11 @@ function openEditSheet(si, bi) {
     btn.dataset.dir = dk;
     btn.textContent = dm.label;
     btn.addEventListener('click', () => {
-      sec.dir = dk;
+      setSectionAngle(sec, DIR_TO_ANGLE[dk]);
       dirRow.querySelectorAll('.dir-big-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.dir === dk)
       );
+      syncRotSheet(sec);
       renderSvg();
     });
     dirRow.appendChild(btn);
@@ -948,6 +1095,39 @@ function openEditSheet(si, bi) {
   });
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
+
+  // ── Drehung (Rotation) ──────────────────────────────────────────────────
+  const rotLabel = document.createElement('div');
+  rotLabel.className = 'sheet-section-label sheet-rot-label';
+  rotLabel.innerHTML = `Drehung <span id="rotReadout" class="rot-readout">${Math.round(secAngle(sec))}°</span>`;
+
+  const rotRow = document.createElement('div');
+  rotRow.className = 'sheet-rot-row';
+
+  const rotMinus = document.createElement('button');
+  rotMinus.className = 'rot-step'; rotMinus.type = 'button'; rotMinus.textContent = '↺';
+  rotMinus.title = '15° gegen den Uhrzeigersinn';
+
+  const rotSlider = document.createElement('input');
+  rotSlider.type = 'range'; rotSlider.className = 'rot-slider'; rotSlider.id = 'rotSlider';
+  rotSlider.min = '0'; rotSlider.max = '359'; rotSlider.step = '1';
+  rotSlider.value = String(Math.round(secAngle(sec)));
+
+  const rotPlus = document.createElement('button');
+  rotPlus.className = 'rot-step'; rotPlus.type = 'button'; rotPlus.textContent = '↻';
+  rotPlus.title = '15° im Uhrzeigersinn';
+
+  const applyRot = deg => {
+    if (snapEnabled) deg = snapAngle(deg);
+    setSectionAngle(sec, deg);
+    syncRotSheet(sec);
+    renderSvg();
+  };
+  rotSlider.addEventListener('input', () => applyRot(parseFloat(rotSlider.value)));
+  rotMinus.addEventListener('click', () => applyRot(secAngle(sec) - 15));
+  rotPlus.addEventListener('click',  () => applyRot(secAngle(sec) + 15));
+
+  rotRow.appendChild(rotMinus); rotRow.appendChild(rotSlider); rotRow.appendChild(rotPlus);
 
   // ── Höhen (links / rechts) ──────────────────────────────────────────────
   const hLabel = document.createElement('div');
@@ -1038,6 +1218,8 @@ function openEditSheet(si, bi) {
   sheet.appendChild(dirRow);
   sheet.appendChild(stdDiv);
   sheet.appendChild(adjRow);
+  sheet.appendChild(rotLabel);
+  sheet.appendChild(rotRow);
   sheet.appendChild(hLabel);
   sheet.appendChild(hRow);
   sheet.appendChild(actRow);
@@ -1045,6 +1227,20 @@ function openEditSheet(si, bi) {
   document.body.appendChild(overlay);
   document.body.appendChild(sheet);
   requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/** Hält Drehregler/Anzeige und Richtungs-Buttons der offenen Bearbeitung synchron. */
+function syncRotSheet(sec) {
+  const sheet = document.getElementById('bottomSheet');
+  if (!sheet) return;
+  const deg = Math.round(secAngle(sec));
+  const sl = sheet.querySelector('#rotSlider');
+  const rd = sheet.querySelector('#rotReadout');
+  if (sl && document.activeElement !== sl) sl.value = String(deg);
+  if (rd) rd.textContent = deg + '°';
+  sheet.querySelectorAll('.dir-big-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.dir === sec.dir)
+  );
 }
 
 function closeSheet() {
@@ -1091,7 +1287,7 @@ function renderSections() {
       const btn = document.createElement('button');
       btn.className = 'dir-btn' + (sec.dir === d ? ' active' : '');
       btn.textContent = DIR_META[d].label;
-      btn.addEventListener('click', () => { sec.dir = d; renderAll(); });
+      btn.addEventListener('click', () => { setSectionAngle(sec, DIR_TO_ANGLE[d]); renderAll(); });
       dirRow.appendChild(btn);
     });
 
@@ -1099,7 +1295,9 @@ function renderSections() {
     const totEl = document.createElement('div');
     totEl.className = 'sec-total';
     const total = sec.bays.reduce((s, b) => s + b.len, 0);
-    totEl.textContent = `${DIR_META[sec.dir].label}  ·  ${total.toFixed(2)} m  (${sec.bays.length} Felder)`;
+    const angDeg = Math.round(secAngle(sec));
+    const angTxt = ROT_SNAP_ANGLES.includes(angDeg) ? '' : `  ·  ${angDeg}°`;
+    totEl.textContent = `${DIR_META[sec.dir].label}${angTxt}  ·  ${total.toFixed(2)} m  (${sec.bays.length} Felder)`;
 
     // Bay list
     const baysDiv = document.createElement('div');
