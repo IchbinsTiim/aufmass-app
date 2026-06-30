@@ -63,11 +63,23 @@ function fmtQty(n) {
   return (Math.round(n * 100) / 100).toString().replace('.', ',');
 }
 
+/** Hat die Position einen vom Nutzer gesetzten Mengenwert? */
+function hasOwnQty(pos) {
+  return pos.qty != null && pos.qty !== '' && !isNaN(parseFloat(pos.qty));
+}
+
+/** Effektive Menge einer Position. Bei Einheit 'm' ohne eigenen Wert gilt
+ *  standardmäßig die Feldlänge – der Nutzer kann sie jederzeit überschreiben. */
+function effQty(pos, bayLen) {
+  if (hasOwnQty(pos)) return parseFloat(pos.qty);
+  if ((pos.unit || defaultUnit(pos.cat)) === 'm' && bayLen != null) return +bayLen;
+  return null;
+}
+
 /** Lesbare Mengenangabe einer Position, z.B. "3 Lagen" / "12,5 m" / "4 Stk". */
-function qtyLabel(pos) {
-  if (pos.qty == null || pos.qty === '') return '';
-  const v = parseFloat(pos.qty);
-  if (isNaN(v)) return '';
+function qtyLabel(pos, bayLen) {
+  const v = effQty(pos, bayLen);
+  if (v == null) return '';
   const u = pos.unit || defaultUnit(pos.cat);
   if (u === 'lagen') return v === 1 ? '1 Lage' : fmtQty(v) + ' Lagen';
   return fmtQty(v) + ' ' + (UNIT_LABEL[u] || u);
@@ -108,7 +120,7 @@ function posTitle(pos, bayLen) {
   if (!p) return '?';
   let base;
   if (p.konsole) base = 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · ' + lagenLabel(pos.lagen);
-  else { const q = qtyLabel(pos); base = q ? p.label + ' · ' + q : p.label; }
+  else { const q = qtyLabel(pos, bayLen); base = q ? p.label + ' · ' + q : p.label; }
   const m = posMeters(pos, bayLen);
   if (m != null) base += ' = ' + fmtQty(m) + ' m';
   return base;
@@ -126,10 +138,11 @@ function posBadge(pos, bayLen) {
     return m != null ? base + ' ' + fmtQty(m) + 'm' : base;
   }
   if (m != null) return p.short + ' ' + fmtQty(m) + 'm';
-  if (pos.qty != null && pos.qty !== '' && !isNaN(parseFloat(pos.qty))) {
+  const v = effQty(pos, bayLen);
+  if (v != null) {
     const u = pos.unit || defaultUnit(pos.cat);
     const suf = u === 'm' ? 'm' : '×';
-    return p.short + ' ' + fmtQty(parseFloat(pos.qty)) + suf;
+    return p.short + ' ' + fmtQty(v) + suf;
   }
   return p.short;
 }
@@ -1242,12 +1255,14 @@ function openEditSheet(si, bi) {
   const plusBtn = document.createElement('button');
   plusBtn.className = 'adj-btn'; plusBtn.textContent = '+';
 
-  const syncInp = () => { inp.value = bay.len.toFixed(2); renderSvg(); };
+  // Feldlänge ist Standardwert der Meter-Positionen → bei Änderung deren
+  // Platzhalter/Anzeige mitführen.
+  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); renderSvg(); };
   minusBtn.addEventListener('click', () => { bay.len = Math.max(0.25, +(bay.len - 0.25).toFixed(2)); syncInp(); });
   plusBtn.addEventListener('click',  () => { bay.len = +(bay.len + 0.25).toFixed(2); syncInp(); });
   inp.addEventListener('change', () => {
     const v = parseFloat(inp.value);
-    if (v >= 0.25) { bay.len = +v.toFixed(2); renderSvg(); }
+    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); renderSvg(); }
   });
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
@@ -1402,7 +1417,13 @@ function openEditSheet(si, bi) {
     const qtyInp = document.createElement('input');
     qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
     qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
-    qtyInp.placeholder = 'Anz.';
+    // Bei Einheit 'm' ohne eigenen Wert zeigt der Platzhalter die Feldlänge an
+    // (Standardwert); der Nutzer kann die Zahl jederzeit überschreiben.
+    const syncPlaceholder = () => {
+      qtyInp.placeholder = ((pos.unit || defaultUnit(pos.cat)) === 'm' && bay.len)
+        ? fmtQty(bay.len) : 'Anz.';
+    };
+    syncPlaceholder();
     qtyInp.value = (pos.qty != null) ? pos.qty : '';
     qtyInp.addEventListener('input', () => {
       const v = parseFloat(qtyInp.value);
@@ -1421,6 +1442,7 @@ function openEditSheet(si, bi) {
       b.addEventListener('click', () => {
         pos.unit = val;
         unitRow.querySelectorAll('.punit-btn').forEach(x => x.classList.toggle('active', x === b));
+        syncPlaceholder();
         updateCalc();
         renderSvg();
       });
@@ -1915,11 +1937,9 @@ async function exportPdf() {
           const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
           a.lagen += lg;
         } else {
-          const v = parseFloat(pos.qty);
-          if (!isNaN(v)) {
-            const u = pos.unit || defaultUnit(pos.cat);
-            a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
-          }
+          const u = pos.unit || defaultUnit(pos.cat);
+          const v = effQty(pos, b.len);
+          if (v != null) a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
         }
         const m = posMeters(pos, b.len);
         if (m != null) a.meters += m;
