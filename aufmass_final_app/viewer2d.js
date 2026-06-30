@@ -644,35 +644,50 @@ function renderSvg() {
     txt.textContent = el.len.toFixed(2);
     g.appendChild(txt);
 
-    // Höhen an den beiden Enden der Unterkante (Gerüst-Grundfeld).
+    // Höhen an den beiden Enden der Unterkante. Zuordnung nach Bildschirm-Lage:
+    // hL ("Höhe links") landet immer am visuell linken (bzw. oberen) Ende,
+    // hR am rechten/unteren – unabhängig von Feldrichtung/-drehung.
     const hFont = Math.max(depth * 0.24, 7);
-    if (bayData.hL != null) drawEdge(hPos(0.12), '↥ ' + bayData.hL.toFixed(2), '#1f7a3d', hFont);
-    if (bayData.hR != null) drawEdge(hPos(0.88), '↥ ' + bayData.hR.toFixed(2), '#1f7a3d', hFont);
+    const hEndA = hPos(0.12), hEndB = hPos(0.88);
+    let hLeftPos, hRightPos;
+    if (Math.abs(hEndB.x - hEndA.x) >= Math.abs(hEndB.y - hEndA.y)) {
+      [hLeftPos, hRightPos] = hEndA.x <= hEndB.x ? [hEndA, hEndB] : [hEndB, hEndA];
+    } else {
+      [hLeftPos, hRightPos] = hEndA.y <= hEndB.y ? [hEndA, hEndB] : [hEndB, hEndA];
+    }
+    if (bayData.hL != null) drawEdge(hLeftPos,  '↥ ' + bayData.hL.toFixed(2), '#1f7a3d', hFont);
+    if (bayData.hR != null) drawEdge(hRightPos, '↥ ' + bayData.hR.toFixed(2), '#1f7a3d', hFont);
 
-    // Positions-Badges – farbige Kurzcodes in einer Zeile, zur Außenkante hin
-    // versetzt (über der Länge), damit nichts mit Move-Griff oder Höhen kollidiert.
+    // Positions-Badges – je Position eine eigene Zeile als Pille, gestapelt
+    // außerhalb der Außenkante (offene Seite, weg von der Wand). So bleibt der
+    // Feldinnenraum frei für Länge + Höhen und es bleibt auch bei vielen
+    // Positionen + Höhenangabe übersichtlich.
     if (positions.length) {
-      const badgeFont = Math.max(depth * 0.20, 7);
-      const catPos = { x: ecx + outx * depth * 0.30, y: ecy + outy * depth * 0.30 };
-      const t = svgEl('text', {
-        x: catPos.x, y: catPos.y,
-        'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': badgeFont, 'font-family': 'system-ui, sans-serif',
-        'font-weight': '700', 'pointer-events': 'none',
-        transform: labelRot ? `rotate(${labelRot.toFixed(1)},${catPos.x},${catPos.y})` : ''
-      });
+      const badgeFont = Math.max(depth * 0.22, 7);
+      const lineH     = badgeFont * 1.45;
+      const startDist = depth * 0.5 + lineH * 0.85;   // knapp außerhalb der Außenkante
       positions.forEach((pos, i) => {
-        if (i > 0) {
-          const sep = svgEl('tspan', { fill: '#9aa3ad' });
-          sep.textContent = '  ·  ';
-          t.appendChild(sep);
-        }
+        const d  = startDist + i * lineH;
+        const px = ecx + outx * d;
+        const py = ecy + outy * d;
         const p  = POS_BY_KEY[pos.cat];
-        const ts = svgEl('tspan', { fill: (p && p.color) || '#333' });
-        ts.textContent = posBadge(pos, bayData.len);
-        t.appendChild(ts);
+        const label = posBadge(pos, bayData.len);
+        const col   = (p && p.color) || '#333';
+        const w = label.length * badgeFont * 0.6 + badgeFont * 0.9;
+        const rot = labelRot ? `rotate(${labelRot.toFixed(1)},${px},${py})` : '';
+        g.appendChild(svgEl('rect', {
+          x: px - w / 2, y: py - lineH / 2, width: w, height: lineH * 0.92,
+          rx: lineH * 0.3, fill: '#ffffff', 'fill-opacity': '0.9',
+          stroke: col, 'stroke-width': '0.6', transform: rot, 'pointer-events': 'none'
+        }));
+        const t = svgEl('text', {
+          x: px, y: py, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+          'font-size': badgeFont, 'font-family': 'system-ui, sans-serif',
+          'font-weight': '700', fill: col, 'pointer-events': 'none', transform: rot
+        });
+        t.textContent = label;
+        g.appendChild(t);
       });
-      g.appendChild(t);
     }
   });
 
