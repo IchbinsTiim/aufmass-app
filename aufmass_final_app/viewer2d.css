@@ -609,6 +609,28 @@
 }
 .rot-step:active { background: #8e44ec; color: #fff; }
 
+/* Feste Drehoptionen 90° / 180° / 270° */
+.sheet-rot-presets {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+.rot-preset {
+  flex: 1 1 calc(33.33% - 0.4rem);
+  min-width: calc(33.33% - 0.4rem);
+  padding: 0.5rem 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border: 2px solid #8e44ec;
+  border-radius: 9px;
+  background: #f6f0ff;
+  color: #8e44ec;
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+  white-space: nowrap;
+}
+.rot-preset:active { background: #8e44ec; color: #fff; }
+
 .rot-slider {
   flex: 1;
   min-width: 0;
