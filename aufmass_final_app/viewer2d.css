@@ -245,6 +245,31 @@
 }
 .empty-hint.hidden { opacity: 0; pointer-events: none; }
 
+/* ── Zoom-Reset (Pinch-Zoom auf der Zeichenfläche) ───────────────────────── */
+.zoom-reset-btn {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid #d6dbe1;
+  background: rgba(255,255,255,0.92);
+  color: #0a2f58;
+  font-size: 1.3rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s, transform 0.1s;
+  z-index: 5;
+}
+.zoom-reset-btn:active { transform: scale(0.92); background: #eef4ff; }
+.zoom-reset-btn.hidden { display: none; }
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -514,6 +539,7 @@
 }
 .pos-unit-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.3rem;
 }
 .punit-btn {
