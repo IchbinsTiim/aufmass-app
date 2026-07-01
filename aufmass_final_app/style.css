@@ -1164,6 +1164,12 @@ html, body {
 .lage-free-input::-webkit-inner-spin-button,
 .lage-free-input::-webkit-outer-spin-button { -webkit-appearance: none; }
 .lage-free-input:focus { border-color: var(--color-border-focus); }
+.acc-lage-calc {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #c0591a;
+  white-space: nowrap;
+}
 
 /* ============================================================
    L/H-Kennzeichnung an den Maß-Eingabefeldern
@@ -1735,7 +1741,7 @@ html, body {
   margin-top: 4px;
 }
 
-.konsole-total {
+.acc-multi-total {
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--color-primary);
