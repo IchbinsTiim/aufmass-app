@@ -88,8 +88,8 @@ function getProjectLabel(project) {
   return parts.join(', ') || 'Neues Projekt';
 }
 
-// Ausgewaehlte Konsolen-Lage (Ebene) einer Konsolen-Zeile ermitteln
-function collectKonsoleLage(row) {
+// Ausgewaehlte Lage (Ebene) einer Konsolen- oder Innengelaender-Zeile ermitteln
+function collectLage(row) {
   const freeInp = row.querySelector('.lage-free-input');
   const freeVal = freeInp ? freeInp.value.trim() : '';
   if (freeVal !== '') return freeVal;
@@ -100,6 +100,20 @@ function collectKonsoleLage(row) {
 function lageLabel(lage) {
   if (!lage || lage === 'alle') return '';
   return lage + (lage === '1' ? ' Lage' : ' Lagen');
+}
+
+// Konkrete Lagen-Zahl (null bei "alle"/leer/ungueltig)
+function lagenAnzahl(lage) {
+  if (!lage || lage === 'alle') return null;
+  const n = parseFloat(String(lage).replace(',', '.'));
+  return (!isNaN(n) && n > 0) ? n : null;
+}
+
+// Laenge × Lagenzahl (ohne konkrete Lagenzahl bleibt die Laenge unveraendert)
+function effektiveLaenge(laenge, lage) {
+  if (laenge === null || laenge === undefined || isNaN(laenge)) return null;
+  const n = lagenAnzahl(lage);
+  return n ? laenge * n : laenge;
 }
 
 function getSeiteName(seite) {
@@ -471,11 +485,11 @@ function collectSeiten() {
         typ:    activeTypBtn.dataset.typ,
         laenge: isNaN(len) ? null : len,
         autoL1: l1Btn ? l1Btn.dataset.active === '1' : false,
-        lage:   collectKonsoleLage(row)
+        lage:   collectLage(row)
       });
     });
 
-    // Innengeländer
+    // Innengeländer (mehrere Lagen je Seite moeglich)
     const innengelaender = [];
     card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
       const l1Btn  = row.querySelector('.accessory-l1-btn');
@@ -483,7 +497,8 @@ function collectSeiten() {
       const len    = lenInp ? parseNum(lenInp.value) : NaN;
       innengelaender.push({
         laenge: isNaN(len) ? null : len,
-        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false,
+        lage:   collectLage(row)
       });
     });
 
@@ -1348,6 +1363,77 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return row;
   }
 
+  // Lage/Ebene-Auswahl (wie im 2D-Programm): Alle / 1 Lage / 2 Lagen / freie Anzahl.
+  // Gemeinsam genutzt von Konsolen- und Innengeländer-Zeilen.
+  function createLageWrap(data, onLageChange) {
+    const lageWrap = document.createElement('div');
+    lageWrap.className = 'acc-lage-wrap';
+
+    const lageBtns = document.createElement('div');
+    lageBtns.className = 'acc-lage-btns';
+    const currentLage   = (data && data.lage != null) ? String(data.lage) : 'alle';
+    const isPresetLage  = ['alle', '1', '2'].includes(currentLage);
+
+    const lageFreeInp = document.createElement('input');
+    lageFreeInp.type = 'number';
+    lageFreeInp.className = 'lage-free-input';
+    lageFreeInp.min = '1';
+    lageFreeInp.step = '1';
+    lageFreeInp.inputMode = 'numeric';
+    lageFreeInp.placeholder = 'Anz.';
+    if (!isPresetLage) lageFreeInp.value = currentLage;
+
+    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']].forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lage-btn' + (isPresetLage && currentLage === val ? ' active' : '');
+      b.dataset.lage = val;
+      b.textContent = lbl;
+      b.addEventListener('click', () => {
+        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        lageFreeInp.value = '';
+        onLageChange();
+      });
+      lageBtns.appendChild(b);
+    });
+
+    lageFreeInp.addEventListener('input', () => {
+      if (lageFreeInp.value.trim() !== '') {
+        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
+      }
+      onLageChange();
+    });
+
+    lageWrap.appendChild(lageBtns);
+    lageWrap.appendChild(lageFreeInp);
+    return lageWrap;
+  }
+
+  // Live-Anzeige "= X,XX m" (Laenge × Lagenzahl) einer Konsolen-/IG-Zeile
+  function createLageCalc() {
+    const calcEl = document.createElement('span');
+    calcEl.className = 'acc-lage-calc';
+    calcEl.style.display = 'none';
+    return calcEl;
+  }
+
+  function updateLageCalc(row) {
+    const calcEl = row.querySelector('.acc-lage-calc');
+    if (!calcEl) return;
+    const inp = row.querySelector('.accessory-length-input');
+    const v   = inp ? parseNum(inp.value) : NaN;
+    const lage = collectLage(row);
+    const n    = lagenAnzahl(lage);
+    if (!isNaN(v) && v > 0 && n && n !== 1) {
+      calcEl.textContent = '= ' + fmtNum(round2(v * n)) + ' m';
+      calcEl.style.display = '';
+    } else {
+      calcEl.textContent = '';
+      calcEl.style.display = 'none';
+    }
+  }
+
   // Konsolen
   const konsoleTitleRow = document.createElement('div');
   konsoleTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
@@ -1360,7 +1446,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
   konsoleList.className = 'acc-multi-list acc-konsole-list';
 
   const konsoleTotalEl = document.createElement('div');
-  konsoleTotalEl.className = 'konsole-total';
+  konsoleTotalEl.className = 'acc-multi-total';
   konsoleTotalEl.style.display = 'none';
 
   function refreshKonsoleTotal() {
@@ -1368,7 +1454,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
     konsoleList.querySelectorAll('.acc-multi-row').forEach(r => {
       const inp = r.querySelector('.accessory-length-input');
       const v = inp ? parseNum(inp.value) : NaN;
-      if (!isNaN(v) && v > 0) { total += v; hasAny = true; }
+      updateLageCalc(r);
+      if (!isNaN(v) && v > 0) { total += effektiveLaenge(v, collectLage(r)); hasAny = true; }
     });
     if (hasAny) {
       konsoleTotalEl.textContent = 'Gesamt: ' + fmtNum(round2(total)) + ' m';
@@ -1403,50 +1490,9 @@ function createAccessoriesSection(seiteData, card, onChange) {
       typeBtns.appendChild(btn);
     });
 
-    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
-
-    // Lage/Ebene-Auswahl (wie im 2D-Programm): Alle / 1 Lage / 2 Lagen / freie Anzahl
-    const lageWrap = document.createElement('div');
-    lageWrap.className = 'acc-lage-wrap';
-
-    const lageBtns = document.createElement('div');
-    lageBtns.className = 'acc-lage-btns';
-    const currentLage   = (data && data.lage != null) ? String(data.lage) : 'alle';
-    const isPresetLage  = ['alle', '1', '2'].includes(currentLage);
-
-    const lageFreeInp = document.createElement('input');
-    lageFreeInp.type = 'number';
-    lageFreeInp.className = 'lage-free-input';
-    lageFreeInp.min = '1';
-    lageFreeInp.step = '1';
-    lageFreeInp.inputMode = 'numeric';
-    lageFreeInp.placeholder = 'Anz.';
-    if (!isPresetLage) lageFreeInp.value = currentLage;
-
-    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']].forEach(([val, lbl]) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'lage-btn' + (isPresetLage && currentLage === val ? ' active' : '');
-      b.dataset.lage = val;
-      b.textContent = lbl;
-      b.addEventListener('click', () => {
-        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        lageFreeInp.value = '';
-        onChange();
-      });
-      lageBtns.appendChild(b);
-    });
-
-    lageFreeInp.addEventListener('input', () => {
-      if (lageFreeInp.value.trim() !== '') {
-        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
-      }
-      onChange();
-    });
-
-    lageWrap.appendChild(lageBtns);
-    lageWrap.appendChild(lageFreeInp);
+    const lenWrap  = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+    const lageWrap = createLageWrap(data, onChange);
+    const calcEl   = createLageCalc();
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -1457,6 +1503,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     row.appendChild(typeBtns);
     row.appendChild(lenWrap);
     row.appendChild(lageWrap);
+    row.appendChild(calcEl);
     row.appendChild(removeBtn);
     konsoleList.appendChild(row);
   }
@@ -1473,7 +1520,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
   section.appendChild(konsoleList);
   section.appendChild(konsoleTotalEl);
 
-  // Innengeländer
+  // Innengeländer – UI 1:1 wie bei den Konsolen (Laenge + Lage/Ebene-Auswahl,
+  // die Laenge wird bei konkreter Lagenzahl automatisch multipliziert)
   const igTitleRow = document.createElement('div');
   igTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
   const igLbl = document.createElement('span');
@@ -1484,17 +1532,48 @@ function createAccessoriesSection(seiteData, card, onChange) {
   const igList = document.createElement('div');
   igList.className = 'acc-multi-list acc-ig-list';
 
+  const igTotalEl = document.createElement('div');
+  igTotalEl.className = 'acc-multi-total';
+  igTotalEl.style.display = 'none';
+
+  function refreshIgTotal() {
+    let total = 0, hasAny = false;
+    igList.querySelectorAll('.acc-multi-row').forEach(r => {
+      const inp = r.querySelector('.accessory-length-input');
+      const v = inp ? parseNum(inp.value) : NaN;
+      updateLageCalc(r);
+      if (!isNaN(v) && v > 0) { total += effektiveLaenge(v, collectLage(r)); hasAny = true; }
+    });
+    if (hasAny) {
+      igTotalEl.textContent = 'Gesamt: ' + fmtNum(round2(total)) + ' m';
+      igTotalEl.style.display = '';
+    } else {
+      igTotalEl.textContent = '';
+      igTotalEl.style.display = 'none';
+    }
+  }
+
+  igList.addEventListener('input', refreshIgTotal);
+  igList.addEventListener('click', () => requestAnimationFrame(refreshIgTotal));
+
   function addIgRow(data) {
     const row = document.createElement('div');
     row.className = 'acc-multi-row';
     row.appendChild(makeAccLabel('IG'));
-    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 || false) : false);
+
+    const lenWrap  = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+    const lageWrap = createLageWrap(data, onChange);
+    const calcEl   = createLageCalc();
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'meas-remove-btn';
     removeBtn.innerHTML = '&times;';
-    removeBtn.addEventListener('click', () => { row.remove(); onChange(); });
+    removeBtn.addEventListener('click', () => { row.remove(); refreshIgTotal(); onChange(); });
+
     row.appendChild(lenWrap);
+    row.appendChild(lageWrap);
+    row.appendChild(calcEl);
     row.appendChild(removeBtn);
     igList.appendChild(row);
   }
@@ -1503,11 +1582,13 @@ function createAccessoriesSection(seiteData, card, onChange) {
     ? seiteData.innengelaender
     : (seiteData.innengelaender ? [seiteData.innengelaender] : []);
   igInit.forEach(ig => addIgRow(ig));
+  refreshIgTotal();
 
-  const addIgBtn = makeAddBtn('+ IG', () => { addIgRow(null); onChange(); });
+  const addIgBtn = makeAddBtn('+ IG', () => { addIgRow(null); refreshIgTotal(); onChange(); });
   igTitleRow.appendChild(addIgBtn);
   section.appendChild(igTitleRow);
   section.appendChild(igList);
+  section.appendChild(igTotalEl);
 
   // Einzelne Zubehör
   section.appendChild(createSingleAcc('df', 'Dachfang (DF)',          seiteData.dachfang          || null));
@@ -1659,13 +1740,18 @@ function updateSummary() {
       if (!activeTypBtn) return;
       const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      const lageStr = lageLabel(collectKonsoleLage(row));
-      detailParts.push('K ' + activeTypBtn.dataset.typ + (lageStr ? ' (' + lageStr + ')' : '') + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      const lage = collectLage(row);
+      const lageStr = lageLabel(lage);
+      const eff = (!isNaN(v) && v > 0) ? effektiveLaenge(v, lage) : null;
+      detailParts.push('K ' + activeTypBtn.dataset.typ + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
     });
     card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
       const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      const lage = collectLage(row);
+      const lageStr = lageLabel(lage);
+      const eff = (!isNaN(v) && v > 0) ? effektiveLaenge(v, lage) : null;
+      detailParts.push('IG' + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
     });
     [{ acc: 'df', label: 'DF', unit: 'm' }, { acc: 'gt', label: 'GT', unit: 'm' }, { acc: 'ft', label: 'FT', unit: 'm' }, { acc: 'ne', label: 'NE', unit: 'm²' }].forEach(({ acc, label, unit }) => {
       const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
@@ -1891,7 +1977,7 @@ function generatePDF() {
   secHead('Gerüstfläche');
 
   let totalArea = 0;
-  const totals = { konsolen: {}, ig: 0, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
+  const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
 
   seiten.forEach((seite, idx) => {
     const name = seite.name === '__manual__' ? seite.manualName : seite.name;
@@ -1958,18 +2044,21 @@ function generatePDF() {
       y += 5;
     }
 
-    // Zubehör-Totals sammeln (Konsolen je Typ + Lage getrennt)
+    // Zubehör-Totals sammeln (Konsolen/Innengeländer je Lage getrennt, Laenge × Lagenzahl)
     if (Array.isArray(seite.konsolen)) {
       seite.konsolen.forEach(k => {
         if (k.laenge !== null && !isNaN(k.laenge)) {
           const key = k.typ + '|' + (k.lage || 'alle');
-          totals.konsolen[key] = (totals.konsolen[key] || 0) + k.laenge;
+          totals.konsolen[key] = (totals.konsolen[key] || 0) + effektiveLaenge(k.laenge, k.lage);
         }
       });
     }
     if (Array.isArray(seite.innengelaender)) {
       seite.innengelaender.forEach(ig => {
-        if (ig.laenge !== null && !isNaN(ig.laenge)) totals.ig += ig.laenge;
+        if (ig.laenge !== null && !isNaN(ig.laenge)) {
+          const key = ig.lage || 'alle';
+          totals.ig[key] = (totals.ig[key] || 0) + effektiveLaenge(ig.laenge, ig.lage);
+        }
       });
     }
     if (seite.dachfang          && seite.dachfang.laenge          != null) totals.df += seite.dachfang.laenge          || 0;
@@ -1989,8 +2078,9 @@ function generatePDF() {
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
   // ── Positionen ─────────────────────────────────────────────────
-  const kKeys = Object.keys(totals.konsolen).sort((a, b) => Number(a.split('|')[0]) - Number(b.split('|')[0]));
-  const hasAcc = kKeys.length > 0 || totals.ig > 0 || totals.df > 0 ||
+  const kKeys  = Object.keys(totals.konsolen).sort((a, b) => Number(a.split('|')[0]) - Number(b.split('|')[0]));
+  const igKeys = Object.keys(totals.ig).sort((a, b) => (a === 'alle' ? -1 : b === 'alle' ? 1 : Number(a) - Number(b)));
+  const hasAcc = kKeys.length > 0 || igKeys.length > 0 || totals.df > 0 ||
     totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
 
   if (hasAcc || zusatz.length > 0) {
@@ -2002,7 +2092,10 @@ function generatePDF() {
       const lageStr = lageLabel(lage);
       pdfRow('Konsole ' + typ + ' cm' + (lageStr ? ' – ' + lageStr : ''), fmtNum(round2(totals.konsolen[key])) + ' m');
     });
-    if (totals.ig > 0) pdfRow('Innengeländer',   fmtNum(round2(totals.ig)) + ' m');
+    igKeys.forEach(lage => {
+      const lageStr = lageLabel(lage);
+      pdfRow('Innengeländer' + (lageStr ? ' – ' + lageStr : ''), fmtNum(round2(totals.ig[lage])) + ' m');
+    });
     if (totals.df > 0) pdfRow('Dachfang',        fmtNum(round2(totals.df)) + ' m');
     if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
     if (totals.ft > 0) pdfRow('Fußgängertunnel', fmtNum(round2(totals.ft)) + ' m');
