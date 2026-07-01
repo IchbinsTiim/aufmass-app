@@ -1073,6 +1073,121 @@ html, body {
 .ks-reset-btn:active { background: #bfdbfe; }
 
 /* ============================================================
+   Wandabstand & WDVS je Seite
+   ============================================================ */
+.wand-wdvs-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+.wand-wdvs-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #f7f8fa;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border);
+  flex: 1;
+  min-width: 140px;
+}
+.wand-wdvs-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+.wand-wdvs-field input {
+  width: 70px;
+  padding: 6px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: #fff;
+  text-align: right;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+  flex: 1;
+  min-width: 0;
+}
+.wand-wdvs-field input::-webkit-inner-spin-button,
+.wand-wdvs-field input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.wand-wdvs-field input:focus { border-color: var(--color-border-focus); }
+.wand-wdvs-unit {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Konsolen-Lage (Ebene) je Konsolenzeile
+   ============================================================ */
+.acc-lage-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.lage-btn {
+  padding: 7px 9px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  min-height: 34px;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.lage-btn.active {
+  border-color: #e67e22;
+  background: #fff7ed;
+  color: #c0591a;
+}
+.lage-free-input {
+  width: 48px;
+  padding: 6px 6px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  text-align: center;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+.lage-free-input::-webkit-inner-spin-button,
+.lage-free-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.lage-free-input:focus { border-color: var(--color-border-focus); }
+
+/* ============================================================
+   L/H-Kennzeichnung an den Maß-Eingabefeldern
+   ============================================================ */
+.meas-field {
+  position: relative;
+}
+.meas-field-tag {
+  position: absolute;
+  top: -8px;
+  left: 3px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  color: #fff;
+  background: var(--color-primary);
+  padding: 1px 4px;
+  border-radius: 4px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ============================================================
    iPad / Tablet-Optimierung (min-width: 768px)
    ============================================================ */
 @media (min-width: 768px) {
@@ -1543,8 +1658,8 @@ html, body {
 .messungen-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .messung-row {
