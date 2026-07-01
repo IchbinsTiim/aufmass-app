@@ -194,6 +194,14 @@
           <h2 class="card-title">Hausseiten</h2>
           <button id="addSideBtn" class="btn btn-primary btn-sm">+ Seite</button>
         </div>
+        <div class="ueberstand-setting">
+          <label class="form-label" for="fieldUeberstandWert">Zuschlag der &bdquo;+&ldquo;-Taste bei Maßen</label>
+          <div class="ueberstand-setting-row">
+            <span class="ueberstand-setting-sign">+</span>
+            <input class="form-input" type="number" id="fieldUeberstandWert" step="0.1" min="0.1" inputmode="decimal" value="2.00" />
+            <span class="ueberstand-setting-unit">m</span>
+          </div>
+        </div>
         <div id="seitenContainer"></div>
         <div id="noSidesHint" class="no-sides-hint">
           Noch keine Seiten erfasst. Tippen Sie auf &bdquo;+ Seite&ldquo;.

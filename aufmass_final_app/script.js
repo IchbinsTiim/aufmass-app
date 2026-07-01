@@ -12,11 +12,35 @@ let currentProjectId = null;
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
   'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen',
-  'Bautenschutzmatte','Fleece','Bauzaun'
+  'Bautenschutzmatte','Fleece','Bauzaun','Käfig'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 // Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
-const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm' };
+const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.' };
+
+// Zuschlag der "+Xm"-Tasten bei den Maßen (Standard 2,00 m, vom Nutzer änderbar)
+const UEBERSTAND_STORAGE_KEY = 'aufmass_ueberstand_wert';
+let ueberstandWert = 2;
+
+function loadUeberstandWert() {
+  const n = parseFloat(localStorage.getItem(UEBERSTAND_STORAGE_KEY));
+  ueberstandWert = (!isNaN(n) && n > 0) ? n : 2;
+}
+
+function setUeberstandWert(v) {
+  if (isNaN(v) || v <= 0) return;
+  ueberstandWert = v;
+  localStorage.setItem(UEBERSTAND_STORAGE_KEY, String(v));
+  document.querySelectorAll('.plus2-btn').forEach(btn => {
+    btn.textContent = '+' + fmtNum(ueberstandWert) + 'm';
+  });
+  // Bestehende Zeilen mit dem neuen Zuschlag neu berechnen (nutzt die
+  // bereits vorhandenen Input-Listener der Maß-Felder).
+  document.querySelectorAll('.messung-laenge, .messung-hoehe, .messung-hoehe2').forEach(el => {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  updateSummary();
+}
 
 // ============================================================
 //  localStorage
@@ -128,15 +152,15 @@ function berechneAbschnitt(abschnitt) {
   const isGiebel = abschnitt.giebel    || false;
   let flaeche = 0;
   for (const m of (abschnitt.messungen || [])) {
-    let l = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+    let l = (m.laenge || 0) + (m.laengePlus2 ? ueberstandWert : 0);
     if (ef) l = Math.max(l, 2.5);
     if (l <= 0) continue;
     if (isGiebel) {
-      const h1 = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
-      const h2 = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+      const h1 = (m.hoehe  || 0) + (m.hoehePlus2  ? ueberstandWert : 0);
+      const h2 = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? ueberstandWert : 0);
       if (h2 >= h1 && h1 >= 0) flaeche += l * (h1 + h2) / 2;
     } else {
-      const h = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+      const h = (m.hoehe || 0) + (m.hoehePlus2 ? ueberstandWert : 0);
       if (h > 0) flaeche += l * h;
     }
   }
@@ -152,7 +176,7 @@ function computeCardFlaeche(card) {
     abRow.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
       const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-      let lEff  = (l || 0) + (lP2 ? 2 : 0);
+      let lEff  = (l || 0) + (lP2 ? ueberstandWert : 0);
       if (ef) lEff = Math.max(lEff, 2.5);
       if (isNaN(l) || lEff <= 0) return;
       if (isGiebel) {
@@ -161,15 +185,15 @@ function computeCardFlaeche(card) {
         const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
         const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
         if (!isNaN(h) && !isNaN(h2)) {
-          const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-          const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+          const h1Eff = (h  || 0) + (hP2  ? ueberstandWert : 0);
+          const h2Eff = (h2 || 0) + (hP22 ? ueberstandWert : 0);
           if (h2Eff >= h1Eff && h1Eff >= 0) total += lEff * (h1Eff + h2Eff) / 2;
         }
       } else {
         const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
         const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
         if (!isNaN(h)) {
-          const hEff = (h || 0) + (hP2 ? 2 : 0);
+          const hEff = (h || 0) + (hP2 ? ueberstandWert : 0);
           if (hEff > 0) total += lEff * hEff;
         }
       }
@@ -928,7 +952,7 @@ function createAbschnittRow(data, container, onChange) {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
       const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
       const calcEl = mRow.querySelector('.messung-calc');
-      let lEff = (l || 0) + (lP2 ? 2 : 0);
+      let lEff = (l || 0) + (lP2 ? ueberstandWert : 0);
       if (ef) lEff = Math.max(lEff, 2.5);
       let f = 0;
       if (!isNaN(l) && lEff > 0) {
@@ -938,15 +962,15 @@ function createAbschnittRow(data, container, onChange) {
           const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
           const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            const h1Eff = (h  || 0) + (hP2  ? ueberstandWert : 0);
+            const h2Eff = (h2 || 0) + (hP22 ? ueberstandWert : 0);
             if (h2Eff >= h1Eff && h1Eff >= 0) f = round2(lEff * (h1Eff + h2Eff) / 2);
           }
         } else {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
           const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            const hEff = (h || 0) + (hP2 ? ueberstandWert : 0);
             if (hEff > 0) f = round2(lEff * hEff);
           }
         }
@@ -976,7 +1000,7 @@ function createAbschnittRow(data, container, onChange) {
     const laengePlus2 = document.createElement('button');
     laengePlus2.type = 'button';
     laengePlus2.className = 'plus2-btn messung-laenge-plus2' + (mData?.laengePlus2 ? ' active' : '');
-    laengePlus2.textContent = '+2m';
+    laengePlus2.textContent = '+' + fmtNum(ueberstandWert) + 'm';
     laengePlus2.addEventListener('click', () => {
       laengePlus2.classList.toggle('active');
       refreshAbschnittCalc();
@@ -999,7 +1023,7 @@ function createAbschnittRow(data, container, onChange) {
     const hoehePlus2 = document.createElement('button');
     hoehePlus2.type = 'button';
     hoehePlus2.className = 'plus2-btn messung-hoehe-plus2' + (mData?.hoehePlus2 ? ' active' : '');
-    hoehePlus2.textContent = '+2m';
+    hoehePlus2.textContent = '+' + fmtNum(ueberstandWert) + 'm';
     hoehePlus2.addEventListener('click', () => {
       hoehePlus2.classList.toggle('active');
       refreshAbschnittCalc();
@@ -1023,7 +1047,7 @@ function createAbschnittRow(data, container, onChange) {
     const hoehe2Plus2 = document.createElement('button');
     hoehe2Plus2.type = 'button';
     hoehe2Plus2.className = 'plus2-btn messung-hoehe2-plus2 giebel-part' + (mData?.hoehe2Plus2 ? ' active' : '');
-    hoehe2Plus2.textContent = '+2m';
+    hoehe2Plus2.textContent = '+' + fmtNum(ueberstandWert) + 'm';
     hoehe2Plus2.addEventListener('click', () => {
       hoehe2Plus2.classList.toggle('active');
       refreshAbschnittCalc();
@@ -1291,7 +1315,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     const lP2 = firstMRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
     const ef  = firstAbRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
     if (isNaN(l)) return null;
-    let lEff = (l || 0) + (lP2 ? 2 : 0);
+    let lEff = (l || 0) + (lP2 ? ueberstandWert : 0);
     if (ef) lEff = Math.max(lEff, 2.5);
     return lEff > 0 ? round2(lEff) : null;
   }
@@ -1699,7 +1723,7 @@ function updateSummary() {
       abRow.querySelectorAll('.messung-row').forEach(mRow => {
         const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
         const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-        let lEff  = (l || 0) + (lP2 ? 2 : 0);
+        let lEff  = (l || 0) + (lP2 ? ueberstandWert : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
         if (isNaN(l) || lEff <= 0) return;
         const bezPfx = bez ? bez + ': ' : '';
@@ -1710,8 +1734,8 @@ function updateSummary() {
           const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
           const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            const h1Eff = (h  || 0) + (hP2  ? ueberstandWert : 0);
+            const h2Eff = (h2 || 0) + (hP22 ? ueberstandWert : 0);
             if (h2Eff >= h1Eff && h1Eff >= 0) {
               const pair = round2(lEff * (h1Eff + h2Eff) / 2);
               abFlaeche += pair;
@@ -1722,7 +1746,7 @@ function updateSummary() {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
           const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            const hEff = (h || 0) + (hP2 ? ueberstandWert : 0);
             if (hEff > 0) {
               const pair = round2(lEff * hEff);
               abFlaeche += pair;
@@ -2007,14 +2031,14 @@ function generatePDF() {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
       (a.messungen || []).forEach(m => {
-        let lEff = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+        let lEff = (m.laenge || 0) + (m.laengePlus2 ? ueberstandWert : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
         if (lEff <= 0) return;
         const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
         const efStr  = ef ? ' (EF)' : '';
         if (isGiebel) {
-          const h1Eff = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
-          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+          const h1Eff = (m.hoehe  || 0) + (m.hoehePlus2  ? ueberstandWert : 0);
+          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? ueberstandWert : 0);
           if (h2Eff < h1Eff || h1Eff < 0) return;
           const pair = round2(lEff * (h1Eff + h2Eff) / 2);
           seitenFlaeche += pair;
@@ -2024,7 +2048,7 @@ function generatePDF() {
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
-          const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+          const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? ueberstandWert : 0);
           if (hEff <= 0) return;
           const pair = round2(lEff * hEff);
           seitenFlaeche += pair;
@@ -2113,26 +2137,28 @@ function generatePDF() {
 
   // ── Baustelle / Logistik ──────────────────────────────────────
   const logParts = [
-    logistik.anfahrtKm             ? logistik.anfahrtKm + ' km Anfahrt' : '',
-    logistik.untergrund             ? 'Untergrund: ' + logistik.untergrund : '',
-    logistik.stellflaecheNotiz      ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
-    logistik.oeffentlicherGrund     ? 'Öffentlicher Grund' : '',
-    logistik.verkehrssicherung      ? 'Verkehrssicherung' : '',
-    logistik.genehmigungErforderlich? 'Genehmigung erforderlich' : ''
+    logistik.anfahrtKm != null              ? ['Anfahrt',                  fmtNum(logistik.anfahrtKm) + ' km'] : null,
+    logistik.untergrund                     ? ['Untergrund',               logistik.untergrund] : null,
+    logistik.stellflaecheNotiz              ? ['Stellfläche',              logistik.stellflaecheNotiz] : null,
+    logistik.oeffentlicherGrund             ? ['Öffentlicher Grund',       ''] : null,
+    logistik.verkehrssicherung              ? ['Verkehrssicherung',        ''] : null,
+    logistik.genehmigungErforderlich        ? ['Genehmigung erforderlich', ''] : null
   ].filter(Boolean);
 
   if (logParts.length > 0) {
     y += 1;
     hline(0.3);
     secHead('Baustelle / Logistik');
-    logParts.forEach(f => pdfRow(f, ''));
+    logParts.forEach(([label, val]) => pdfRow(label, val));
   }
 
   // ── Transport / Laufaufwand (für die Kalkulation) ──────────────
+  // Hinweis: "→" wird von der Standard-PDF-Schrift nicht unterstützt und
+  // erscheint sonst als kaputte Zeichenfolge – daher hier "-" statt Pfeil.
   const transportParts = [
-    logistik.transportM  ? ['Laufweg LKW → Objekt', logistik.transportM + ' m'] : null,
-    logistik.hoehenmeter ? ['Höhenmeter',           logistik.hoehenmeter + ' m'] : null,
-    logistik.treppen     ? ['Treppen / Stockwerke', String(logistik.treppen)] : null
+    logistik.transportM  != null ? ['Laufweg LKW - Objekt', fmtNum(logistik.transportM)  + ' m'] : null,
+    logistik.hoehenmeter  != null ? ['Höhenmeter',           fmtNum(logistik.hoehenmeter) + ' m'] : null,
+    logistik.treppen      != null ? ['Treppen / Stockwerke', String(logistik.treppen)] : null
   ].filter(Boolean);
 
   if (transportParts.length > 0) {
@@ -2206,6 +2232,21 @@ function initApp() {
   loadProjects();
   renderProjectList();
   showScreen('homeScreen');
+
+  loadUeberstandWert();
+  const ueberstandInp = document.getElementById('fieldUeberstandWert');
+  if (ueberstandInp) {
+    ueberstandInp.value = ueberstandWert;
+    ueberstandInp.addEventListener('change', () => {
+      const v = parseNum(ueberstandInp.value);
+      if (isNaN(v) || v <= 0) {
+        ueberstandInp.value = ueberstandWert;
+        return;
+      }
+      setUeberstandWert(v);
+      ueberstandInp.value = ueberstandWert;
+    });
+  }
 
   document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
 
