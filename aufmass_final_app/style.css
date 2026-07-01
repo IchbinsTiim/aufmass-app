@@ -409,6 +409,45 @@ html, body {
 }
 
 /* ============================================================
+   Überstand-Einstellung ("+Xm"-Zuschlag)
+   ============================================================ */
+.ueberstand-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  background: #f9f9fb;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.ueberstand-setting .form-label {
+  margin: 0;
+}
+
+.ueberstand-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ueberstand-setting-sign,
+.ueberstand-setting-unit {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ueberstand-setting-row .form-input {
+  width: 72px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+/* ============================================================
    No-sides hint
    ============================================================ */
 .no-sides-hint {
