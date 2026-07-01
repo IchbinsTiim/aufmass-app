@@ -12,11 +12,11 @@ let currentProjectId = null;
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
   'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen',
-  'Bautenschutzmatte','Fleece'
+  'Bautenschutzmatte','Fleece','Bauzaun'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 // Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
-const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²' };
+const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm' };
 
 // ============================================================
 //  localStorage
@@ -86,6 +86,20 @@ function getProjectLabel(project) {
     parts.push([a.plz, a.ort].filter(Boolean).join(' '));
   }
   return parts.join(', ') || 'Neues Projekt';
+}
+
+// Ausgewaehlte Konsolen-Lage (Ebene) einer Konsolen-Zeile ermitteln
+function collectKonsoleLage(row) {
+  const freeInp = row.querySelector('.lage-free-input');
+  const freeVal = freeInp ? freeInp.value.trim() : '';
+  if (freeVal !== '') return freeVal;
+  const activeLageBtn = row.querySelector('.lage-btn.active');
+  return activeLageBtn ? activeLageBtn.dataset.lage : 'alle';
+}
+
+function lageLabel(lage) {
+  if (!lage || lage === 'alle') return '';
+  return lage + (lage === '1' ? ' Lage' : ' Lagen');
 }
 
 function getSeiteName(seite) {
@@ -445,7 +459,7 @@ function collectSeiten() {
       abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
     });
 
-    // Konsolen
+    // Konsolen (mehrere Lagen je Seite moeglich)
     const konsolen = [];
     card.querySelectorAll('.acc-konsole-list .acc-multi-row').forEach(row => {
       const activeTypBtn = row.querySelector('.konsole-btn.active');
@@ -456,7 +470,8 @@ function collectSeiten() {
       konsolen.push({
         typ:    activeTypBtn.dataset.typ,
         laenge: isNaN(len) ? null : len,
-        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false,
+        lage:   collectKonsoleLage(row)
       });
     });
 
@@ -488,11 +503,16 @@ function collectSeiten() {
     const ksInp  = card.querySelector('.ks-input');
     const ksVal  = ksInp ? parseNum(ksInp.value) : NaN;
 
+    const wandabstandVal = parseNum(card.querySelector('.seite-wandabstand')?.value);
+    const wdvsVal        = parseNum(card.querySelector('.seite-wdvs')?.value);
+
     result.push({
       id:               card.dataset.sideId,
       name:             sel ? sel.value : '',
       manualName:       manual ? manual.value.trim() : '',
       abschnitte,
+      wandabstand:      isNaN(wandabstandVal) ? null : wandabstandVal,
+      wdvs:             isNaN(wdvsVal) ? null : wdvsVal,
       konsolen,
       innengelaender,
       dachfang:          collectSingleToggle('df'),
@@ -658,6 +678,36 @@ function createSeiteCard(seiteData) {
   nameRow.appendChild(nameSelect);
   nameRow.appendChild(manualInput);
 
+  // Wandabstand & WDVS
+  function makeSideMetaField(labelText, unitText, inputClass, initVal) {
+    const wrap = document.createElement('div');
+    wrap.className = 'wand-wdvs-field';
+    const lab = document.createElement('span');
+    lab.className = 'wand-wdvs-label';
+    lab.textContent = labelText;
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.className = inputClass;
+    inp.step = '0.01';
+    inp.min = '0';
+    inp.inputMode = 'decimal';
+    inp.placeholder = '0,00';
+    if (initVal !== null && initVal !== undefined && !isNaN(initVal)) inp.value = initVal;
+    inp.addEventListener('input', mainOnChange);
+    const unit = document.createElement('span');
+    unit.className = 'wand-wdvs-unit';
+    unit.textContent = unitText;
+    wrap.appendChild(lab);
+    wrap.appendChild(inp);
+    wrap.appendChild(unit);
+    return wrap;
+  }
+
+  const wandWdvsRow = document.createElement('div');
+  wandWdvsRow.className = 'wand-wdvs-row';
+  wandWdvsRow.appendChild(makeSideMetaField('Wandabstand', 'm',  'seite-wandabstand', seiteData.wandabstand));
+  wandWdvsRow.appendChild(makeSideMetaField('WDVS',        'cm', 'seite-wdvs',        seiteData.wdvs));
+
   // Abschnitte
   const abschnittSection = createAbschnittSection(seiteData, mainOnChange);
 
@@ -721,6 +771,7 @@ function createSeiteCard(seiteData) {
   footer.appendChild(removeBtn);
 
   body.appendChild(nameRow);
+  body.appendChild(wandWdvsRow);
   body.appendChild(abschnittSection);
   body.appendChild(ksRow);
   body.appendChild(accSectionRef);
@@ -820,6 +871,9 @@ function createAbschnittRow(data, container, onChange) {
     row.classList.toggle('giebel-active', isGiebel);
     messungenList.querySelectorAll('.messung-hoehe').forEach(el => {
       el.placeholder = isGiebel ? 'H1 (Rinne)' : 'H';
+    });
+    messungenList.querySelectorAll('.meas-field-h .meas-field-tag').forEach(tag => {
+      tag.textContent = isGiebel ? 'H1' : 'H';
     });
     refreshAbschnittCalc();
     onChange();
@@ -942,7 +996,7 @@ function createAbschnittRow(data, container, onChange) {
 
     const hoehe2Inp = document.createElement('input');
     hoehe2Inp.type = 'number';
-    hoehe2Inp.className = 'messung-hoehe2 giebel-part';
+    hoehe2Inp.className = 'messung-hoehe2';
     hoehe2Inp.step = '0.01';
     hoehe2Inp.min = '0';
     hoehe2Inp.inputMode = 'decimal';
@@ -978,13 +1032,18 @@ function createAbschnittRow(data, container, onChange) {
     laengeInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
     hoeheInp.addEventListener('input',  () => { refreshAbschnittCalc(); onChange(); });
 
-    mRow.appendChild(laengeInp);
+    const laengeField = wrapMeasField('L', laengeInp);
+    const hoeheField  = wrapMeasField(isGiebelNow ? 'H1' : 'H', hoeheInp);
+    hoeheField.classList.add('meas-field-h');
+    const hoehe2Field = wrapMeasField('H2', hoehe2Inp, 'giebel-part');
+
+    mRow.appendChild(laengeField);
     mRow.appendChild(laengePlus2);
     mRow.appendChild(mulSign);
-    mRow.appendChild(hoeheInp);
+    mRow.appendChild(hoeheField);
     mRow.appendChild(hoehePlus2);
     mRow.appendChild(giebelSep);
-    mRow.appendChild(hoehe2Inp);
+    mRow.appendChild(hoehe2Field);
     mRow.appendChild(hoehe2Plus2);
     mRow.appendChild(calcSpan);
     mRow.appendChild(removeMBtn);
@@ -1045,6 +1104,8 @@ function addSide() {
     name:           'Straßenseite',
     manualName:     '',
     abschnitte:     [{ bezeichnung: '', einzelfeld: false, giebel: false, messungen: [] }],
+    wandabstand:       null,
+    wdvs:              null,
     konsolen:          [],
     innengelaender:    [],
     dachfang:          null,
@@ -1160,6 +1221,19 @@ function createZusatzRow(data) {
 // ============================================================
 //  Hilfsfunktionen für Zubehör-Abschnitt
 // ============================================================
+
+// Eindeutige L/H-Kennzeichnung direkt am Eingabefeld (kleines Badge oben links)
+function wrapMeasField(labelText, input, extraClass) {
+  const wrap = document.createElement('div');
+  wrap.className = 'meas-field' + (extraClass ? ' ' + extraClass : '');
+  const tag = document.createElement('span');
+  tag.className = 'meas-field-tag';
+  tag.textContent = labelText;
+  wrap.appendChild(tag);
+  wrap.appendChild(input);
+  wrap._tag = tag;
+  return wrap;
+}
 
 function makeAccLabel(text) {
   const el = document.createElement('span');
@@ -1330,6 +1404,50 @@ function createAccessoriesSection(seiteData, card, onChange) {
     });
 
     const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+
+    // Lage/Ebene-Auswahl (wie im 2D-Programm): Alle / 1 Lage / 2 Lagen / freie Anzahl
+    const lageWrap = document.createElement('div');
+    lageWrap.className = 'acc-lage-wrap';
+
+    const lageBtns = document.createElement('div');
+    lageBtns.className = 'acc-lage-btns';
+    const currentLage   = (data && data.lage != null) ? String(data.lage) : 'alle';
+    const isPresetLage  = ['alle', '1', '2'].includes(currentLage);
+
+    const lageFreeInp = document.createElement('input');
+    lageFreeInp.type = 'number';
+    lageFreeInp.className = 'lage-free-input';
+    lageFreeInp.min = '1';
+    lageFreeInp.step = '1';
+    lageFreeInp.inputMode = 'numeric';
+    lageFreeInp.placeholder = 'Anz.';
+    if (!isPresetLage) lageFreeInp.value = currentLage;
+
+    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']].forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lage-btn' + (isPresetLage && currentLage === val ? ' active' : '');
+      b.dataset.lage = val;
+      b.textContent = lbl;
+      b.addEventListener('click', () => {
+        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        lageFreeInp.value = '';
+        onChange();
+      });
+      lageBtns.appendChild(b);
+    });
+
+    lageFreeInp.addEventListener('input', () => {
+      if (lageFreeInp.value.trim() !== '') {
+        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
+      }
+      onChange();
+    });
+
+    lageWrap.appendChild(lageBtns);
+    lageWrap.appendChild(lageFreeInp);
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'meas-remove-btn';
@@ -1338,6 +1456,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
     row.appendChild(typeBtns);
     row.appendChild(lenWrap);
+    row.appendChild(lageWrap);
     row.appendChild(removeBtn);
     konsoleList.appendChild(row);
   }
@@ -1480,6 +1599,15 @@ function updateSummary() {
     let seitenFlaeche = 0;
     const detailParts = [];
 
+    const wandabstandVal = parseNum(card.querySelector('.seite-wandabstand')?.value);
+    const wdvsVal        = parseNum(card.querySelector('.seite-wdvs')?.value);
+    if (!isNaN(wandabstandVal) || !isNaN(wdvsVal)) {
+      const metaParts = [];
+      if (!isNaN(wandabstandVal)) metaParts.push('Wandabstand ' + fmtNum(wandabstandVal) + ' m');
+      if (!isNaN(wdvsVal))        metaParts.push('WDVS ' + fmtNum(wdvsVal) + ' cm');
+      detailParts.push(metaParts.join(' · '));
+    }
+
     card.querySelectorAll('.abschnitt-row').forEach(abRow => {
       const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
       const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
@@ -1531,7 +1659,8 @@ function updateSummary() {
       if (!activeTypBtn) return;
       const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('K ' + activeTypBtn.dataset.typ + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      const lageStr = lageLabel(collectKonsoleLage(row));
+      detailParts.push('K ' + activeTypBtn.dataset.typ + (lageStr ? ' (' + lageStr + ')' : '') + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
     });
     card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
       const lenInp = row.querySelector('.accessory-length-input');
@@ -1774,6 +1903,16 @@ function generatePDF() {
     doc.setFont(undefined, 'normal');
     y += 6;
 
+    if (seite.wandabstand != null || seite.wdvs != null) {
+      const metaParts = [];
+      if (seite.wandabstand != null) metaParts.push('Wandabstand ' + fmtNum(seite.wandabstand) + ' m');
+      if (seite.wdvs != null)        metaParts.push('WDVS ' + fmtNum(seite.wdvs) + ' cm');
+      chk(6);
+      doc.setFontSize(9);
+      doc.text(metaParts.join('   '), IND + 3, y);
+      y += 5;
+    }
+
     let seitenFlaeche = 0;
     (seite.abschnitte || []).forEach(a => {
       const ef = a.einzelfeld || false;
@@ -1819,11 +1958,13 @@ function generatePDF() {
       y += 5;
     }
 
-    // Zubehör-Totals sammeln
+    // Zubehör-Totals sammeln (Konsolen je Typ + Lage getrennt)
     if (Array.isArray(seite.konsolen)) {
       seite.konsolen.forEach(k => {
-        if (k.laenge !== null && !isNaN(k.laenge))
-          totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + k.laenge;
+        if (k.laenge !== null && !isNaN(k.laenge)) {
+          const key = k.typ + '|' + (k.lage || 'alle');
+          totals.konsolen[key] = (totals.konsolen[key] || 0) + k.laenge;
+        }
       });
     }
     if (Array.isArray(seite.innengelaender)) {
@@ -1848,15 +1989,19 @@ function generatePDF() {
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
   // ── Positionen ─────────────────────────────────────────────────
-  const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
-  const hasAcc = kTypen.length > 0 || totals.ig > 0 || totals.df > 0 ||
+  const kKeys = Object.keys(totals.konsolen).sort((a, b) => Number(a.split('|')[0]) - Number(b.split('|')[0]));
+  const hasAcc = kKeys.length > 0 || totals.ig > 0 || totals.df > 0 ||
     totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
 
   if (hasAcc || zusatz.length > 0) {
     y += 1;
     hline(0.3);
     secHead('Positionen');
-    kTypen.forEach(t => pdfRow('Konsole ' + t + ' cm', fmtNum(round2(totals.konsolen[t])) + ' m'));
+    kKeys.forEach(key => {
+      const [typ, lage] = key.split('|');
+      const lageStr = lageLabel(lage);
+      pdfRow('Konsole ' + typ + ' cm' + (lageStr ? ' – ' + lageStr : ''), fmtNum(round2(totals.konsolen[key])) + ' m');
+    });
     if (totals.ig > 0) pdfRow('Innengeländer',   fmtNum(round2(totals.ig)) + ' m');
     if (totals.df > 0) pdfRow('Dachfang',        fmtNum(round2(totals.df)) + ' m');
     if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
