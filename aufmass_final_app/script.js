@@ -307,7 +307,7 @@ function createNewProject() {
     id: genId('proj'),
     erstellt: today,
     geaendert: today,
-    anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '' },
+    anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
     geruesttyp: 'fassade',
     geruesttypName: '',
     seiten: [],
@@ -333,6 +333,7 @@ function openProject(projectId) {
   document.getElementById('fieldPlz').value     = a.plz     || '';
   document.getElementById('fieldOrt').value     = a.ort     || '';
   document.getElementById('fieldBauherr').value = a.bauherr || '';
+  document.getElementById('fieldTelefon').value = a.telefon || '';
 
   const typ = proj.geruesttyp || 'fassade';
   document.querySelectorAll('.type-btn').forEach(btn => {
@@ -360,7 +361,8 @@ function collectAnschrift() {
     nummer:   document.getElementById('fieldNummer').value.trim(),
     plz:      document.getElementById('fieldPlz').value.trim(),
     ort:      document.getElementById('fieldOrt').value.trim(),
-    bauherr:  document.getElementById('fieldBauherr').value.trim()
+    bauherr:  document.getElementById('fieldBauherr').value.trim(),
+    telefon:  document.getElementById('fieldTelefon').value.trim()
   };
 }
 
@@ -1969,6 +1971,7 @@ function generatePDF() {
   ].filter(Boolean).join(', ');
   if (addrLine)           { doc.setFontSize(10); doc.text(addrLine, LM, y); y += 5; }
   if (anschrift.bauherr)  { doc.setFontSize(10); doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 5; }
+  if (anschrift.telefon)  { doc.setFontSize(10); doc.text('Telefon: ' + anschrift.telefon, LM, y); y += 5; }
   doc.setFontSize(10); doc.text(geruesttypLabel, LM, y); y += 5;
   y += 2;
 
@@ -2252,7 +2255,7 @@ function initApp() {
   });
 
   // Anschrift Auto-Save
-  ['fieldStrasse', 'fieldNummer', 'fieldPlz', 'fieldOrt', 'fieldBauherr'].forEach(id => {
+  ['fieldStrasse', 'fieldNummer', 'fieldPlz', 'fieldOrt', 'fieldBauherr', 'fieldTelefon'].forEach(id => {
     document.getElementById(id).addEventListener('change', () => {
       const proj = getCurrentProject();
       if (!proj) return;

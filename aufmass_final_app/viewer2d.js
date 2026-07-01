@@ -27,14 +27,14 @@ const FIELD_PRESETS = [0.73, 1.09, 1.57, 2.07, 2.57, 3.07];
 const KONSOLE_TYPES = ['0,19', '0,30', '0,50', '0,70', '1,09'];
 
 // Verfügbare Positions-Arten. `konsole:true` → mit Typ + Lagen, mehrfach möglich.
-// `unit` = voreingestellte Mengeneinheit ('m' | 'stk' | 'lagen'); pro Position
-// im Editor änderbar.
+// `unit` = voreingestellte Mengeneinheit ('m' | 'm2' | 'stgm' | 'stk' | 'lagen');
+// pro Position im Editor änderbar.
 const POSITIONS = [
   { key: 'konsole',       label: 'Konsole',          short: 'K',    color: '#cc7a00', konsole: true },
   { key: 'innengelaender',label: 'Innengeländer',    short: 'IG',   color: '#2f9e44', unit: 'lagen' },
-  { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a', unit: 'm' },
+  { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a', unit: 'm2' },
   { key: 'dachfang',      label: 'Dachfang',         short: 'DF',   color: '#b08900', unit: 'm' },
-  { key: 'treppenturm',   label: 'Treppenturm',      short: 'TT',   color: '#8e44ec', unit: 'stk' },
+  { key: 'treppenturm',   label: 'Treppenturm',      short: 'TT',   color: '#8e44ec', unit: 'stgm' },
   { key: 'durchgang',     label: 'Durchgang',        short: 'DG',   color: '#1f5f9e', unit: 'stk' },
   { key: 'geruesttreppe', label: 'Gerüsttreppe',     short: 'GT',   color: '#4659c9', unit: 'stk' },
   { key: 'verbreiterung', label: 'Verbreiterung',    short: 'VB',   color: '#0f9b8e', unit: 'lagen' },
@@ -49,8 +49,8 @@ const POSITIONS = [
 const POS_BY_KEY = Object.fromEntries(POSITIONS.map(p => [p.key, p]));
 
 // Mengeneinheiten für (Nicht-Konsolen-)Positionen.
-const UNIT_DEFS  = [['m', 'm'], ['stk', 'Stk'], ['lagen', 'Lagen']];
-const UNIT_LABEL = { m: 'm', stk: 'Stk', lagen: 'Lagen' };
+const UNIT_DEFS  = [['m', 'm'], ['m2', 'm²'], ['stgm', 'Stg. m'], ['stk', 'Stk'], ['lagen', 'Lagen']];
+const UNIT_LABEL = { m: 'm', m2: 'm²', stgm: 'Stg. m', stk: 'Stk', lagen: 'Lagen' };
 
 /** Voreingestellte Einheit einer Positionsart. */
 function defaultUnit(cat) {
@@ -68,11 +68,19 @@ function hasOwnQty(pos) {
   return pos.qty != null && pos.qty !== '' && !isNaN(parseFloat(pos.qty));
 }
 
+/** Fläche eines Feldes (Länge × Gerüsttiefe) – Vorschlagswert für Netz-m². */
+function bayArea(bayLen) {
+  return bayLen != null ? +(bayLen * state.depth).toFixed(3) : null;
+}
+
 /** Effektive Menge einer Position. Bei Einheit 'm' ohne eigenen Wert gilt
- *  standardmäßig die Feldlänge – der Nutzer kann sie jederzeit überschreiben. */
+ *  standardmäßig die Feldlänge, bei 'm2' die Feldfläche – der Nutzer kann
+ *  den Wert jederzeit überschreiben. */
 function effQty(pos, bayLen) {
   if (hasOwnQty(pos)) return parseFloat(pos.qty);
-  if ((pos.unit || defaultUnit(pos.cat)) === 'm' && bayLen != null) return +bayLen;
+  const u = pos.unit || defaultUnit(pos.cat);
+  if (u === 'm'  && bayLen != null) return +bayLen;
+  if (u === 'm2' && bayLen != null) return bayArea(bayLen);
   return null;
 }
 
@@ -141,7 +149,7 @@ function posBadge(pos, bayLen) {
   const v = effQty(pos, bayLen);
   if (v != null) {
     const u = pos.unit || defaultUnit(pos.cat);
-    const suf = u === 'm' ? 'm' : '×';
+    const suf = (u === 'm' || u === 'stgm') ? 'm' : (u === 'm2' ? 'm²' : '×');
     return p.short + ' ' + fmtQty(v) + suf;
   }
   return p.short;
@@ -180,6 +188,22 @@ let addCtxDirFixed = false;  // true when direction already chosen via direction
 let selectedSi     = null;   // index of currently selected section (shows + buttons)
 let snapEnabled    = true;   // magnetic grid snapping on/off
 let pdfMode        = false;  // when true: render clean plan (no handles)
+
+/* ── Zeichenfläche: Pinch-Zoom & Pan ──────────────────────────────────────────
+   `view` legt die Kamera relativ zur automatisch berechneten "Fit"-Box (die
+   gesamten Inhalt zeigende, in renderSvg() ermittelte Bounding-Box) fest:
+   scale=1/offX=0/offY=0 → Standardansicht (alles sichtbar), wie bisher.
+   `lastFitBox` wird bei jedem renderSvg()-Aufruf aktualisiert und von den
+   Touch-Handlern für Bildschirm↔Welt-Umrechnungen wiederverwendet. */
+let view = { scale: 1, offX: 0, offY: 0 };
+let lastFitBox = { cx: 200, cy: 150, w: 400, h: 300 };
+const VIEW_MIN_SCALE = 0.5;
+const VIEW_MAX_SCALE = 8;
+
+// Aktive Zeigerpunkte (Finger) auf der Zeichenfläche, für Pan/Pinch.
+const canvasPointers = new Map();   // pointerId → { x, y } (Client-Koordinaten)
+let canvasGesture     = null;       // { mode:'pan'|'pinch', ... } – siehe beginCanvasGesture()
+let canvasJustMoved   = false;      // unterdrückt den Tap/Klick direkt nach einem Pan/Pinch
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -546,6 +570,7 @@ function renderSvg() {
   const hasBays = state.sections.some(s => s.bays.length > 0);
   if (!hasBays) {
     svg.setAttribute('viewBox', '0 0 400 300');
+    lastFitBox = { cx: 200, cy: 150, w: 400, h: 300 };
     hint.classList.remove('hidden');
     return;
   }
@@ -569,11 +594,22 @@ function renderSvg() {
   const PAD = pdfMode ? depth * 1.8 + 20 : depth * 3.5 + HANDLE_R * 5;
   minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
   const vw = maxX - minX, vh = maxY - minY;
-  svg.setAttribute('viewBox', `${minX.toFixed(1)} ${minY.toFixed(1)} ${vw.toFixed(1)} ${vh.toFixed(1)}`);
+  lastFitBox = { cx: minX + vw / 2, cy: minY + vh / 2, w: vw, h: vh };
+
+  // Nutzer-Zoom/Pan wird über der automatisch berechneten "Fit"-Box angewendet
+  // (scale=1/offX=0/offY=0 → unverändert wie zuvor). Im PDF-Export immer die
+  // volle Ansicht, unabhängig vom aktuellen Zoom auf dem Bildschirm.
+  const zScale = pdfMode ? 1 : view.scale;
+  const zOffX  = pdfMode ? 0 : view.offX;
+  const zOffY  = pdfMode ? 0 : view.offY;
+  const finalW = vw / zScale, finalH = vh / zScale;
+  const finalX = lastFitBox.cx - finalW / 2 + zOffX;
+  const finalY = lastFitBox.cy - finalH / 2 + zOffY;
+  svg.setAttribute('viewBox', `${finalX.toFixed(1)} ${finalY.toFixed(1)} ${finalW.toFixed(1)} ${finalH.toFixed(1)}`);
 
   const gbg = document.getElementById('gridBg');
-  gbg.setAttribute('x', minX); gbg.setAttribute('y', minY);
-  gbg.setAttribute('width', vw); gbg.setAttribute('height', vh);
+  gbg.setAttribute('x', finalX); gbg.setAttribute('y', finalY);
+  gbg.setAttribute('width', finalW); gbg.setAttribute('height', finalH);
 
   const bayFontSize  = Math.max(depth * 0.38, 9);
   const infoFontSize = Math.max(depth * 0.28, 7);
@@ -601,6 +637,7 @@ function renderSvg() {
     });
     poly.addEventListener('click', ev => {
       ev.stopPropagation();
+      if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → kein Öffnen
       selectedSi = el.si;
       renderSvg();
       openEditSheet(el.si, el.bi);
@@ -856,7 +893,7 @@ function renderSvg() {
   drawMovePreview(g);
 
   // 8. Scale bar
-  drawScaleBar(g, minX, minY, vw, vh, infoFontSize);
+  drawScaleBar(g, finalX, finalY, finalW, finalH, infoFontSize);
 }
 
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
@@ -1045,6 +1082,133 @@ function onSvgPointerUp(e) {
   }
   if (!d.moved) openEditSheet(d.si, d.bi);
   else renderAll();
+}
+
+// ── Zeichenfläche: Pinch-Zoom & Pan ──────────────────────────────────────────
+// Ein Finger auf leerem Grund oder einem Feld verschiebt die Ansicht (Pan),
+// zwei Finger zoomen (Pinch) mit dem Fingermittelpunkt als Ankerpunkt – der
+// Punkt unter den Fingern bleibt dabei fixiert, damit sich das Zoomen auf dem
+// iPad ruhig und ohne Ruckeln anfühlt. Handles (Verschieben/Drehen) haben
+// eigene pointerdown-Listener mit stopPropagation() und sind hiervon nicht
+// betroffen.
+
+function clampScale(s) {
+  return Math.min(VIEW_MAX_SCALE, Math.max(VIEW_MIN_SCALE, s));
+}
+
+function scheduleCanvasRender() {
+  if (!rafPending) {
+    rafPending = true;
+    requestAnimationFrame(() => { renderSvg(); updateZoomResetBtn(); rafPending = false; });
+  }
+}
+
+/** Setzt canvasGesture anhand der aktuell aktiven Finger neu auf – wird bei
+ *  jedem Wechsel der Fingeranzahl (Auflegen/Abheben) aufgerufen, damit z.B.
+ *  ein Pinch nahtlos in ein Ein-Finger-Pan übergeht. */
+function beginCanvasGesture() {
+  const pts = [...canvasPointers.values()];
+  const svg = document.getElementById('planSvg');
+
+  if (pts.length === 1) {
+    canvasGesture = {
+      mode: 'pan',
+      moved: false,
+      startClientX: pts[0].x,
+      startClientY: pts[0].y,
+      startOffX: view.offX,
+      startOffY: view.offY
+    };
+  } else if (pts.length === 2) {
+    const midClient = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    canvasGesture = {
+      mode: 'pinch',
+      moved: false,
+      startDist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+      startMidClient: midClient,
+      startScale: view.scale,
+      startWorld: screenToSvg(midClient.x, midClient.y),
+      startFit: { ...lastFitBox }
+    };
+  } else {
+    canvasGesture = null;
+  }
+}
+
+function onCanvasPointerDown(e) {
+  if (drag) return;                                    // Handle-Drag hat Vorrang (stoppt Propagation ohnehin selbst)
+  if (canvasPointers.size >= 2 && !canvasPointers.has(e.pointerId)) return;  // max. 2 Finger verfolgen
+  // Absichtlich KEIN setPointerCapture hier: das würde den Klick-Kompatibilitäts-
+  // event bereits bei einem einfachen Tap auf das svg umleiten (statt auf das
+  // Feld/den Hintergrund darunter) und so das Öffnen des Bearbeiten-Sheets
+  // verhindern. Capture wird erst in onCanvasPointerMove gesetzt, sobald sich
+  // eine echte Pan-/Pinch-Bewegung bestätigt hat.
+  canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  beginCanvasGesture();
+}
+
+function onCanvasPointerMove(e) {
+  if (!canvasPointers.has(e.pointerId)) return;
+  canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!canvasGesture) return;
+
+  const svg  = document.getElementById('planSvg');
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  const captureActivePointers = () => {
+    canvasPointers.forEach((_, id) => { try { svg.setPointerCapture(id); } catch (err) { /* ignorieren */ } });
+  };
+
+  if (canvasGesture.mode === 'pan' && canvasPointers.size === 1) {
+    const p = [...canvasPointers.values()][0];
+    const dxClient = p.x - canvasGesture.startClientX;
+    const dyClient = p.y - canvasGesture.startClientY;
+    if (!canvasGesture.moved && Math.hypot(dxClient, dyClient) > 4) { canvasGesture.moved = true; captureActivePointers(); }
+    const vb = svg.viewBox.baseVal;
+    view.offX = canvasGesture.startOffX - dxClient * (vb.width  / rect.width);
+    view.offY = canvasGesture.startOffY - dyClient * (vb.height / rect.height);
+    scheduleCanvasRender();
+  } else if (canvasGesture.mode === 'pinch' && canvasPointers.size === 2) {
+    const pts = [...canvasPointers.values()];
+    const midClient = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if (!canvasGesture.moved && Math.abs(dist - canvasGesture.startDist) > 6) { canvasGesture.moved = true; captureActivePointers(); }
+
+    view.scale = clampScale(canvasGesture.startScale * (dist / canvasGesture.startDist));
+
+    // Ankerpunkt: der Weltpunkt unter dem Finger-Mittelpunkt bei Gestenstart
+    // bleibt exakt unter dem aktuellen Finger-Mittelpunkt – kein Driften.
+    const fit    = canvasGesture.startFit;
+    const finalW = fit.w / view.scale;
+    const finalH = fit.h / view.scale;
+    const finalX = canvasGesture.startWorld.x - (midClient.x - rect.left) * (finalW / rect.width);
+    const finalY = canvasGesture.startWorld.y - (midClient.y - rect.top)  * (finalH / rect.height);
+    view.offX = finalX - (fit.cx - finalW / 2);
+    view.offY = finalY - (fit.cy - finalH / 2);
+    scheduleCanvasRender();
+  }
+}
+
+function onCanvasPointerUp(e) {
+  canvasPointers.delete(e.pointerId);
+  try { document.getElementById('planSvg').releasePointerCapture(e.pointerId); } catch (err) { /* ignorieren */ }
+  if (canvasGesture && canvasGesture.moved) canvasJustMoved = true;
+  beginCanvasGesture();
+}
+
+/** Setzt Zoom/Pan der Zeichenfläche auf die automatische Vollansicht zurück. */
+function resetCanvasView() {
+  view = { scale: 1, offX: 0, offY: 0 };
+  renderSvg();
+  updateZoomResetBtn();
+}
+
+function updateZoomResetBtn() {
+  const btn = document.getElementById('zoomResetBtn');
+  if (!btn) return;
+  const isDefault = view.scale === 1 && view.offX === 0 && view.offY === 0;
+  btn.classList.toggle('hidden', isDefault);
 }
 
 // ── Add field sheet (direction + size) ────────────────────────────────────
@@ -1423,11 +1587,13 @@ function openEditSheet(si, bi) {
     const qtyInp = document.createElement('input');
     qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
     qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
-    // Bei Einheit 'm' ohne eigenen Wert zeigt der Platzhalter die Feldlänge an
-    // (Standardwert); der Nutzer kann die Zahl jederzeit überschreiben.
+    // Bei Einheit 'm' zeigt der Platzhalter die Feldlänge, bei 'm2' die Feldfläche
+    // an (Vorschlagswert); der Nutzer kann die Zahl jederzeit überschreiben.
     const syncPlaceholder = () => {
-      qtyInp.placeholder = ((pos.unit || defaultUnit(pos.cat)) === 'm' && bay.len)
-        ? fmtQty(bay.len) : 'Anz.';
+      const u = pos.unit || defaultUnit(pos.cat);
+      if (u === 'm'  && bay.len) { qtyInp.placeholder = fmtQty(bay.len); return; }
+      if (u === 'm2' && bay.len) { qtyInp.placeholder = fmtQty(bayArea(bay.len)); return; }
+      qtyInp.placeholder = 'Anz.';
     };
     syncPlaceholder();
     qtyInp.value = (pos.qty != null) ? pos.qty : '';
@@ -1797,7 +1963,9 @@ function buildFieldChain(defs) {
     const e = sectionEnd(s); x = e.x; y = e.y;
     return s;
   });
+  view = { scale: 1, offX: 0, offY: 0 };
   renderAll();
+  updateZoomResetBtn();
 }
 
 /** Erzeugt Feld-Definitionen für eine Wand aus mehreren Längen. */
@@ -1867,7 +2035,9 @@ function onLoadFile(e) {
       _bId = d._bId || state.sections.flatMap(x => x.bays).length;
       document.getElementById('projectName').value = state.project;
       document.getElementById('scaffDepth').value  = state.depth;
+      view = { scale: 1, offX: 0, offY: 0 };
       renderAll();
+      updateZoomResetBtn();
     } catch { alert('Fehler beim Laden: Ungültige Datei.'); }
   };
   reader.readAsText(file);
@@ -1943,7 +2113,7 @@ function aggregatePositions(bays) {
         const v = effQty(pos, bay.len);
         if (v != null) {
           a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
-          if (u === 'm') a.meters += v;   // Meter-Mengen zählen direkt als lfd. Meter
+          if (u === 'm' || u === 'stgm') a.meters += v;   // Meter-/Steigemeter-Mengen zählen direkt als lfd. Meter
         }
       }
       const m = posMeters(pos, bay.len);   // Lagen × Feldlänge (Lagen-Mengen + Konsolen)
@@ -2205,9 +2375,20 @@ function init() {
   svg.addEventListener('pointerup',     onSvgPointerUp);
   svg.addEventListener('pointercancel', onSvgPointerUp);
   // Tap empty canvas → deselect section (hides + buttons)
-  const deselect = () => { if (selectedSi !== null) { selectedSi = null; renderSvg(); } };
+  const deselect = () => {
+    if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → nicht abwählen
+    if (selectedSi !== null) { selectedSi = null; renderSvg(); }
+  };
   svg.addEventListener('click',       deselect);
   svg.addEventListener('pointerdown', e => { if (e.target === svg || e.target.id === 'gridBg') deselect(); });
+
+  // Pinch-Zoom & Pan (ein/zwei Finger) – nach den bestehenden Handle-Listenern,
+  // damit Verschiebe-/Dreh-Griffe (die stopPropagation() aufrufen) Vorrang haben.
+  svg.addEventListener('pointerdown',   onCanvasPointerDown);
+  svg.addEventListener('pointermove',   onCanvasPointerMove);
+  svg.addEventListener('pointerup',     onCanvasPointerUp);
+  svg.addEventListener('pointercancel', onCanvasPointerUp);
+  document.getElementById('zoomResetBtn')?.addEventListener('click', resetCanvasView);
 
   // Device mode: restore saved preference or show picker
   const savedMode = getMode();
