@@ -73,6 +73,29 @@ function bayArea(bayLen) {
   return bayLen != null ? +(bayLen * state.depth).toFixed(3) : null;
 }
 
+/** Gerüstfläche eines Feldes: Länge × kleinere der beiden eingetragenen Höhen
+ *  (hL/hR). Ist nur eine Höhe gesetzt, wird diese verwendet; ist keine
+ *  gesetzt, liefert das Feld 0 m² (fließt nicht in die Summe ein). */
+function bayFlaecheM2(bay) {
+  const heights = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
+  if (!heights.length || !bay.len) return 0;
+  return bay.len * Math.min(...heights);
+}
+
+/** Gesamtgerüstfläche (m²) über alle Felder der Zeichnung. */
+function computeTotalFlaeche() {
+  let total = 0;
+  state.sections.forEach(sec => sec.bays.forEach(bay => { total += bayFlaecheM2(bay); }));
+  return +total.toFixed(2);
+}
+
+/** Aktualisiert die Live-Anzeige der Gesamtfläche im Toolbar. */
+function updateAreaReadout() {
+  const el = document.getElementById('areaReadout');
+  if (!el) return;
+  el.textContent = 'Gesamtfläche: ' + computeTotalFlaeche().toFixed(2).replace('.', ',') + ' m²';
+}
+
 /** Effektive Menge einer Position. Bei Einheit 'm' ohne eigenen Wert gilt
  *  standardmäßig die Feldlänge, bei 'm2' die Feldfläche – der Nutzer kann
  *  den Wert jederzeit überschreiben. */
@@ -189,6 +212,104 @@ let selectedSi     = null;   // index of currently selected section (shows + but
 let snapEnabled    = true;   // magnetic grid snapping on/off
 let pdfMode        = false;  // when true: render clean plan (no handles)
 
+// Zwischenablage für "Position kopieren/einfügen": vollständige Positions-
+// Konfiguration eines Feldes (Höhen + alle Kategorien/Mengen/Zuschläge), die
+// per Klick auf beliebig viele andere Felder übertragen werden kann.
+let copiedBayData = null;
+
+// ── Projektverwaltung (gemeinsam mit der Aufmaß-Hauptapp) ───────────────────
+// Wird der 2D-Zeichner aus einem Projekt heraus geöffnet, teilt er sich die
+// Projektliste (inkl. Ordner/Status/Adresse) mit script.js/index.html: die
+// Zeichnung wird direkt im Projektdatensatz gespeichert (zeichnung2d) statt
+// nur als lose Datei.
+const PROJECTS_STORAGE_KEY = 'aufmass_projects_v2';
+const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
+let linkedProjectId = null;
+let autosave2dTimer = null;
+
+function loadLinkedProjects() {
+  try {
+    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+/** Lädt die Zeichnung des verknüpften Projekts (falls vorhanden) in `state`. */
+function loadFromLinkedProject() {
+  const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
+  if (!id) return;
+  const list = loadLinkedProjects();
+  const proj = list.find(p => p.id === id);
+  if (!proj) return;
+  linkedProjectId = id;
+
+  const projName = (proj.name && proj.name.trim()) ||
+    [[proj.anschrift?.strasse, proj.anschrift?.nummer].filter(Boolean).join(' '),
+     [proj.anschrift?.plz, proj.anschrift?.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+
+  if (proj.zeichnung2d && Array.isArray(proj.zeichnung2d.sections)) {
+    const z = proj.zeichnung2d;
+    state.project  = projName || z.project || '';
+    state.depth    = z.depth || 0.73;
+    state.sections = z.sections;
+    _sId = z._sId || state.sections.length;
+    _bId = z._bId || state.sections.flatMap(s => s.bays).length;
+  } else {
+    state.project = projName || '';
+  }
+}
+
+/** Schreibt die aktuelle Zeichnung (gebündelt) in das verknüpfte Projekt. */
+function scheduleAutosave2d() {
+  if (!linkedProjectId) return;
+  if (autosave2dTimer) clearTimeout(autosave2dTimer);
+  autosave2dTimer = setTimeout(() => {
+    autosave2dTimer = null;
+    const list = loadLinkedProjects();
+    const idx = list.findIndex(p => p.id === linkedProjectId);
+    if (idx < 0) return;
+    list[idx].name = state.project || list[idx].name || '';
+    list[idx].zeichnung2d = { depth: state.depth, sections: state.sections, _sId, _bId };
+    list[idx].geaendert = new Date().toISOString().slice(0, 10);
+    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+  }, 700);
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toastEl');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+/** Kopiert Höhen + alle Positionen (Konsolen, Innengeländer, Netze, Dachfang
+ *  usw. inkl. ihrer Mengen/Zuschläge) eines Feldes in die Zwischenablage. */
+function copyBayPositions(bay) {
+  copiedBayData = {
+    hL: bay.hL,
+    hR: bay.hR,
+    positions: JSON.parse(JSON.stringify(bay.positions || []))
+  };
+  showToast('Position kopiert – bei anderen Feldern „Einfügen" antippen');
+  renderSections();
+}
+
+/** Überträgt die kopierte Positions-Konfiguration auf ein anderes Feld. */
+function pasteBayPositions(bay) {
+  if (!copiedBayData) return;
+  bay.hL = copiedBayData.hL;
+  bay.hR = copiedBayData.hR;
+  bay.positions = copiedBayData.positions.map(p => ({ ...p, id: ++_bId }));
+  showToast('Position eingefügt');
+}
+
 /* ── Zeichenfläche: Pinch-Zoom & Pan ──────────────────────────────────────────
    `view` legt die Kamera relativ zur automatisch berechneten "Fit"-Box (die
    gesamten Inhalt zeigende, in renderSvg() ermittelte Bounding-Box) fest:
@@ -226,7 +347,7 @@ function normalizeBay(bay) {
     const pos = { id: ++_bId, cat: bay.category };
     if (bay.category === 'konsole') {
       pos.typ = KONSOLE_TYPES[0];
-      pos.lagen = 'alle';
+      pos.lagen = '1';
     }
     bay.positions.push(pos);
   }
@@ -566,6 +687,8 @@ function renderSvg() {
   const svg  = document.getElementById('planSvg');
   const hint = document.getElementById('emptyHint');
   g.innerHTML = '';
+  updateAreaReadout();
+  scheduleAutosave2d();
 
   const hasBays = state.sections.some(s => s.bays.length > 0);
   if (!hasBays) {
@@ -1096,6 +1219,20 @@ function clampScale(s) {
   return Math.min(VIEW_MAX_SCALE, Math.max(VIEW_MIN_SCALE, s));
 }
 
+/** Verhindert, dass die Zeichnung durch Pan/Pinch komplett aus dem sichtbaren
+ *  Bereich verschwindet: der Kamera-Mittelpunkt darf sich höchstens um eine
+ *  Bildschirmbreite/-höhe (bei aktuellem Zoom) über den Rand der gesamten
+ *  Zeichnung (lastFitBox) hinaus bewegen – ein Rest der Zeichnung bleibt so
+ *  immer in Reichweite eines einzigen weiteren Wischens. */
+function clampViewOffset() {
+  const finalW = lastFitBox.w / view.scale;
+  const finalH = lastFitBox.h / view.scale;
+  const maxOffX = lastFitBox.w / 2 + finalW;
+  const maxOffY = lastFitBox.h / 2 + finalH;
+  view.offX = Math.max(-maxOffX, Math.min(maxOffX, view.offX));
+  view.offY = Math.max(-maxOffY, Math.min(maxOffY, view.offY));
+}
+
 function scheduleCanvasRender() {
   if (!rafPending) {
     rafPending = true;
@@ -1168,6 +1305,7 @@ function onCanvasPointerMove(e) {
     const vb = svg.viewBox.baseVal;
     view.offX = canvasGesture.startOffX - dxClient * (vb.width  / rect.width);
     view.offY = canvasGesture.startOffY - dyClient * (vb.height / rect.height);
+    clampViewOffset();
     scheduleCanvasRender();
   } else if (canvasGesture.mode === 'pinch' && canvasPointers.size === 2) {
     const pts = [...canvasPointers.values()];
@@ -1186,6 +1324,7 @@ function onCanvasPointerMove(e) {
     const finalY = canvasGesture.startWorld.y - (midClient.y - rect.top)  * (finalH / rect.height);
     view.offX = finalX - (fit.cx - finalW / 2);
     view.offY = finalY - (fit.cy - finalH / 2);
+    clampViewOffset();
     scheduleCanvasRender();
   }
 }
@@ -1642,7 +1781,7 @@ function openEditSheet(si, bi) {
   const konsWrap = document.createElement('div');
   konsWrap.className = 'pos-konsole-list';
 
-  const lagenPresets = [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']];
+  const lagenPresets = [['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen']];
 
   const makeKonsoleRow = pos => {
     const row = document.createElement('div');
@@ -1731,7 +1870,7 @@ function openEditSheet(si, bi) {
   addKonsBtn.type = 'button'; addKonsBtn.className = 'pos-add-konsole';
   addKonsBtn.textContent = '+ Konsole';
   addKonsBtn.addEventListener('click', () => {
-    bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: 'alle' });
+    bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1' });
     buildKonsole(); renderSvg();
   });
 
@@ -1763,6 +1902,30 @@ function openEditSheet(si, bi) {
   okBtn.className = 'sheet-ok'; okBtn.textContent = 'Fertig';
   okBtn.addEventListener('click', () => { renderAll(); closeSheet(); });
 
+  // ── Position kopieren / einfügen ────────────────────────────────────────
+  const copyPasteRow = document.createElement('div');
+  copyPasteRow.className = 'sheet-actions sheet-copy-paste-row';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button'; copyBtn.className = 'sheet-copy';
+  copyBtn.textContent = 'Position kopieren';
+  copyBtn.addEventListener('click', () => copyBayPositions(bay));
+
+  const pasteBtn = document.createElement('button');
+  pasteBtn.type = 'button';
+  pasteBtn.className = 'sheet-paste' + (copiedBayData ? ' active' : '');
+  pasteBtn.textContent = '📋 Position einfügen';
+  pasteBtn.disabled = !copiedBayData;
+  pasteBtn.addEventListener('click', () => {
+    pasteBayPositions(bay);
+    renderSvg();
+    closeSheet();
+    openEditSheet(si, bi);   // Sheet mit den neuen Werten neu aufbauen
+  });
+
+  copyPasteRow.appendChild(copyBtn);
+  copyPasteRow.appendChild(pasteBtn);
+
   actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
 
   sheet.appendChild(hdr);
@@ -1780,6 +1943,7 @@ function openEditSheet(si, bi) {
   sheet.appendChild(konsLabel);
   sheet.appendChild(konsWrap);
   sheet.appendChild(addKonsBtn);
+  sheet.appendChild(copyPasteRow);
   sheet.appendChild(actRow);
 
   document.body.appendChild(overlay);
@@ -1919,6 +2083,22 @@ function renderSections() {
       editBtn.textContent = '+ Positionen';
       editBtn.addEventListener('click', () => { selectedSi = si; renderSvg(); openEditSheet(si, bi); });
       posLine.appendChild(editBtn);
+
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button'; copyBtn.className = 'bay-pos-copy';
+      copyBtn.textContent = 'Kopieren';
+      copyBtn.title = 'Höhen + Positionen dieses Feldes kopieren';
+      copyBtn.addEventListener('click', () => copyBayPositions(bay));
+      posLine.appendChild(copyBtn);
+
+      const pasteBtn = document.createElement('button');
+      pasteBtn.type = 'button';
+      pasteBtn.className = 'bay-pos-paste' + (copiedBayData ? ' active' : '');
+      pasteBtn.textContent = '📋 Einfügen';
+      pasteBtn.title = copiedBayData ? 'Kopierte Position auf dieses Feld übertragen' : 'Zuerst ein Feld kopieren';
+      pasteBtn.disabled = !copiedBayData;
+      pasteBtn.addEventListener('click', () => { pasteBayPositions(bay); renderAll(); });
+      posLine.appendChild(pasteBtn);
 
       row.appendChild(top); row.appendChild(bottom); row.appendChild(posLine);
       baysDiv.appendChild(row);
@@ -2180,7 +2360,8 @@ async function exportPdf() {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
   const totalLen = state.sections
     .reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
-  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   Gesamtlänge: ${totalLen.toFixed(2)} m`, margin, margin + 12);
+  const totalFlaeche = computeTotalFlaeche();
+  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   Gesamtlänge: ${totalLen.toFixed(2)} m   |   Gesamtfläche: ${totalFlaeche.toFixed(2)} m²`, margin, margin + 12);
   doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
     doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
 
@@ -2269,14 +2450,15 @@ async function exportPdf() {
       };
 
       sideBlocks.forEach(({ side, bays }) => {
-        const len = bays.reduce((s, b) => s + b.len, 0);
-        const cnt = bays.filter(bay => (bay.positions || []).length).length;
-        drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m`, aggregatePositions(bays));
+        const len   = bays.reduce((s, b) => s + b.len, 0);
+        const flae  = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
+        const cnt   = bays.filter(bay => (bay.positions || []).length).length;
+        drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`, aggregatePositions(bays));
       });
 
       // Gesamt über alle Seiten
       const totalLenAll = allBays.reduce((s, b) => s + b.len, 0);
-      drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m`, aggregatePositions(allBays));
+      drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`, aggregatePositions(allBays));
     }
 
     doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
@@ -2333,6 +2515,14 @@ function showDevicePicker(onPicked) {
 // ── Init ───────────────────────────────────────────────────────────────────
 
 function init() {
+  loadFromLinkedProject();
+  document.getElementById('projectName').value = state.project;
+  document.getElementById('scaffDepth').value  = state.depth;
+  if (linkedProjectId) {
+    const backLink = document.querySelector('.back-link');
+    if (backLink) backLink.setAttribute('href', 'index.html?resume=1');
+  }
+
   document.getElementById('addSectionBtn').addEventListener('click', () => {
     addCtx = null;
     openAddSheet();
@@ -2348,6 +2538,7 @@ function init() {
 
   document.getElementById('projectName').addEventListener('input', e => {
     state.project = e.target.value;
+    scheduleAutosave2d();
   });
   document.getElementById('scaffDepth').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
@@ -2389,6 +2580,7 @@ function init() {
   svg.addEventListener('pointerup',     onCanvasPointerUp);
   svg.addEventListener('pointercancel', onCanvasPointerUp);
   document.getElementById('zoomResetBtn')?.addEventListener('click', resetCanvasView);
+  document.getElementById('fitViewBtn')?.addEventListener('click', resetCanvasView);
 
   // Device mode: restore saved preference or show picker
   const savedMode = getMode();

@@ -5,9 +5,31 @@
 // ============================================================
 
 const STORAGE_KEY = 'aufmass_projects_v2';
+const FOLDERS_STORAGE_KEY = 'aufmass_folders_v1';
+// Vom 2D-Zeichner (viewer2d.html) mitgenutzter Schlüssel: welches Projekt ist
+// gerade geöffnet. So wissen beide Programme, welche Projektakte (inkl.
+// 2D-Zeichnung) gerade bearbeitet wird, und teilen sich dieselbe Projektliste.
+const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
+
+const PROJECT_STATUS = ['in_bearbeitung', 'abgeschlossen', 'archiviert'];
+const PROJECT_STATUS_LABEL = {
+  in_bearbeitung: 'In Bearbeitung',
+  abgeschlossen:  'Abgeschlossen',
+  archiviert:     'Archiviert'
+};
 
 let projects = [];
+let folders = [];
 let currentProjectId = null;
+
+// Aktueller Filter-/Sortier-/Suchzustand der Projektübersicht (nur UI-Zustand,
+// nicht persistiert).
+let overviewState = {
+  search: '',
+  folderId: '',       // '' = alle, '__none__' = ohne Ordner, sonst Ordner-ID
+  status: '',          // '' = alle
+  sort: 'geaendert'    // 'geaendert' | 'name'
+};
 
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
@@ -49,10 +71,25 @@ function setUeberstandWert(v) {
 //  localStorage
 // ============================================================
 
+// Ergänzt ältere Projekte (vor der Projektverwaltung mit Ordnern/Status/2D-
+// Zeichnung) um die neuen Felder, ohne bestehende Daten zu verändern.
+function migrateProjectMeta(p) {
+  if (p.name === undefined)        p.name = '';
+  if (p.status === undefined)      p.status = 'in_bearbeitung';
+  if (p.folderId === undefined)    p.folderId = null;
+  if (p.zeichnung2d === undefined) p.zeichnung2d = null;
+  if (p.archiviert !== undefined) { // sehr alte Übergangsdaten
+    if (p.archiviert) p.status = 'archiviert';
+    delete p.archiviert;
+  }
+  return p;
+}
+
 function loadProjects() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     projects = raw ? JSON.parse(raw) : [];
+    projects.forEach(migrateProjectMeta);
   } catch (_) {
     projects = [];
   }
@@ -62,8 +99,43 @@ function saveProjects() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }
 
+function loadFolders() {
+  try {
+    const raw = localStorage.getItem(FOLDERS_STORAGE_KEY);
+    folders = raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    folders = [];
+  }
+}
+
+function saveFolders() {
+  localStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+}
+
 function getCurrentProject() {
   return projects.find(p => p.id === currentProjectId) || null;
+}
+
+/** Anzeigename eines Projekts: expliziter Projektname, sonst Adresse, sonst "Neues Projekt". */
+function getProjectName(project) {
+  return (project.name && project.name.trim()) || getProjectLabel(project);
+}
+
+function getFolder(folderId) {
+  return folders.find(f => f.id === folderId) || null;
+}
+
+/** Zählt Felder + Gesamtfläche (m²) der optional verknüpften 2D-Zeichnung. */
+function get2dStats(project) {
+  const z = project.zeichnung2d;
+  if (!z || !Array.isArray(z.sections)) return { felder: 0, flaeche: 0 };
+  let felder = 0, flaeche = 0;
+  z.sections.forEach(sec => (sec.bays || []).forEach(bay => {
+    felder++;
+    const heights = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
+    if (heights.length && bay.len) flaeche += bay.len * Math.min(...heights);
+  }));
+  return { felder, flaeche: round2(flaeche) };
 }
 
 // ============================================================
@@ -336,46 +408,330 @@ function showScreen(id) {
 }
 
 // ============================================================
-//  Startseite - Projektliste
+//  Startseite - Projektübersicht (Ordner, Suche, Filter, Vorschau)
 // ============================================================
 
-function renderProjectList() {
-  const listEl  = document.getElementById('projectList');
-  const emptyEl = document.getElementById('emptyState');
-  listEl.innerHTML = '';
+function matchesSearch(proj, q) {
+  if (!q) return true;
+  const hay = [
+    getProjectName(proj),
+    proj.anschrift?.bauherr || '',
+    proj.anschrift?.strasse || '', proj.anschrift?.nummer || '',
+    proj.anschrift?.plz || '', proj.anschrift?.ort || ''
+  ].join(' ').toLowerCase();
+  return hay.includes(q.toLowerCase());
+}
+
+function getFilteredSortedProjects() {
+  let list = projects.filter(p => {
+    if (overviewState.folderId === '__none__' && p.folderId) return false;
+    if (overviewState.folderId && overviewState.folderId !== '__none__' && p.folderId !== overviewState.folderId) return false;
+    if (overviewState.status && p.status !== overviewState.status) return false;
+    if (!matchesSearch(p, overviewState.search)) return false;
+    return true;
+  });
+  if (overviewState.sort === 'name') {
+    list = list.sort((a, b) => getProjectName(a).localeCompare(getProjectName(b), 'de'));
+  } else {
+    list = list.sort((a, b) => (b.geaendert || '').localeCompare(a.geaendert || ''));
+  }
+  return list;
+}
+
+function renderFolderBar() {
+  const bar = document.getElementById('folderBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+
+  const makeChip = (label, folderId, count) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'folder-chip' + (overviewState.folderId === folderId ? ' active' : '');
+    btn.innerHTML = `${label} <span class="folder-chip-count">${count}</span>`;
+    btn.addEventListener('click', () => {
+      overviewState.folderId = folderId;
+      renderProjectOverview();
+    });
+    return btn;
+  };
+
+  bar.appendChild(makeChip('Alle Projekte', '', projects.length));
+  bar.appendChild(makeChip('Ohne Ordner', '__none__', projects.filter(p => !p.folderId).length));
+
+  folders.forEach(f => {
+    const count = projects.filter(p => p.folderId === f.id).length;
+    const chip = makeChip(f.name, f.id, count);
+    chip.addEventListener('dblclick', () => renameFolderPrompt(f.id));
+    bar.appendChild(chip);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'folder-chip folder-chip-add';
+  addBtn.textContent = '+ Ordner';
+  addBtn.addEventListener('click', createFolderPrompt);
+  bar.appendChild(addBtn);
+
+  if (overviewState.folderId && overviewState.folderId !== '__none__') {
+    const folder = getFolder(overviewState.folderId);
+    if (folder) {
+      const manageBtn = document.createElement('button');
+      manageBtn.type = 'button';
+      manageBtn.className = 'folder-chip folder-chip-manage';
+      manageBtn.title = 'Ordner umbenennen/löschen';
+      manageBtn.textContent = '✎';
+      manageBtn.addEventListener('click', () => openFolderManageMenu(folder, manageBtn));
+      bar.appendChild(manageBtn);
+    }
+  }
+}
+
+function createFolderPrompt() {
+  const name = prompt('Name des neuen Ordners (z. B. 2026, Firma Müller, Abgeschlossen):');
+  if (!name || !name.trim()) return;
+  folders.push({ id: genId('folder'), name: name.trim() });
+  saveFolders();
+  renderProjectOverview();
+}
+
+function renameFolderPrompt(folderId) {
+  const folder = getFolder(folderId);
+  if (!folder) return;
+  const name = prompt('Ordner umbenennen:', folder.name);
+  if (!name || !name.trim()) return;
+  folder.name = name.trim();
+  saveFolders();
+  renderProjectOverview();
+}
+
+function deleteFolderPrompt(folderId) {
+  const folder = getFolder(folderId);
+  if (!folder) return;
+  const count = projects.filter(p => p.folderId === folderId).length;
+  const msg = count > 0
+    ? `Ordner "${folder.name}" löschen? ${count} Projekt(e) darin werden in "Ohne Ordner" verschoben.`
+    : `Ordner "${folder.name}" löschen?`;
+  if (!confirm(msg)) return;
+  projects.forEach(p => { if (p.folderId === folderId) p.folderId = null; });
+  folders = folders.filter(f => f.id !== folderId);
+  saveProjects();
+  saveFolders();
+  if (overviewState.folderId === folderId) overviewState.folderId = '';
+  renderProjectOverview();
+}
+
+function closeFloatingMenu() {
+  document.getElementById('floatingMenu')?.remove();
+  document.getElementById('floatingMenuOverlay')?.remove();
+}
+
+/** Kleines, an einem Button verankertes Popup-Menü (Aktionen, ggf. mit
+ *  Untermenüs) – touch-tauglich, ohne Abhängigkeit von Browser-Kontextmenüs. */
+function openFloatingMenu(anchorEl, items) {
+  closeFloatingMenu();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'floatingMenuOverlay';
+  overlay.className = 'floating-menu-overlay';
+  overlay.addEventListener('click', closeFloatingMenu);
+
+  const menu = document.createElement('div');
+  menu.id = 'floatingMenu';
+  menu.className = 'floating-menu';
+
+  items.forEach(item => {
+    if (item === '---') {
+      const sep = document.createElement('div');
+      sep.className = 'floating-menu-sep';
+      menu.appendChild(sep);
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'floating-menu-item' + (item.danger ? ' danger' : '') + (item.active ? ' active' : '');
+    btn.textContent = item.label;
+    btn.addEventListener('click', () => { closeFloatingMenu(); item.onClick(); });
+    menu.appendChild(btn);
+  });
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(menu);
+
+  const r = anchorEl.getBoundingClientRect();
+  const menuW = 240;
+  let left = r.right - menuW;
+  if (left < 8) left = 8;
+  if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
+  let top = r.bottom + 6;
+  menu.style.left = left + 'px';
+  menu.style.top  = top + 'px';
+  // Falls das Menü unten aus dem Bildschirm ragen würde: oberhalb öffnen
+  requestAnimationFrame(() => {
+    const mh = menu.getBoundingClientRect().height;
+    if (top + mh > window.innerHeight - 8) {
+      menu.style.top = Math.max(8, r.top - mh - 6) + 'px';
+    }
+  });
+}
+
+function openFolderManageMenu(folder, anchorEl) {
+  openFloatingMenu(anchorEl, [
+    { label: 'Ordner umbenennen', onClick: () => renameFolderPrompt(folder.id) },
+    { label: 'Ordner löschen', danger: true, onClick: () => deleteFolderPrompt(folder.id) }
+  ]);
+}
+
+function openMoveToFolderMenu(proj, anchorEl) {
+  const items = [
+    { label: (!proj.folderId ? '✓ ' : '') + 'Ohne Ordner', active: !proj.folderId, onClick: () => moveProjectToFolder(proj.id, null) }
+  ];
+  folders.forEach(f => {
+    items.push({
+      label: (proj.folderId === f.id ? '✓ ' : '') + f.name,
+      active: proj.folderId === f.id,
+      onClick: () => moveProjectToFolder(proj.id, f.id)
+    });
+  });
+  items.push('---');
+  items.push({ label: '+ Neuer Ordner…', onClick: () => {
+    const name = prompt('Name des neuen Ordners:');
+    if (!name || !name.trim()) return;
+    const folder = { id: genId('folder'), name: name.trim() };
+    folders.push(folder);
+    saveFolders();
+    moveProjectToFolder(proj.id, folder.id);
+  } });
+  openFloatingMenu(anchorEl, items);
+}
+
+function moveProjectToFolder(projectId, folderId) {
+  const proj = projects.find(p => p.id === projectId);
+  if (!proj) return;
+  proj.folderId = folderId;
+  saveProjects();
+  renderProjectOverview();
+  showToast(folderId ? 'In Ordner verschoben' : 'Ordner entfernt');
+}
+
+function openStatusMenu(proj, anchorEl) {
+  openFloatingMenu(anchorEl, PROJECT_STATUS.map(s => ({
+    label: (proj.status === s ? '✓ ' : '') + PROJECT_STATUS_LABEL[s],
+    active: proj.status === s,
+    onClick: () => {
+      proj.status = s;
+      proj.geaendert = new Date().toISOString().slice(0, 10);
+      saveProjects();
+      renderProjectOverview();
+    }
+  })));
+}
+
+function renameProjectPrompt(proj) {
+  const name = prompt('Projekt umbenennen:', getProjectName(proj));
+  if (name === null) return;
+  proj.name = name.trim();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+  saveProjects();
+  renderProjectOverview();
+}
+
+function duplicateProject(proj) {
+  const copy = JSON.parse(JSON.stringify(proj));
+  copy.id = genId('proj');
+  copy.name = (getProjectName(proj) + ' (Kopie)').trim();
+  const today = new Date().toISOString().slice(0, 10);
+  copy.erstellt = today;
+  copy.geaendert = today;
+  copy.status = 'in_bearbeitung';
+  projects.push(copy);
+  saveProjects();
+  renderProjectOverview();
+  showToast('Projekt dupliziert');
+}
+
+function deleteProjectFromOverview(proj) {
+  if (!confirm(`Projekt "${getProjectName(proj)}" wirklich löschen?`)) return;
+  projects = projects.filter(p => p.id !== proj.id);
+  saveProjects();
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === proj.id) {
+    localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+  }
+  renderProjectOverview();
+  showToast('Projekt gelöscht');
+}
+
+function openProjectActionMenu(proj, anchorEl) {
+  openFloatingMenu(anchorEl, [
+    { label: 'Öffnen', onClick: () => openProject(proj.id) },
+    { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
+    { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
+    { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
+    { label: 'Status ändern…', onClick: () => openStatusMenu(proj, anchorEl) },
+    '---',
+    { label: 'Löschen', danger: true, onClick: () => deleteProjectFromOverview(proj) }
+  ]);
+}
+
+function createProjectCard(proj) {
+  const card = document.createElement('div');
+  card.className = 'project-card2';
+  const typ = proj.geruesttyp || 'fassade';
+  const seitenAnzahl = (proj.seiten || []).length;
+  const bauherr = proj.anschrift?.bauherr || '';
+  const addrParts = [
+    [proj.anschrift?.strasse, proj.anschrift?.nummer].filter(Boolean).join(' '),
+    [proj.anschrift?.plz, proj.anschrift?.ort].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+  const stats2d = get2dStats(proj);
+  const statsParts = [seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : '')];
+  if (proj.zeichnung2d) {
+    statsParts.push(stats2d.felder + ' Feld' + (stats2d.felder !== 1 ? 'er' : ''));
+    statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
+  }
+
+  card.innerHTML = `
+    <div class="project-card2-top">
+      <span class="project-card2-badge ${typ}">${getTypeBadge(typ)}</span>
+      <span class="project-card2-status status-${proj.status}">${PROJECT_STATUS_LABEL[proj.status] || ''}</span>
+      <button type="button" class="project-card2-menu-btn" aria-label="Aktionen">⋯</button>
+    </div>
+    <div class="project-card2-name">${getProjectName(proj)}</div>
+    ${bauherr ? `<div class="project-card2-line">${bauherr}</div>` : ''}
+    ${addrParts ? `<div class="project-card2-line project-card2-addr">${addrParts}</div>` : ''}
+    ${proj.anschrift?.telefon ? `<div class="project-card2-line">${proj.anschrift.telefon}</div>` : ''}
+    <div class="project-card2-stats">${statsParts.join(' · ')}</div>
+    <div class="project-card2-dates">Erstellt ${fmtDate(proj.erstellt)} · Geändert ${fmtDate(proj.geaendert)}</div>
+  `;
+
+  card.querySelector('.project-card2-menu-btn').addEventListener('click', ev => {
+    ev.stopPropagation();
+    openProjectActionMenu(proj, ev.currentTarget);
+  });
+  card.addEventListener('click', () => openProject(proj.id));
+  return card;
+}
+
+function renderProjectOverview() {
+  const gridEl    = document.getElementById('projectGrid');
+  const emptyEl   = document.getElementById('emptyState');
+  const noResEl   = document.getElementById('noResultsState');
+  if (!gridEl) return;
+
+  renderFolderBar();
+
+  gridEl.innerHTML = '';
 
   if (projects.length === 0) {
     emptyEl.classList.remove('hidden');
+    noResEl.classList.add('hidden');
     return;
   }
   emptyEl.classList.add('hidden');
 
-  const sorted = [...projects].sort((a, b) =>
-    (b.geaendert || '').localeCompare(a.geaendert || '')
-  );
+  const list = getFilteredSortedProjects();
+  noResEl.classList.toggle('hidden', list.length > 0);
 
-  sorted.forEach(proj => {
-    const card = document.createElement('div');
-    card.className = 'project-card';
-    const typ = proj.geruesttyp || 'fassade';
-    const seitenAnzahl = (proj.seiten || []).length;
-    const bauherr = proj.anschrift?.bauherr || '';
-    const typeDisplay = (typ === 'sonder' && proj.geruesttypName)
-      ? proj.geruesttypName : getTypeLabel(typ);
-    const metaParts = [typeDisplay, seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : ''), fmtDate(proj.geaendert)];
-
-    card.innerHTML = `
-      <div class="project-card-badge ${typ}">${getTypeBadge(typ)}</div>
-      <div class="project-card-body">
-        <div class="project-card-address">${getProjectLabel(proj)}</div>
-        <div class="project-card-meta">${metaParts.join(' · ')}</div>
-        ${bauherr ? `<div class="project-card-meta">${bauherr}</div>` : ''}
-      </div>
-      <div class="project-card-arrow">&rsaquo;</div>
-    `;
-    card.addEventListener('click', () => openProject(proj.id));
-    listEl.appendChild(card);
-  });
+  list.forEach(proj => gridEl.appendChild(createProjectCard(proj)));
 }
 
 // ============================================================
@@ -386,6 +742,9 @@ function createNewProject() {
   const today = new Date().toISOString().slice(0, 10);
   const proj = {
     id: genId('proj'),
+    name: '',
+    status: 'in_bearbeitung',
+    folderId: (overviewState.folderId && overviewState.folderId !== '__none__') ? overviewState.folderId : null,
     erstellt: today,
     geaendert: today,
     anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
@@ -394,19 +753,24 @@ function createNewProject() {
     seiten: [],
     technik: { lastklasse: '3', breitenklasse: 'W06' },
     logistik: {},
-    zusatzpositionen: []
+    zusatzpositionen: [],
+    zeichnung2d: null
   };
   projects.push(proj);
   saveProjects();
   openProject(proj.id);
 }
 
-function openProject(projectId) {
+function openProject(projectId, opts) {
   currentProjectId = projectId;
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, projectId);
   const proj = getCurrentProject();
   if (!proj) return;
 
-  document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
+  document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
+
+  document.getElementById('fieldProjektname').value = proj.name || '';
+  setProjectStatus(proj.status || 'in_bearbeitung');
 
   const a = proj.anschrift || {};
   document.getElementById('fieldStrasse').value = a.strasse || '';
@@ -417,7 +781,7 @@ function openProject(projectId) {
   document.getElementById('fieldTelefon').value = a.telefon || '';
 
   const typ = proj.geruesttyp || 'fassade';
-  document.querySelectorAll('.type-btn').forEach(btn => {
+  document.querySelectorAll('#geruesttypSelector .type-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.type === typ);
   });
   document.getElementById('sonderNameRow').style.display = typ === 'sonder' ? '' : 'none';
@@ -428,8 +792,32 @@ function openProject(projectId) {
 
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
+  update2dSummary(proj);
   updateSummary();
-  showScreen('projectScreen');
+  if (!opts || !opts.keepScreen) showScreen('projectScreen');
+}
+
+function setProjectStatus(status) {
+  document.querySelectorAll('.status-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.status === status);
+  });
+}
+
+function collectProjectStatus() {
+  const active = document.querySelector('.status-btn.active');
+  return active ? active.dataset.status : 'in_bearbeitung';
+}
+
+/** Zeigt Kennzahlen der verknüpften 2D-Zeichnung (Felder/Fläche) im Projekt an. */
+function update2dSummary(proj) {
+  const el = document.getElementById('zeichnung2dSummary');
+  if (!el) return;
+  const stats = get2dStats(proj);
+  if (!proj.zeichnung2d) {
+    el.textContent = 'Noch keine 2D-Zeichnung vorhanden.';
+  } else {
+    el.textContent = `${stats.felder} Feld${stats.felder === 1 ? '' : 'er'} gezeichnet · Gesamtfläche ${fmtNum(stats.flaeche)} m²`;
+  }
 }
 
 // ============================================================
@@ -448,7 +836,7 @@ function collectAnschrift() {
 }
 
 function collectGeruesttyp() {
-  const active = document.querySelector('.type-btn.active');
+  const active = document.querySelector('#geruesttypSelector .type-btn.active');
   return active ? active.dataset.type : 'fassade';
 }
 
@@ -631,30 +1019,69 @@ function collectSeiten() {
 //  Speichern / Löschen
 // ============================================================
 
+/** Liest den kompletten Formularzustand ein und schreibt ihn in das Projekt
+ *  (mutiert proj direkt – die 2D-Zeichnung des 2D-Zeichners bleibt unberührt).
+ *  Wird sowohl vom manuellen "Speichern" als auch vom Auto-Save genutzt. */
+function collectProjectFromForm(proj) {
+  proj.name              = document.getElementById('fieldProjektname').value.trim();
+  proj.status            = collectProjectStatus();
+  proj.anschrift         = collectAnschrift();
+  proj.geruesttyp        = collectGeruesttyp();
+  proj.geruesttypName    = document.getElementById('fieldSonderName').value.trim();
+  proj.seiten            = collectSeiten();
+  proj.technik           = collectTechnik();
+  proj.logistik          = collectLogistik();
+  proj.zusatzpositionen  = collectZusatzpositionen();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+}
+
 function saveCurrentProject() {
   const proj = getCurrentProject();
   if (!proj) return;
-
-  proj.anschrift        = collectAnschrift();
-  proj.geruesttyp       = collectGeruesttyp();
-  proj.geruesttypName   = document.getElementById('fieldSonderName').value.trim();
-  proj.seiten           = collectSeiten();
-  proj.technik          = collectTechnik();
-  proj.logistik         = collectLogistik();
-  proj.zusatzpositionen = collectZusatzpositionen();
-  proj.geaendert = new Date().toISOString().slice(0, 10);
-  document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
+  collectProjectFromForm(proj);
+  document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
   saveProjects();
   showToast('Gespeichert');
 }
 
+// Automatisches Speichern: jede Änderung im Projektbildschirm wird gebündelt
+// (700ms nach der letzten Änderung) automatisch übernommen – ohne Toast, ohne
+// Tippen auf "Speichern". Beim Wiederöffnen eines Projekts steht so immer der
+// zuletzt bearbeitete Stand zur Verfügung.
+let autosaveTimer = null;
+function scheduleAutosave() {
+  if (!currentProjectId) return;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    const proj = getCurrentProject();
+    if (!proj) return;
+    collectProjectFromForm(proj);
+    document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
+    saveProjects();
+  }, 700);
+}
+
+function flushAutosave() {
+  if (!autosaveTimer) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = null;
+  const proj = getCurrentProject();
+  if (!proj) return;
+  collectProjectFromForm(proj);
+  saveProjects();
+}
+
 function deleteCurrentProject() {
   if (!currentProjectId) return;
-  if (!confirm('Dieses Projekt wirklich loschen?')) return;
+  if (!confirm('Dieses Projekt wirklich löschen?')) return;
   projects = projects.filter(p => p.id !== currentProjectId);
   saveProjects();
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === currentProjectId) {
+    localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+  }
   currentProjectId = null;
-  renderProjectList();
+  renderProjectOverview();
   showScreen('homeScreen');
 }
 
@@ -2270,7 +2697,7 @@ function generatePDF() {
   }
 
   const proj = getCurrentProject();
-  const base = proj ? getProjectLabel(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmaß';
+  const base = proj ? getProjectName(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmaß';
   doc.save((base || 'Aufmaß') + '.pdf');
 }
 
@@ -2281,21 +2708,14 @@ function generatePDF() {
 function exportJson() {
   const proj = getCurrentProject();
   if (!proj) return;
-  proj.anschrift        = collectAnschrift();
-  proj.geruesttyp       = collectGeruesttyp();
-  proj.geruesttypName   = document.getElementById('fieldSonderName').value.trim();
-  proj.seiten           = collectSeiten();
-  proj.technik          = collectTechnik();
-  proj.logistik         = collectLogistik();
-  proj.zusatzpositionen = collectZusatzpositionen();
-  proj.geaendert = new Date().toISOString().slice(0, 10);
+  collectProjectFromForm(proj);
   saveProjects();
 
   const blob = new Blob([JSON.stringify(proj, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url;
-  a.download = (getProjectLabel(proj).replace(/[^a-z0-9]/gi, '_') || 'Aufmaß') + '.json';
+  a.download = (getProjectName(proj).replace(/[^a-z0-9]/gi, '_') || 'Aufmaß') + '.json';
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -2308,6 +2728,7 @@ function handleImportFile(e) {
     try {
       const data = JSON.parse(evt.target.result);
       if (!data.seiten) { alert('Unbekanntes Dateiformat.'); return; }
+      migrateProjectMeta(data);
       const existing = projects.findIndex(p => p.id === data.id);
       if (existing >= 0) {
         projects[existing] = data;
@@ -2329,10 +2750,34 @@ function handleImportFile(e) {
 //  Event-Listener & App-Start
 // ============================================================
 
+function goToOverview() {
+  renderProjectOverview();
+  showScreen('homeScreen');
+}
+
+function open2dViewer() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  flushAutosave();
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, proj.id);
+  window.location.href = 'viewer2d.html';
+}
+
 function initApp() {
   loadProjects();
-  renderProjectList();
-  showScreen('homeScreen');
+  loadFolders();
+
+  // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
+  // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
+  const resumeId = new URLSearchParams(window.location.search).get('resume')
+    ? localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY)
+    : null;
+  if (resumeId && projects.some(p => p.id === resumeId)) {
+    openProject(resumeId);
+  } else {
+    renderProjectOverview();
+    showScreen('homeScreen');
+  }
 
   loadUeberstandWert();
   const ueberstandInp = document.getElementById('fieldUeberstandWert');
@@ -2352,9 +2797,8 @@ function initApp() {
   document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
 
   document.getElementById('backBtn').addEventListener('click', () => {
-    saveCurrentProject();
-    renderProjectList();
-    showScreen('homeScreen');
+    flushAutosave();
+    goToOverview();
   });
 
   document.getElementById('deleteProjectBtn').addEventListener('click', deleteCurrentProject);
@@ -2368,11 +2812,13 @@ function initApp() {
     document.getElementById('importFileInput').click();
   });
   document.getElementById('importFileInput').addEventListener('change', handleImportFile);
+  document.getElementById('open2dBtn')?.addEventListener('click', open2dViewer);
 
   document.getElementById('addZusatzBtn').addEventListener('click', () => {
     const container = document.getElementById('zusatzContainer');
     container.appendChild(createZusatzRow({}));
     refreshNoZusatzHint();
+    scheduleAutosave();
   });
 
   // Logistik-Toggles
@@ -2386,26 +2832,47 @@ function initApp() {
     });
   });
 
-  // Gerüsttyp-Toggle
-  document.querySelectorAll('.type-btn').forEach(btn => {
+  // Gerüsttyp-Toggle (nur innerhalb des Gerüsttyp-Auswahlblocks, nicht den
+  // gleich gestylten, aber unabhängigen Status-Buttons)
+  document.querySelectorAll('#geruesttypSelector .type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#geruesttypSelector .type-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('sonderNameRow').style.display =
         btn.dataset.type === 'sonder' ? '' : 'none';
     });
   });
 
-  // Anschrift Auto-Save
-  ['fieldStrasse', 'fieldNummer', 'fieldPlz', 'fieldOrt', 'fieldBauherr', 'fieldTelefon'].forEach(id => {
-    document.getElementById(id).addEventListener('change', () => {
-      const proj = getCurrentProject();
-      if (!proj) return;
-      proj.anschrift = collectAnschrift();
-      proj.geaendert = new Date().toISOString().slice(0, 10);
-      document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
-      saveProjects();
+  // Status-Toggle (Projekt-Status)
+  document.querySelectorAll('#statusSelector .status-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#statusSelector .status-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
     });
+  });
+
+  // Automatisches Speichern: jede Eingabe/Änderung/jeder Tastendruck im
+  // Projektbildschirm löst (gebündelt) einen Auto-Save aus – deckt Anschrift,
+  // Technik, Logistik, Hausseiten, Positionen, Projektname & Status ab.
+  const projectScreenEl = document.getElementById('projectScreen');
+  projectScreenEl.addEventListener('input',  scheduleAutosave);
+  projectScreenEl.addEventListener('change', scheduleAutosave);
+  projectScreenEl.addEventListener('click', e => {
+    if (e.target.closest('button')) scheduleAutosave();
+  });
+
+  // Projektübersicht: Suche, Status-Filter, Sortierung
+  document.getElementById('searchInput')?.addEventListener('input', e => {
+    overviewState.search = e.target.value;
+    renderProjectOverview();
+  });
+  document.getElementById('statusFilterSelect')?.addEventListener('change', e => {
+    overviewState.status = e.target.value;
+    renderProjectOverview();
+  });
+  document.getElementById('sortSelect')?.addEventListener('change', e => {
+    overviewState.sort = e.target.value;
+    renderProjectOverview();
   });
 }
 
