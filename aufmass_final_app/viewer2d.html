@@ -3,16 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Gerüst 2D-Ansicht</title>
-  <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="viewer2d.css" />
+  <link rel="stylesheet" href="style.css?v=20260630" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260701" />
 </head>
 <body>
 
   <header class="viewer-header">
     <a href="index.html" class="back-link">← Aufmaß</a>
     <h1>Gerüst 2D-Ansicht</h1>
-    <p>Tippen Sie auf „Feld hinzufügen" oder auf einen grünen&nbsp;+ Punkt im Plan, um Felder anzufügen. Ziehen Sie einen blauen Pfeil-Button, um ein Feld zu verlängern.</p>
+    <p>Jedes Feld ist einzeln verschiebbar: Ziehen Sie den orangenen Punkt, um ein Feld frei zu bewegen. Tippen Sie auf einen blauen&nbsp;+ Button (links/rechts), um direkt ein weiteres Feld in dieselbe Richtung anzufügen. Tippen Sie auf das Feld selbst, um Maße, Höhen und Drehung zu bearbeiten.</p>
   </header>
 
   <div id="toolbar">
@@ -30,8 +33,12 @@
       <button id="uShapeBtn" class="secondary">U-Form</button>
       <button id="rectBtn" class="secondary">Rechteck</button>
     </div>
+    <div class="tool-group stats">
+      <span class="area-readout" id="areaReadout" title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">Gesamtfläche: 0,00 m²</span>
+    </div>
     <div class="tool-group actions">
       <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
+      <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
       <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
       <button id="savePlanBtn" class="secondary">Speichern</button>
       <button id="loadPlanBtn" class="secondary">Laden</button>
@@ -70,12 +77,15 @@
           <button class="empty-add-btn" id="emptyAddBtn">Feld&nbsp;hinzufügen</button>
         </div>
       </div>
+      <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
     </div>
   </div>
 
   <!-- Bay editor popup (injected by JS) -->
 
+  <div id="toastEl" class="toast"></div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js"></script>
+  <script src="viewer2d.js?v=20260701"></script>
 </body>
 </html>

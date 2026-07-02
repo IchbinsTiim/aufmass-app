@@ -8,7 +8,7 @@
 </head>
 <body>
 
-  <!-- Startseite: Projektliste -->
+  <!-- Startseite: Projektübersicht -->
   <div id="homeScreen" class="screen">
     <header class="app-header">
       <div class="header-title">
@@ -17,11 +17,34 @@
       <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
     </header>
     <main class="screen-content">
-      <div id="projectList" class="project-list"></div>
+
+      <div class="overview-toolbar">
+        <input type="search" id="searchInput" class="form-input overview-search" placeholder="Suche nach Name, Kunde, Adresse…" />
+        <select id="statusFilterSelect" class="form-input overview-select">
+          <option value="">Alle Status</option>
+          <option value="in_bearbeitung">In Bearbeitung</option>
+          <option value="abgeschlossen">Abgeschlossen</option>
+          <option value="archiviert">Archiviert</option>
+        </select>
+        <select id="sortSelect" class="form-input overview-select">
+          <option value="geaendert">Zuletzt geändert</option>
+          <option value="name">Alphabetisch</option>
+        </select>
+      </div>
+
+      <div class="folder-bar" id="folderBar"></div>
+
+      <div id="projectGrid" class="project-grid"></div>
+
       <div id="emptyState" class="empty-state hidden">
         <div class="empty-icon-box"></div>
         <h2>Keine Projekte</h2>
         <p>Tippen Sie auf &bdquo;+ Neues Projekt&ldquo; um zu beginnen.</p>
+      </div>
+      <div id="noResultsState" class="empty-state hidden">
+        <div class="empty-icon-box"></div>
+        <h2>Keine Treffer</h2>
+        <p>Keine Projekte für diese Suche/diesen Filter gefunden.</p>
       </div>
     </main>
   </div>
@@ -34,6 +57,23 @@
       <button id="deleteProjectBtn" class="btn btn-danger-ghost">Löschen</button>
     </header>
     <main class="screen-content">
+
+      <!-- 0. Projekt (Name & Status) -->
+      <section class="card">
+        <h2 class="card-title">Projekt</h2>
+        <div class="form-group">
+          <label class="form-label">Projektname</label>
+          <input class="form-input" type="text" id="fieldProjektname" placeholder="z. B. Umbau Musterstraße 12" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <div class="type-selector" id="statusSelector">
+            <button class="status-btn type-btn active" data-status="in_bearbeitung">In Bearbeitung</button>
+            <button class="status-btn type-btn" data-status="abgeschlossen">Abgeschlossen</button>
+            <button class="status-btn type-btn" data-status="archiviert">Archiviert</button>
+          </div>
+        </div>
+      </section>
 
       <!-- 1. Anschrift -->
       <section class="card">
@@ -58,9 +98,15 @@
             <input class="form-input" type="text" id="fieldOrt" placeholder="Musterstadt" />
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Bauherr / Auftraggeber</label>
-          <input class="form-input" type="text" id="fieldBauherr" placeholder="Herr Muster GmbH" />
+        <div class="form-row">
+          <div class="form-group" style="flex: 2">
+            <label class="form-label">Bauherr / Auftraggeber</label>
+            <input class="form-input" type="text" id="fieldBauherr" placeholder="Herr Muster GmbH" />
+          </div>
+          <div class="form-group" style="flex: 1">
+            <label class="form-label">Telefon</label>
+            <input class="form-input" type="tel" id="fieldTelefon" placeholder="0170 1234567" autocomplete="tel" inputmode="tel" />
+          </div>
         </div>
       </section>
 
@@ -160,11 +206,35 @@
           <label class="form-label">Stellfläche-Notiz</label>
           <input class="form-input" type="text" id="fieldStellflaecheNotiz" placeholder="z. B. Gehweg gesperrt" />
         </div>
+        <div class="form-subhead">Transport zum Objekt</div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">LKW → Objekt (m)</label>
+            <input class="form-input" type="number" id="fieldTransportM" placeholder="0" min="0" inputmode="decimal" />
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Höhenmeter (m)</label>
+            <input class="form-input" type="number" id="fieldHoehenmeter" placeholder="0" min="0" inputmode="decimal" />
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Treppen / Stockwerke</label>
+            <input class="form-input" type="number" id="fieldTreppen" placeholder="0" min="0" inputmode="numeric" />
+          </div>
+        </div>
         <div class="logistik-toggles">
           <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Öffentlicher Grund</button>
           <button type="button" class="logistik-toggle-btn" id="toggleVerkehr" data-active="0">Verkehrssicherung</button>
           <button type="button" class="logistik-toggle-btn" id="toggleGenehmigung" data-active="0">Genehmigung erforderlich</button>
         </div>
+      </section>
+
+      <!-- 4b. 2D-Zeichnung -->
+      <section class="card">
+        <div class="section-header">
+          <h2 class="card-title">2D-Zeichnung</h2>
+          <button id="open2dBtn" class="btn btn-secondary btn-sm">2D-Ansicht öffnen</button>
+        </div>
+        <p id="zeichnung2dSummary" class="ueberstand-setting-hint">Noch keine 2D-Zeichnung vorhanden.</p>
       </section>
 
       <!-- 5. Hausseiten -->
@@ -173,10 +243,20 @@
           <h2 class="card-title">Hausseiten</h2>
           <button id="addSideBtn" class="btn btn-primary btn-sm">+ Seite</button>
         </div>
+        <div class="ueberstand-setting">
+          <label class="form-label" for="fieldUeberstandWert">Standard-Zuschlag der &bdquo;+&ldquo;-Taste bei Maßen</label>
+          <div class="ueberstand-setting-row">
+            <span class="ueberstand-setting-sign">+</span>
+            <input class="form-input" type="number" id="fieldUeberstandWert" step="0.1" min="0.1" inputmode="decimal" value="2.00" />
+            <span class="ueberstand-setting-unit">m</span>
+          </div>
+          <p class="ueberstand-setting-hint">Vorschlagswert beim Aktivieren einer &bdquo;+&ldquo;-Taste. Jedes Maß-Feld kann danach einen eigenen, individuellen Zuschlag erhalten.</p>
+        </div>
         <div id="seitenContainer"></div>
         <div id="noSidesHint" class="no-sides-hint">
           Noch keine Seiten erfasst. Tippen Sie auf &bdquo;+ Seite&ldquo;.
         </div>
+        <button id="addSideBtnBottom" class="btn btn-primary btn-full add-side-bottom">+ Seite hinzufügen</button>
       </section>
 
       <!-- 6. Zusatzpositionen -->

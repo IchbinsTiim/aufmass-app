@@ -185,92 +185,214 @@ html, body {
 }
 
 /* ============================================================
-   Project list (home screen)
+   Projektübersicht (Startseite): Suche/Filter, Ordner, Projektkarten
    ============================================================ */
-.project-list {
+.overview-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.overview-search { flex: 2; min-width: 200px; }
+.overview-select { flex: 1; min-width: 140px; }
+
+.folder-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.folder-chip {
+  padding: 8px 14px;
+  min-height: 40px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-card);
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.folder-chip.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+.folder-chip-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.65;
+}
+.folder-chip-add {
+  border-style: dashed;
+  color: var(--color-primary);
+}
+.folder-chip-manage {
+  padding: 8px 12px;
+  color: var(--color-text-secondary);
 }
 
-.project-card {
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.project-card2 {
+  position: relative;
   background: var(--color-card);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 14px 16px;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  display: flex;
-  align-items: center;
-  gap: 14px;
   transition: box-shadow 0.15s, transform 0.1s;
   -webkit-user-select: none;
   user-select: none;
 }
-
-.project-card:active {
+.project-card2:active {
   transform: scale(0.99);
   box-shadow: var(--shadow-md);
 }
 
-.project-card-badge {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+.project-card2-top {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 0.65rem;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.project-card2-badge {
+  padding: 3px 8px;
+  border-radius: 7px;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  flex-shrink: 0;
-  text-align: center;
-  line-height: 1.2;
-  padding: 4px;
 }
+.project-card2-badge.fassade { background: #dbeafe; color: #1d4ed8; }
+.project-card2-badge.dach    { background: #fce7f3; color: #be185d; }
+.project-card2-badge.sonder  { background: #d1fae5; color: #065f46; }
 
-.project-card-badge.fassade {
-  background: #dbeafe;
-  color: #1d4ed8;
+.project-card2-status {
+  padding: 3px 8px;
+  border-radius: 7px;
+  font-size: 0.62rem;
+  font-weight: 700;
 }
+.project-card2-status.status-in_bearbeitung { background: #fff4e0; color: #a15c00; }
+.project-card2-status.status-abgeschlossen  { background: #e3f9e5; color: #1a7a2e; }
+.project-card2-status.status-archiviert     { background: #ececee; color: #6e6e73; }
 
-.project-card-badge.dach {
-  background: #fce7f3;
-  color: #be185d;
+.project-card2-menu-btn {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 1.2rem;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1;
 }
+.project-card2-menu-btn:active { background: var(--color-border); }
 
-.project-card-badge.sonder {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.project-card-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.project-card-address {
-  font-weight: 600;
-  font-size: 0.95rem;
+.project-card2-name {
+  font-weight: 700;
+  font-size: 1rem;
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.project-card-meta {
-  font-size: 0.8rem;
+.project-card2-line {
+  font-size: 0.85rem;
   color: var(--color-text-secondary);
-  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.project-card2-addr { font-weight: 500; color: var(--color-text); }
+.project-card2-stats {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+.project-card2-dates {
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+}
 
-.project-card-arrow {
-  color: var(--color-border);
-  font-size: 1.3rem;
-  font-weight: 300;
+/* Schwebendes Aktionsmenü (Projekt-/Ordner-Aktionen) */
+.floating-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+.floating-menu {
+  position: fixed;
+  z-index: 41;
+  width: 240px;
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--color-border);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.floating-menu-item {
+  text-align: left;
+  padding: 12px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.floating-menu-item:active { background: var(--color-bg); }
+.floating-menu-item.active { color: var(--color-primary); }
+.floating-menu-item.danger { color: var(--color-danger); }
+.floating-menu-sep {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 6px;
+}
+
+/* ============================================================
+   Empty state
+   ============================================================ */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-text-secondary);
+}
+
+.empty-icon-box {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--color-border);
+  margin: 0 auto 16px;
+}
+
+.empty-state h2 {
+  font-size: 1.15rem;
+  margin-bottom: 6px;
+  color: var(--color-text);
+}
+
+.empty-state p {
+  font-size: 0.9rem;
 }
 
 /* ============================================================
@@ -331,6 +453,15 @@ html, body {
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.form-subhead {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 6px 0 2px;
 }
 
 .form-input {
@@ -397,6 +528,54 @@ html, body {
 
 .section-header .card-title {
   margin-bottom: 0;
+}
+
+/* ============================================================
+   Überstand-Einstellung ("+Xm"-Zuschlag)
+   ============================================================ */
+.ueberstand-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  background: #f9f9fb;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.ueberstand-setting-hint {
+  width: 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.ueberstand-setting .form-label {
+  margin: 0;
+}
+
+.ueberstand-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ueberstand-setting-sign,
+.ueberstand-setting-unit {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ueberstand-setting-row .form-input {
+  width: 72px;
+  padding: 6px 8px;
+  text-align: center;
 }
 
 /* ============================================================
@@ -884,6 +1063,17 @@ html, body {
   background: #eff6ff;
   color: var(--color-primary);
 }
+.konsole-btn-df {
+  border-style: dashed;
+  border-color: #e67e22;
+  color: #e67e22;
+}
+.konsole-btn-df.active {
+  border-style: solid;
+  border-color: #e67e22;
+  background: #fff4e6;
+  color: #e67e22;
+}
 .accessory-toggle {
   padding: 10px 14px;
   border: 1.5px solid var(--color-border);
@@ -1062,6 +1252,127 @@ html, body {
   min-height: 36px;
 }
 .ks-reset-btn:active { background: #bfdbfe; }
+
+/* ============================================================
+   Wandabstand & WDVS je Seite
+   ============================================================ */
+.wand-wdvs-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+.wand-wdvs-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #f7f8fa;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border);
+  flex: 1;
+  min-width: 140px;
+}
+.wand-wdvs-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+.wand-wdvs-field input {
+  width: 70px;
+  padding: 6px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: #fff;
+  text-align: right;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+  flex: 1;
+  min-width: 0;
+}
+.wand-wdvs-field input::-webkit-inner-spin-button,
+.wand-wdvs-field input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.wand-wdvs-field input:focus { border-color: var(--color-border-focus); }
+.wand-wdvs-unit {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Konsolen-Lage (Ebene) je Konsolenzeile
+   ============================================================ */
+.acc-lage-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.lage-btn {
+  padding: 7px 9px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  min-height: 34px;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.lage-btn.active {
+  border-color: #e67e22;
+  background: #fff7ed;
+  color: #c0591a;
+}
+.lage-free-input {
+  width: 48px;
+  padding: 6px 6px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  text-align: center;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+.lage-free-input::-webkit-inner-spin-button,
+.lage-free-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.lage-free-input:focus { border-color: var(--color-border-focus); }
+.acc-lage-calc {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #c0591a;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   L/H-Kennzeichnung an den Maß-Eingabefeldern
+   ============================================================ */
+.meas-field {
+  position: relative;
+}
+.meas-field-tag {
+  position: absolute;
+  top: -8px;
+  left: 3px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  color: #fff;
+  background: var(--color-primary);
+  padding: 1px 4px;
+  border-radius: 4px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  z-index: 1;
+}
 
 /* ============================================================
    iPad / Tablet-Optimierung (min-width: 768px)
@@ -1365,6 +1676,10 @@ html, body {
    Zusatzpositionen
    ============================================================ */
 
+.add-side-bottom {
+  margin-top: 12px;
+}
+
 .zusatz-row {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1386,10 +1701,10 @@ html, body {
 .zusatz-art {
   flex: 2;
   min-width: 130px;
-  padding: 9px 10px;
+  padding: 11px 12px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   background: #f9f9fb;
   color: var(--color-text);
   outline: none;
@@ -1398,11 +1713,11 @@ html, body {
 }
 
 .zusatz-einheit {
-  width: 72px;
-  padding: 9px 8px;
+  width: 80px;
+  padding: 11px 8px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   background: #f9f9fb;
   color: var(--color-text);
   outline: none;
@@ -1411,8 +1726,8 @@ html, body {
 }
 
 .zusatz-menge {
-  width: 88px;
-  padding: 9px 10px;
+  width: 92px;
+  padding: 11px 10px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
@@ -1440,10 +1755,10 @@ html, body {
 
 .zusatz-notiz {
   flex: 1;
-  padding: 9px 12px;
+  padding: 11px 12px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   color: var(--color-text);
   background: #f9f9fb;
   outline: none;
@@ -1514,6 +1829,11 @@ html, body {
   display: block;
 }
 
+/* Zuschlag-Steuerelemente sind inline-flex (Taste + Wert-Feld) statt block */
+.abschnitt-row.giebel-active .zuschlag-ctrl.giebel-part {
+  display: inline-flex;
+}
+
 .giebel-sep {
   font-size: 0.9rem;
   color: #e67e22;
@@ -1530,15 +1850,16 @@ html, body {
 .messungen-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .messung-row {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex-wrap: nowrap;
+  row-gap: 8px;
+  flex-wrap: wrap;
 }
 
 .messung-laenge,
@@ -1562,6 +1883,13 @@ html, body {
   -webkit-appearance: none;
 }
 
+.zuschlag-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
 .plus2-btn {
   padding: 8px 7px;
   border: 1.5px solid var(--color-border);
@@ -1571,6 +1899,7 @@ html, body {
   background: #f9f9fb;
   color: var(--color-text-secondary);
   min-height: 36px;
+  min-width: 36px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1579,6 +1908,28 @@ html, body {
   border-color: var(--color-primary);
   background: #eff6ff;
   color: var(--color-primary);
+}
+
+.plus2-value-input {
+  width: 46px;
+  padding: 8px 4px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  background: #eff6ff;
+  color: var(--color-primary);
+  -moz-appearance: textfield;
+}
+
+.plus2-value-input::-webkit-outer-spin-button,
+.plus2-value-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.plus2-value-input:focus {
+  background: #fff;
 }
 
 .messung-mul {
@@ -1607,7 +1958,7 @@ html, body {
   margin-top: 4px;
 }
 
-.konsole-total {
+.acc-multi-total {
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--color-primary);
@@ -1634,6 +1985,13 @@ html, body {
 
   .plus2-btn {
     padding: 10px;
+    min-height: 44px;
+  }
+
+  .plus2-value-input {
+    width: 56px;
+    padding: 10px 6px;
+    font-size: 0.85rem;
     min-height: 44px;
   }
 }

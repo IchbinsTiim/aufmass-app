@@ -5,24 +5,91 @@
 // ============================================================
 
 const STORAGE_KEY = 'aufmass_projects_v2';
+const FOLDERS_STORAGE_KEY = 'aufmass_folders_v1';
+// Vom 2D-Zeichner (viewer2d.html) mitgenutzter Schlüssel: welches Projekt ist
+// gerade geöffnet. So wissen beide Programme, welche Projektakte (inkl.
+// 2D-Zeichnung) gerade bearbeitet wird, und teilen sich dieselbe Projektliste.
+const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
+
+const PROJECT_STATUS = ['in_bearbeitung', 'abgeschlossen', 'archiviert'];
+const PROJECT_STATUS_LABEL = {
+  in_bearbeitung: 'In Bearbeitung',
+  abgeschlossen:  'Abgeschlossen',
+  archiviert:     'Archiviert'
+};
 
 let projects = [];
+let folders = [];
 let currentProjectId = null;
+
+// Aktueller Filter-/Sortier-/Suchzustand der Projektübersicht (nur UI-Zustand,
+// nicht persistiert).
+let overviewState = {
+  search: '',
+  folderId: '',       // '' = alle, '__none__' = ohne Ordner, sonst Ordner-ID
+  status: '',          // '' = alle
+  sort: 'geaendert'    // 'geaendert' | 'name'
+};
 
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
-  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen'
+  'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen',
+  'Bautenschutzmatte','Fleece','Bauzaun','Käfig'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
+// Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
+const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.' };
+
+// Konsolentypen (Breite in cm) + Sonder-Variante "Dachfang" (intern Konsole 0,50)
+const KONSOLE_TYPES = ['0', '19', '30', '50', '70', '109'];
+const KONSOLE_DACHFANG_TYP = '50df';
+
+// Standard-Zuschlag der "+Xm"-Tasten bei den Maßen (Standard 2,00 m). Dient als
+// Vorschlagswert beim erstmaligen Aktivieren einer Zuschlag-Taste – jedes Feld
+// kann seinen eigenen (individuellen) Zuschlagswert erhalten und behalten.
+const UEBERSTAND_STORAGE_KEY = 'aufmass_ueberstand_wert';
+let ueberstandWert = 2;
+
+function loadUeberstandWert() {
+  const n = parseFloat(localStorage.getItem(UEBERSTAND_STORAGE_KEY));
+  ueberstandWert = (!isNaN(n) && n > 0) ? n : 2;
+}
+
+function setUeberstandWert(v) {
+  if (isNaN(v) || v <= 0) return;
+  ueberstandWert = v;
+  localStorage.setItem(UEBERSTAND_STORAGE_KEY, String(v));
+  // Nur noch inaktive Zuschlag-Tasten zeigen den globalen Standardwert als
+  // Vorschlag an. Bereits aktivierte (individuelle) Zuschläge bleiben unverändert.
+  document.querySelectorAll('.plus2-btn:not(.active)').forEach(btn => {
+    btn.textContent = '+' + fmtNum(ueberstandWert) + 'm';
+  });
+  updateSummary();
+}
 
 // ============================================================
 //  localStorage
 // ============================================================
 
+// Ergänzt ältere Projekte (vor der Projektverwaltung mit Ordnern/Status/2D-
+// Zeichnung) um die neuen Felder, ohne bestehende Daten zu verändern.
+function migrateProjectMeta(p) {
+  if (p.name === undefined)        p.name = '';
+  if (p.status === undefined)      p.status = 'in_bearbeitung';
+  if (p.folderId === undefined)    p.folderId = null;
+  if (p.zeichnung2d === undefined) p.zeichnung2d = null;
+  if (p.archiviert !== undefined) { // sehr alte Übergangsdaten
+    if (p.archiviert) p.status = 'archiviert';
+    delete p.archiviert;
+  }
+  return p;
+}
+
 function loadProjects() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     projects = raw ? JSON.parse(raw) : [];
+    projects.forEach(migrateProjectMeta);
   } catch (_) {
     projects = [];
   }
@@ -32,8 +99,43 @@ function saveProjects() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }
 
+function loadFolders() {
+  try {
+    const raw = localStorage.getItem(FOLDERS_STORAGE_KEY);
+    folders = raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    folders = [];
+  }
+}
+
+function saveFolders() {
+  localStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+}
+
 function getCurrentProject() {
   return projects.find(p => p.id === currentProjectId) || null;
+}
+
+/** Anzeigename eines Projekts: expliziter Projektname, sonst Adresse, sonst "Neues Projekt". */
+function getProjectName(project) {
+  return (project.name && project.name.trim()) || getProjectLabel(project);
+}
+
+function getFolder(folderId) {
+  return folders.find(f => f.id === folderId) || null;
+}
+
+/** Zählt Felder + Gesamtfläche (m²) der optional verknüpften 2D-Zeichnung. */
+function get2dStats(project) {
+  const z = project.zeichnung2d;
+  if (!z || !Array.isArray(z.sections)) return { felder: 0, flaeche: 0 };
+  let felder = 0, flaeche = 0;
+  z.sections.forEach(sec => (sec.bays || []).forEach(bay => {
+    felder++;
+    const heights = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
+    if (heights.length && bay.len) flaeche += bay.len * Math.min(...heights);
+  }));
+  return { felder, flaeche: round2(flaeche) };
 }
 
 // ============================================================
@@ -85,6 +187,61 @@ function getProjectLabel(project) {
   return parts.join(', ') || 'Neues Projekt';
 }
 
+// Ausgewaehlte Lage (Ebene) einer Konsolen- oder Innengelaender-Zeile ermitteln
+function collectLage(row) {
+  const freeInp = row.querySelector('.lage-free-input');
+  const freeVal = freeInp ? freeInp.value.trim() : '';
+  if (freeVal !== '') return freeVal;
+  const activeLageBtn = row.querySelector('.lage-btn.active');
+  return activeLageBtn ? activeLageBtn.dataset.lage : 'alle';
+}
+
+function lageLabel(lage) {
+  if (!lage || lage === 'alle') return '';
+  return lage + (lage === '1' ? ' Lage' : ' Lagen');
+}
+
+// Konkrete Lagen-Zahl (null bei "alle"/leer/ungueltig)
+function lagenAnzahl(lage) {
+  if (!lage || lage === 'alle') return null;
+  const n = parseFloat(String(lage).replace(',', '.'));
+  return (!isNaN(n) && n > 0) ? n : null;
+}
+
+// Laenge × Lagenzahl (ohne konkrete Lagenzahl bleibt die Laenge unveraendert)
+function effektiveLaenge(laenge, lage) {
+  if (laenge === null || laenge === undefined || isNaN(laenge)) return null;
+  const n = lagenAnzahl(lage);
+  return n ? laenge * n : laenge;
+}
+
+// Aktiven, individuellen Zuschlagwert (m) eines Zuschlag-Steuerelements (DOM)
+// auslesen. 0 = Zuschlag nicht aktiv.
+function readZuschlag(wrapEl) {
+  if (!wrapEl) return 0;
+  const btn = wrapEl.querySelector('.plus2-btn');
+  if (!btn || !btn.classList.contains('active')) return 0;
+  const inp = wrapEl.querySelector('.plus2-value-input');
+  const v = inp ? parseNum(inp.value) : NaN;
+  return (!isNaN(v) && v > 0) ? v : ueberstandWert;
+}
+
+// Konsolentyp (cm-Code, ggf. mit "df"-Suffix für Dachfang) → Meterangabe "0,30"
+function konsoleTypMeter(typ) {
+  const base = String(typ).replace(/[^0-9]/g, '');
+  const n = parseFloat(base);
+  return isNaN(n) ? base : (n / 100).toFixed(2).replace('.', ',');
+}
+
+// Anzeigetext für einen Konsolentyp. short=true → kompaktes App-Präfix ("K"/"DF"),
+// sonst der volle PDF-Text ("Konsole 0,30" / "DF / Konsole 0,50").
+function konsoleTypLabel(typ, short) {
+  const isDachfang = String(typ).endsWith('df');
+  const meter = konsoleTypMeter(typ);
+  if (short) return (isDachfang ? 'DF ' : 'K ') + meter;
+  return (isDachfang ? 'DF / Konsole ' : 'Konsole ') + meter;
+}
+
 function getSeiteName(seite) {
   if (seite.name === '__manual__') return seite.manualName || 'Unbenannte Seite';
   return seite.name || 'Unbenannte Seite';
@@ -97,15 +254,15 @@ function berechneAbschnitt(abschnitt) {
   const isGiebel = abschnitt.giebel    || false;
   let flaeche = 0;
   for (const m of (abschnitt.messungen || [])) {
-    let l = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+    let l = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
     if (ef) l = Math.max(l, 2.5);
     if (l <= 0) continue;
     if (isGiebel) {
-      const h1 = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
-      const h2 = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+      const h1 = (m.hoehe  || 0) + (m.hoeheZuschlag  > 0 ? m.hoeheZuschlag  : 0);
+      const h2 = (m.hoehe2 || 0) + (m.hoehe2Zuschlag > 0 ? m.hoehe2Zuschlag : 0);
       if (h2 >= h1 && h1 >= 0) flaeche += l * (h1 + h2) / 2;
     } else {
-      const h = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+      const h = (m.hoehe || 0) + (m.hoeheZuschlag > 0 ? m.hoeheZuschlag : 0);
       if (h > 0) flaeche += l * h;
     }
   }
@@ -120,25 +277,25 @@ function computeCardFlaeche(card) {
     const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
     abRow.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-      let lEff  = (l || 0) + (lP2 ? 2 : 0);
+      const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+      let lEff  = (l || 0) + lZ;
       if (ef) lEff = Math.max(lEff, 2.5);
       if (isNaN(l) || lEff <= 0) return;
       if (isGiebel) {
         const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
         const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+        const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
         if (!isNaN(h) && !isNaN(h2)) {
-          const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-          const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+          const h1Eff = (h  || 0) + hZ;
+          const h2Eff = (h2 || 0) + h2Z;
           if (h2Eff >= h1Eff && h1Eff >= 0) total += lEff * (h1Eff + h2Eff) / 2;
         }
       } else {
         const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
         if (!isNaN(h)) {
-          const hEff = (h || 0) + (hP2 ? 2 : 0);
+          const hEff = (h || 0) + hZ;
           if (hEff > 0) total += lEff * hEff;
         }
       }
@@ -147,10 +304,37 @@ function computeCardFlaeche(card) {
   return round2(total);
 }
 
-// Migration alter Projekte → Schema 2.1 (messungen je Abschnitt)
+// Migration eines alten Boolean-Zuschlags ("+2m"-Taste an/aus) auf den neuen
+// individuellen, numerischen Zuschlagwert je Feld (Schema 2.2).
+function migrateMessung(m) {
+  const out = { ...m };
+  if (out.laengeZuschlag === undefined) {
+    out.laengeZuschlag = out.laengePlus2 ? ueberstandWert : null;
+  }
+  if (out.hoeheZuschlag === undefined) {
+    out.hoeheZuschlag = out.hoehePlus2 ? ueberstandWert : null;
+  }
+  if (out.hoehe2Zuschlag === undefined) {
+    out.hoehe2Zuschlag = out.hoehe2Plus2 ? ueberstandWert : null;
+  }
+  delete out.laengePlus2;
+  delete out.hoehePlus2;
+  delete out.hoehe2Plus2;
+  return out;
+}
+
+// Migration alter Projekte → Schema 2.2 (messungen je Abschnitt, individueller Zuschlag)
 function migrateSeite(seite) {
-  // Bereits v2.1 (hat messungen)
-  if (seite.abschnitte && seite.abschnitte.length > 0 && seite.abschnitte[0].messungen) return seite;
+  // Bereits v2.1+ (hat messungen) → nur noch Zuschlag-Felder je Messung migrieren
+  if (seite.abschnitte && seite.abschnitte.length > 0 && seite.abschnitte[0].messungen) {
+    return {
+      ...seite,
+      abschnitte: seite.abschnitte.map(a => ({
+        ...a,
+        messungen: (a.messungen || []).map(migrateMessung)
+      }))
+    };
+  }
 
   // v2.0: abschnitte mit laenge/hoeheBisBelag, aber noch ohne messungen
   if (seite.abschnitte && seite.abschnitte.length > 0) {
@@ -161,11 +345,11 @@ function migrateSeite(seite) {
         bezeichnung: a.bezeichnung || '',
         einzelfeld:  a.einzelfeld  || false,
         messungen: [{
-          id:          genId('m'),
-          laenge:      a.laenge      ?? null,
-          laengePlus2: false,
-          hoehe:       a.hoeheBisBelag ?? null,
-          hoehePlus2:  false
+          id:             genId('m'),
+          laenge:         a.laenge      ?? null,
+          laengeZuschlag: null,
+          hoehe:          a.hoeheBisBelag ?? null,
+          hoeheZuschlag:  null
         }]
       }))
     };
@@ -187,13 +371,13 @@ function migrateSeite(seite) {
     const eff = round2((l.wert || 0) + ex);
     return {
       id: genId('ab'), bezeichnung: '', einzelfeld: false,
-      messungen: [{ id: genId('m'), laenge: eff > 0 ? eff : null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+      messungen: [{ id: genId('m'), laenge: eff > 0 ? eff : null, laengeZuschlag: null, hoehe: avgHoehe, hoeheZuschlag: null }]
     };
   });
   if (abschnitte.length === 0) {
     abschnitte.push({
       id: genId('ab'), bezeichnung: '', einzelfeld: false,
-      messungen: [{ id: genId('m'), laenge: null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+      messungen: [{ id: genId('m'), laenge: null, laengeZuschlag: null, hoehe: avgHoehe, hoeheZuschlag: null }]
     });
   }
   return { ...seite, abschnitte };
@@ -224,46 +408,330 @@ function showScreen(id) {
 }
 
 // ============================================================
-//  Startseite - Projektliste
+//  Startseite - Projektübersicht (Ordner, Suche, Filter, Vorschau)
 // ============================================================
 
-function renderProjectList() {
-  const listEl  = document.getElementById('projectList');
-  const emptyEl = document.getElementById('emptyState');
-  listEl.innerHTML = '';
+function matchesSearch(proj, q) {
+  if (!q) return true;
+  const hay = [
+    getProjectName(proj),
+    proj.anschrift?.bauherr || '',
+    proj.anschrift?.strasse || '', proj.anschrift?.nummer || '',
+    proj.anschrift?.plz || '', proj.anschrift?.ort || ''
+  ].join(' ').toLowerCase();
+  return hay.includes(q.toLowerCase());
+}
+
+function getFilteredSortedProjects() {
+  let list = projects.filter(p => {
+    if (overviewState.folderId === '__none__' && p.folderId) return false;
+    if (overviewState.folderId && overviewState.folderId !== '__none__' && p.folderId !== overviewState.folderId) return false;
+    if (overviewState.status && p.status !== overviewState.status) return false;
+    if (!matchesSearch(p, overviewState.search)) return false;
+    return true;
+  });
+  if (overviewState.sort === 'name') {
+    list = list.sort((a, b) => getProjectName(a).localeCompare(getProjectName(b), 'de'));
+  } else {
+    list = list.sort((a, b) => (b.geaendert || '').localeCompare(a.geaendert || ''));
+  }
+  return list;
+}
+
+function renderFolderBar() {
+  const bar = document.getElementById('folderBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+
+  const makeChip = (label, folderId, count) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'folder-chip' + (overviewState.folderId === folderId ? ' active' : '');
+    btn.innerHTML = `${label} <span class="folder-chip-count">${count}</span>`;
+    btn.addEventListener('click', () => {
+      overviewState.folderId = folderId;
+      renderProjectOverview();
+    });
+    return btn;
+  };
+
+  bar.appendChild(makeChip('Alle Projekte', '', projects.length));
+  bar.appendChild(makeChip('Ohne Ordner', '__none__', projects.filter(p => !p.folderId).length));
+
+  folders.forEach(f => {
+    const count = projects.filter(p => p.folderId === f.id).length;
+    const chip = makeChip(f.name, f.id, count);
+    chip.addEventListener('dblclick', () => renameFolderPrompt(f.id));
+    bar.appendChild(chip);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'folder-chip folder-chip-add';
+  addBtn.textContent = '+ Ordner';
+  addBtn.addEventListener('click', createFolderPrompt);
+  bar.appendChild(addBtn);
+
+  if (overviewState.folderId && overviewState.folderId !== '__none__') {
+    const folder = getFolder(overviewState.folderId);
+    if (folder) {
+      const manageBtn = document.createElement('button');
+      manageBtn.type = 'button';
+      manageBtn.className = 'folder-chip folder-chip-manage';
+      manageBtn.title = 'Ordner umbenennen/löschen';
+      manageBtn.textContent = '✎';
+      manageBtn.addEventListener('click', () => openFolderManageMenu(folder, manageBtn));
+      bar.appendChild(manageBtn);
+    }
+  }
+}
+
+function createFolderPrompt() {
+  const name = prompt('Name des neuen Ordners (z. B. 2026, Firma Müller, Abgeschlossen):');
+  if (!name || !name.trim()) return;
+  folders.push({ id: genId('folder'), name: name.trim() });
+  saveFolders();
+  renderProjectOverview();
+}
+
+function renameFolderPrompt(folderId) {
+  const folder = getFolder(folderId);
+  if (!folder) return;
+  const name = prompt('Ordner umbenennen:', folder.name);
+  if (!name || !name.trim()) return;
+  folder.name = name.trim();
+  saveFolders();
+  renderProjectOverview();
+}
+
+function deleteFolderPrompt(folderId) {
+  const folder = getFolder(folderId);
+  if (!folder) return;
+  const count = projects.filter(p => p.folderId === folderId).length;
+  const msg = count > 0
+    ? `Ordner "${folder.name}" löschen? ${count} Projekt(e) darin werden in "Ohne Ordner" verschoben.`
+    : `Ordner "${folder.name}" löschen?`;
+  if (!confirm(msg)) return;
+  projects.forEach(p => { if (p.folderId === folderId) p.folderId = null; });
+  folders = folders.filter(f => f.id !== folderId);
+  saveProjects();
+  saveFolders();
+  if (overviewState.folderId === folderId) overviewState.folderId = '';
+  renderProjectOverview();
+}
+
+function closeFloatingMenu() {
+  document.getElementById('floatingMenu')?.remove();
+  document.getElementById('floatingMenuOverlay')?.remove();
+}
+
+/** Kleines, an einem Button verankertes Popup-Menü (Aktionen, ggf. mit
+ *  Untermenüs) – touch-tauglich, ohne Abhängigkeit von Browser-Kontextmenüs. */
+function openFloatingMenu(anchorEl, items) {
+  closeFloatingMenu();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'floatingMenuOverlay';
+  overlay.className = 'floating-menu-overlay';
+  overlay.addEventListener('click', closeFloatingMenu);
+
+  const menu = document.createElement('div');
+  menu.id = 'floatingMenu';
+  menu.className = 'floating-menu';
+
+  items.forEach(item => {
+    if (item === '---') {
+      const sep = document.createElement('div');
+      sep.className = 'floating-menu-sep';
+      menu.appendChild(sep);
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'floating-menu-item' + (item.danger ? ' danger' : '') + (item.active ? ' active' : '');
+    btn.textContent = item.label;
+    btn.addEventListener('click', () => { closeFloatingMenu(); item.onClick(); });
+    menu.appendChild(btn);
+  });
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(menu);
+
+  const r = anchorEl.getBoundingClientRect();
+  const menuW = 240;
+  let left = r.right - menuW;
+  if (left < 8) left = 8;
+  if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
+  let top = r.bottom + 6;
+  menu.style.left = left + 'px';
+  menu.style.top  = top + 'px';
+  // Falls das Menü unten aus dem Bildschirm ragen würde: oberhalb öffnen
+  requestAnimationFrame(() => {
+    const mh = menu.getBoundingClientRect().height;
+    if (top + mh > window.innerHeight - 8) {
+      menu.style.top = Math.max(8, r.top - mh - 6) + 'px';
+    }
+  });
+}
+
+function openFolderManageMenu(folder, anchorEl) {
+  openFloatingMenu(anchorEl, [
+    { label: 'Ordner umbenennen', onClick: () => renameFolderPrompt(folder.id) },
+    { label: 'Ordner löschen', danger: true, onClick: () => deleteFolderPrompt(folder.id) }
+  ]);
+}
+
+function openMoveToFolderMenu(proj, anchorEl) {
+  const items = [
+    { label: (!proj.folderId ? '✓ ' : '') + 'Ohne Ordner', active: !proj.folderId, onClick: () => moveProjectToFolder(proj.id, null) }
+  ];
+  folders.forEach(f => {
+    items.push({
+      label: (proj.folderId === f.id ? '✓ ' : '') + f.name,
+      active: proj.folderId === f.id,
+      onClick: () => moveProjectToFolder(proj.id, f.id)
+    });
+  });
+  items.push('---');
+  items.push({ label: '+ Neuer Ordner…', onClick: () => {
+    const name = prompt('Name des neuen Ordners:');
+    if (!name || !name.trim()) return;
+    const folder = { id: genId('folder'), name: name.trim() };
+    folders.push(folder);
+    saveFolders();
+    moveProjectToFolder(proj.id, folder.id);
+  } });
+  openFloatingMenu(anchorEl, items);
+}
+
+function moveProjectToFolder(projectId, folderId) {
+  const proj = projects.find(p => p.id === projectId);
+  if (!proj) return;
+  proj.folderId = folderId;
+  saveProjects();
+  renderProjectOverview();
+  showToast(folderId ? 'In Ordner verschoben' : 'Ordner entfernt');
+}
+
+function openStatusMenu(proj, anchorEl) {
+  openFloatingMenu(anchorEl, PROJECT_STATUS.map(s => ({
+    label: (proj.status === s ? '✓ ' : '') + PROJECT_STATUS_LABEL[s],
+    active: proj.status === s,
+    onClick: () => {
+      proj.status = s;
+      proj.geaendert = new Date().toISOString().slice(0, 10);
+      saveProjects();
+      renderProjectOverview();
+    }
+  })));
+}
+
+function renameProjectPrompt(proj) {
+  const name = prompt('Projekt umbenennen:', getProjectName(proj));
+  if (name === null) return;
+  proj.name = name.trim();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+  saveProjects();
+  renderProjectOverview();
+}
+
+function duplicateProject(proj) {
+  const copy = JSON.parse(JSON.stringify(proj));
+  copy.id = genId('proj');
+  copy.name = (getProjectName(proj) + ' (Kopie)').trim();
+  const today = new Date().toISOString().slice(0, 10);
+  copy.erstellt = today;
+  copy.geaendert = today;
+  copy.status = 'in_bearbeitung';
+  projects.push(copy);
+  saveProjects();
+  renderProjectOverview();
+  showToast('Projekt dupliziert');
+}
+
+function deleteProjectFromOverview(proj) {
+  if (!confirm(`Projekt "${getProjectName(proj)}" wirklich löschen?`)) return;
+  projects = projects.filter(p => p.id !== proj.id);
+  saveProjects();
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === proj.id) {
+    localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+  }
+  renderProjectOverview();
+  showToast('Projekt gelöscht');
+}
+
+function openProjectActionMenu(proj, anchorEl) {
+  openFloatingMenu(anchorEl, [
+    { label: 'Öffnen', onClick: () => openProject(proj.id) },
+    { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
+    { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
+    { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
+    { label: 'Status ändern…', onClick: () => openStatusMenu(proj, anchorEl) },
+    '---',
+    { label: 'Löschen', danger: true, onClick: () => deleteProjectFromOverview(proj) }
+  ]);
+}
+
+function createProjectCard(proj) {
+  const card = document.createElement('div');
+  card.className = 'project-card2';
+  const typ = proj.geruesttyp || 'fassade';
+  const seitenAnzahl = (proj.seiten || []).length;
+  const bauherr = proj.anschrift?.bauherr || '';
+  const addrParts = [
+    [proj.anschrift?.strasse, proj.anschrift?.nummer].filter(Boolean).join(' '),
+    [proj.anschrift?.plz, proj.anschrift?.ort].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+  const stats2d = get2dStats(proj);
+  const statsParts = [seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : '')];
+  if (proj.zeichnung2d) {
+    statsParts.push(stats2d.felder + ' Feld' + (stats2d.felder !== 1 ? 'er' : ''));
+    statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
+  }
+
+  card.innerHTML = `
+    <div class="project-card2-top">
+      <span class="project-card2-badge ${typ}">${getTypeBadge(typ)}</span>
+      <span class="project-card2-status status-${proj.status}">${PROJECT_STATUS_LABEL[proj.status] || ''}</span>
+      <button type="button" class="project-card2-menu-btn" aria-label="Aktionen">⋯</button>
+    </div>
+    <div class="project-card2-name">${getProjectName(proj)}</div>
+    ${bauherr ? `<div class="project-card2-line">${bauherr}</div>` : ''}
+    ${addrParts ? `<div class="project-card2-line project-card2-addr">${addrParts}</div>` : ''}
+    ${proj.anschrift?.telefon ? `<div class="project-card2-line">${proj.anschrift.telefon}</div>` : ''}
+    <div class="project-card2-stats">${statsParts.join(' · ')}</div>
+    <div class="project-card2-dates">Erstellt ${fmtDate(proj.erstellt)} · Geändert ${fmtDate(proj.geaendert)}</div>
+  `;
+
+  card.querySelector('.project-card2-menu-btn').addEventListener('click', ev => {
+    ev.stopPropagation();
+    openProjectActionMenu(proj, ev.currentTarget);
+  });
+  card.addEventListener('click', () => openProject(proj.id));
+  return card;
+}
+
+function renderProjectOverview() {
+  const gridEl    = document.getElementById('projectGrid');
+  const emptyEl   = document.getElementById('emptyState');
+  const noResEl   = document.getElementById('noResultsState');
+  if (!gridEl) return;
+
+  renderFolderBar();
+
+  gridEl.innerHTML = '';
 
   if (projects.length === 0) {
     emptyEl.classList.remove('hidden');
+    noResEl.classList.add('hidden');
     return;
   }
   emptyEl.classList.add('hidden');
 
-  const sorted = [...projects].sort((a, b) =>
-    (b.geaendert || '').localeCompare(a.geaendert || '')
-  );
+  const list = getFilteredSortedProjects();
+  noResEl.classList.toggle('hidden', list.length > 0);
 
-  sorted.forEach(proj => {
-    const card = document.createElement('div');
-    card.className = 'project-card';
-    const typ = proj.geruesttyp || 'fassade';
-    const seitenAnzahl = (proj.seiten || []).length;
-    const bauherr = proj.anschrift?.bauherr || '';
-    const typeDisplay = (typ === 'sonder' && proj.geruesttypName)
-      ? proj.geruesttypName : getTypeLabel(typ);
-    const metaParts = [typeDisplay, seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : ''), fmtDate(proj.geaendert)];
-
-    card.innerHTML = `
-      <div class="project-card-badge ${typ}">${getTypeBadge(typ)}</div>
-      <div class="project-card-body">
-        <div class="project-card-address">${getProjectLabel(proj)}</div>
-        <div class="project-card-meta">${metaParts.join(' · ')}</div>
-        ${bauherr ? `<div class="project-card-meta">${bauherr}</div>` : ''}
-      </div>
-      <div class="project-card-arrow">&rsaquo;</div>
-    `;
-    card.addEventListener('click', () => openProject(proj.id));
-    listEl.appendChild(card);
-  });
+  list.forEach(proj => gridEl.appendChild(createProjectCard(proj)));
 }
 
 // ============================================================
@@ -274,27 +742,35 @@ function createNewProject() {
   const today = new Date().toISOString().slice(0, 10);
   const proj = {
     id: genId('proj'),
+    name: '',
+    status: 'in_bearbeitung',
+    folderId: (overviewState.folderId && overviewState.folderId !== '__none__') ? overviewState.folderId : null,
     erstellt: today,
     geaendert: today,
-    anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '' },
+    anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
     geruesttyp: 'fassade',
     geruesttypName: '',
     seiten: [],
     technik: { lastklasse: '3', breitenklasse: 'W06' },
     logistik: {},
-    zusatzpositionen: []
+    zusatzpositionen: [],
+    zeichnung2d: null
   };
   projects.push(proj);
   saveProjects();
   openProject(proj.id);
 }
 
-function openProject(projectId) {
+function openProject(projectId, opts) {
   currentProjectId = projectId;
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, projectId);
   const proj = getCurrentProject();
   if (!proj) return;
 
-  document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
+  document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
+
+  document.getElementById('fieldProjektname').value = proj.name || '';
+  setProjectStatus(proj.status || 'in_bearbeitung');
 
   const a = proj.anschrift || {};
   document.getElementById('fieldStrasse').value = a.strasse || '';
@@ -302,9 +778,10 @@ function openProject(projectId) {
   document.getElementById('fieldPlz').value     = a.plz     || '';
   document.getElementById('fieldOrt').value     = a.ort     || '';
   document.getElementById('fieldBauherr').value = a.bauherr || '';
+  document.getElementById('fieldTelefon').value = a.telefon || '';
 
   const typ = proj.geruesttyp || 'fassade';
-  document.querySelectorAll('.type-btn').forEach(btn => {
+  document.querySelectorAll('#geruesttypSelector .type-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.type === typ);
   });
   document.getElementById('sonderNameRow').style.display = typ === 'sonder' ? '' : 'none';
@@ -315,8 +792,32 @@ function openProject(projectId) {
 
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
+  update2dSummary(proj);
   updateSummary();
-  showScreen('projectScreen');
+  if (!opts || !opts.keepScreen) showScreen('projectScreen');
+}
+
+function setProjectStatus(status) {
+  document.querySelectorAll('.status-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.status === status);
+  });
+}
+
+function collectProjectStatus() {
+  const active = document.querySelector('.status-btn.active');
+  return active ? active.dataset.status : 'in_bearbeitung';
+}
+
+/** Zeigt Kennzahlen der verknüpften 2D-Zeichnung (Felder/Fläche) im Projekt an. */
+function update2dSummary(proj) {
+  const el = document.getElementById('zeichnung2dSummary');
+  if (!el) return;
+  const stats = get2dStats(proj);
+  if (!proj.zeichnung2d) {
+    el.textContent = 'Noch keine 2D-Zeichnung vorhanden.';
+  } else {
+    el.textContent = `${stats.felder} Feld${stats.felder === 1 ? '' : 'er'} gezeichnet · Gesamtfläche ${fmtNum(stats.flaeche)} m²`;
+  }
 }
 
 // ============================================================
@@ -329,12 +830,13 @@ function collectAnschrift() {
     nummer:   document.getElementById('fieldNummer').value.trim(),
     plz:      document.getElementById('fieldPlz').value.trim(),
     ort:      document.getElementById('fieldOrt').value.trim(),
-    bauherr:  document.getElementById('fieldBauherr').value.trim()
+    bauherr:  document.getElementById('fieldBauherr').value.trim(),
+    telefon:  document.getElementById('fieldTelefon').value.trim()
   };
 }
 
 function collectGeruesttyp() {
-  const active = document.querySelector('.type-btn.active');
+  const active = document.querySelector('#geruesttypSelector .type-btn.active');
   return active ? active.dataset.type : 'fassade';
 }
 
@@ -366,11 +868,17 @@ function setLogistikToggle(id, active) {
 }
 
 function collectLogistik() {
-  const anfahrtVal = parseNum(document.getElementById('fieldAnfahrtKm')?.value);
+  const anfahrtVal     = parseNum(document.getElementById('fieldAnfahrtKm')?.value);
+  const transportVal   = parseNum(document.getElementById('fieldTransportM')?.value);
+  const hoehenmeterVal = parseNum(document.getElementById('fieldHoehenmeter')?.value);
+  const treppenVal     = parseNum(document.getElementById('fieldTreppen')?.value);
   return {
     anfahrtKm:              isNaN(anfahrtVal) ? null : anfahrtVal,
     untergrund:             document.getElementById('fieldUntergrund')?.value.trim()         || '',
     stellflaecheNotiz:      document.getElementById('fieldStellflaecheNotiz')?.value.trim()  || '',
+    transportM:             isNaN(transportVal)   ? null : transportVal,
+    hoehenmeter:            isNaN(hoehenmeterVal) ? null : hoehenmeterVal,
+    treppen:                isNaN(treppenVal)     ? null : treppenVal,
     oeffentlicherGrund:     document.getElementById('toggleOeffentlich')?.dataset.active === '1',
     verkehrssicherung:      document.getElementById('toggleVerkehr')?.dataset.active    === '1',
     genehmigungErforderlich:document.getElementById('toggleGenehmigung')?.dataset.active === '1'
@@ -382,6 +890,9 @@ function loadLogistik(l) {
   document.getElementById('fieldAnfahrtKm').value         = l.anfahrtKm != null ? l.anfahrtKm : '';
   document.getElementById('fieldUntergrund').value        = l.untergrund        || '';
   document.getElementById('fieldStellflaecheNotiz').value = l.stellflaecheNotiz || '';
+  document.getElementById('fieldTransportM').value        = l.transportM   != null ? l.transportM   : '';
+  document.getElementById('fieldHoehenmeter').value       = l.hoehenmeter  != null ? l.hoehenmeter  : '';
+  document.getElementById('fieldTreppen').value           = l.treppen      != null ? l.treppen      : '';
   setLogistikToggle('toggleOeffentlich', l.oeffentlicherGrund);
   setLogistikToggle('toggleVerkehr',     l.verkehrssicherung);
   setLogistikToggle('toggleGenehmigung', l.genehmigungErforderlich);
@@ -417,23 +928,23 @@ function collectSeiten() {
         const lV   = parseNum(mRow.querySelector('.messung-laenge')?.value);
         const hV   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
         const h2V  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const lP2  = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active')  || false;
-        const hP2  = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')   || false;
-        const hP22 = mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active')  || false;
+        const lZ   = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+        const hZ   = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+        const h2Z  = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
         messungen.push({
-          id:           genId('m'),
-          laenge:       isNaN(lV)  ? null : lV,
-          laengePlus2:  lP2,
-          hoehe:        isNaN(hV)  ? null : hV,
-          hoehePlus2:   hP2,
-          hoehe2:       isNaN(h2V) ? null : h2V,
-          hoehe2Plus2:  hP22
+          id:             genId('m'),
+          laenge:         isNaN(lV)  ? null : lV,
+          laengeZuschlag: lZ > 0 ? lZ : null,
+          hoehe:          isNaN(hV)  ? null : hV,
+          hoeheZuschlag:  hZ > 0 ? hZ : null,
+          hoehe2:         isNaN(h2V) ? null : h2V,
+          hoehe2Zuschlag: h2Z > 0 ? h2Z : null
         });
       });
       abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
     });
 
-    // Konsolen
+    // Konsolen (mehrere Lagen je Seite moeglich)
     const konsolen = [];
     card.querySelectorAll('.acc-konsole-list .acc-multi-row').forEach(row => {
       const activeTypBtn = row.querySelector('.konsole-btn.active');
@@ -444,11 +955,12 @@ function collectSeiten() {
       konsolen.push({
         typ:    activeTypBtn.dataset.typ,
         laenge: isNaN(len) ? null : len,
-        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false,
+        lage:   collectLage(row)
       });
     });
 
-    // Innengeländer
+    // Innengeländer (mehrere Lagen je Seite moeglich)
     const innengelaender = [];
     card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
       const l1Btn  = row.querySelector('.accessory-l1-btn');
@@ -456,7 +968,8 @@ function collectSeiten() {
       const len    = lenInp ? parseNum(lenInp.value) : NaN;
       innengelaender.push({
         laenge: isNaN(len) ? null : len,
-        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false
+        autoL1: l1Btn ? l1Btn.dataset.active === '1' : false,
+        lage:   collectLage(row)
       });
     });
 
@@ -476,11 +989,16 @@ function collectSeiten() {
     const ksInp  = card.querySelector('.ks-input');
     const ksVal  = ksInp ? parseNum(ksInp.value) : NaN;
 
+    const wandabstandVal = parseNum(card.querySelector('.seite-wandabstand')?.value);
+    const wdvsVal        = parseNum(card.querySelector('.seite-wdvs')?.value);
+
     result.push({
       id:               card.dataset.sideId,
       name:             sel ? sel.value : '',
       manualName:       manual ? manual.value.trim() : '',
       abschnitte,
+      wandabstand:      isNaN(wandabstandVal) ? null : wandabstandVal,
+      wdvs:             isNaN(wdvsVal) ? null : wdvsVal,
       konsolen,
       innengelaender,
       dachfang:          collectSingleToggle('df'),
@@ -501,30 +1019,69 @@ function collectSeiten() {
 //  Speichern / Löschen
 // ============================================================
 
+/** Liest den kompletten Formularzustand ein und schreibt ihn in das Projekt
+ *  (mutiert proj direkt – die 2D-Zeichnung des 2D-Zeichners bleibt unberührt).
+ *  Wird sowohl vom manuellen "Speichern" als auch vom Auto-Save genutzt. */
+function collectProjectFromForm(proj) {
+  proj.name              = document.getElementById('fieldProjektname').value.trim();
+  proj.status            = collectProjectStatus();
+  proj.anschrift         = collectAnschrift();
+  proj.geruesttyp        = collectGeruesttyp();
+  proj.geruesttypName    = document.getElementById('fieldSonderName').value.trim();
+  proj.seiten            = collectSeiten();
+  proj.technik           = collectTechnik();
+  proj.logistik          = collectLogistik();
+  proj.zusatzpositionen  = collectZusatzpositionen();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+}
+
 function saveCurrentProject() {
   const proj = getCurrentProject();
   if (!proj) return;
-
-  proj.anschrift        = collectAnschrift();
-  proj.geruesttyp       = collectGeruesttyp();
-  proj.geruesttypName   = document.getElementById('fieldSonderName').value.trim();
-  proj.seiten           = collectSeiten();
-  proj.technik          = collectTechnik();
-  proj.logistik         = collectLogistik();
-  proj.zusatzpositionen = collectZusatzpositionen();
-  proj.geaendert = new Date().toISOString().slice(0, 10);
-  document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
+  collectProjectFromForm(proj);
+  document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
   saveProjects();
   showToast('Gespeichert');
 }
 
+// Automatisches Speichern: jede Änderung im Projektbildschirm wird gebündelt
+// (700ms nach der letzten Änderung) automatisch übernommen – ohne Toast, ohne
+// Tippen auf "Speichern". Beim Wiederöffnen eines Projekts steht so immer der
+// zuletzt bearbeitete Stand zur Verfügung.
+let autosaveTimer = null;
+function scheduleAutosave() {
+  if (!currentProjectId) return;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    const proj = getCurrentProject();
+    if (!proj) return;
+    collectProjectFromForm(proj);
+    document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
+    saveProjects();
+  }, 700);
+}
+
+function flushAutosave() {
+  if (!autosaveTimer) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = null;
+  const proj = getCurrentProject();
+  if (!proj) return;
+  collectProjectFromForm(proj);
+  saveProjects();
+}
+
 function deleteCurrentProject() {
   if (!currentProjectId) return;
-  if (!confirm('Dieses Projekt wirklich loschen?')) return;
+  if (!confirm('Dieses Projekt wirklich löschen?')) return;
   projects = projects.filter(p => p.id !== currentProjectId);
   saveProjects();
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === currentProjectId) {
+    localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+  }
   currentProjectId = null;
-  renderProjectList();
+  renderProjectOverview();
   showScreen('homeScreen');
 }
 
@@ -646,6 +1203,36 @@ function createSeiteCard(seiteData) {
   nameRow.appendChild(nameSelect);
   nameRow.appendChild(manualInput);
 
+  // Wandabstand & WDVS
+  function makeSideMetaField(labelText, unitText, inputClass, initVal) {
+    const wrap = document.createElement('div');
+    wrap.className = 'wand-wdvs-field';
+    const lab = document.createElement('span');
+    lab.className = 'wand-wdvs-label';
+    lab.textContent = labelText;
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.className = inputClass;
+    inp.step = '0.01';
+    inp.min = '0';
+    inp.inputMode = 'decimal';
+    inp.placeholder = '0,00';
+    if (initVal !== null && initVal !== undefined && !isNaN(initVal)) inp.value = initVal;
+    inp.addEventListener('input', mainOnChange);
+    const unit = document.createElement('span');
+    unit.className = 'wand-wdvs-unit';
+    unit.textContent = unitText;
+    wrap.appendChild(lab);
+    wrap.appendChild(inp);
+    wrap.appendChild(unit);
+    return wrap;
+  }
+
+  const wandWdvsRow = document.createElement('div');
+  wandWdvsRow.className = 'wand-wdvs-row';
+  wandWdvsRow.appendChild(makeSideMetaField('Wandabstand', 'm',  'seite-wandabstand', seiteData.wandabstand));
+  wandWdvsRow.appendChild(makeSideMetaField('WDVS',        'cm', 'seite-wdvs',        seiteData.wdvs));
+
   // Abschnitte
   const abschnittSection = createAbschnittSection(seiteData, mainOnChange);
 
@@ -709,6 +1296,7 @@ function createSeiteCard(seiteData) {
   footer.appendChild(removeBtn);
 
   body.appendChild(nameRow);
+  body.appendChild(wandWdvsRow);
   body.appendChild(abschnittSection);
   body.appendChild(ksRow);
   body.appendChild(accSectionRef);
@@ -809,6 +1397,9 @@ function createAbschnittRow(data, container, onChange) {
     messungenList.querySelectorAll('.messung-hoehe').forEach(el => {
       el.placeholder = isGiebel ? 'H1 (Rinne)' : 'H';
     });
+    messungenList.querySelectorAll('.meas-field-h .meas-field-tag').forEach(tag => {
+      tag.textContent = isGiebel ? 'H1' : 'H';
+    });
     refreshAbschnittCalc();
     onChange();
   });
@@ -843,27 +1434,27 @@ function createAbschnittRow(data, container, onChange) {
     let total = 0;
     messungenList.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
       const calcEl = mRow.querySelector('.messung-calc');
-      let lEff = (l || 0) + (lP2 ? 2 : 0);
+      let lEff = (l || 0) + lZ;
       if (ef) lEff = Math.max(lEff, 2.5);
       let f = 0;
       if (!isNaN(l) && lEff > 0) {
         if (isGiebel) {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            const h1Eff = (h  || 0) + hZ;
+            const h2Eff = (h2 || 0) + h2Z;
             if (h2Eff >= h1Eff && h1Eff >= 0) f = round2(lEff * (h1Eff + h2Eff) / 2);
           }
         } else {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            const hEff = (h || 0) + hZ;
             if (hEff > 0) f = round2(lEff * hEff);
           }
         }
@@ -890,12 +1481,7 @@ function createAbschnittRow(data, container, onChange) {
     laengeInp.placeholder = 'L';
     if (mData?.laenge != null && !isNaN(mData.laenge)) laengeInp.value = mData.laenge;
 
-    const laengePlus2 = document.createElement('button');
-    laengePlus2.type = 'button';
-    laengePlus2.className = 'plus2-btn messung-laenge-plus2' + (mData?.laengePlus2 ? ' active' : '');
-    laengePlus2.textContent = '+2m';
-    laengePlus2.addEventListener('click', () => {
-      laengePlus2.classList.toggle('active');
+    const laengeZuschlagCtrl = createZuschlagControl(mData?.laengeZuschlag, 'messung-laenge-zuschlag', () => {
       refreshAbschnittCalc();
       onChange();
     });
@@ -913,12 +1499,7 @@ function createAbschnittRow(data, container, onChange) {
     hoeheInp.placeholder = isGiebelNow ? 'H1 (Rinne)' : 'H';
     if (mData?.hoehe != null && !isNaN(mData.hoehe)) hoeheInp.value = mData.hoehe;
 
-    const hoehePlus2 = document.createElement('button');
-    hoehePlus2.type = 'button';
-    hoehePlus2.className = 'plus2-btn messung-hoehe-plus2' + (mData?.hoehePlus2 ? ' active' : '');
-    hoehePlus2.textContent = '+2m';
-    hoehePlus2.addEventListener('click', () => {
-      hoehePlus2.classList.toggle('active');
+    const hoeheZuschlagCtrl = createZuschlagControl(mData?.hoeheZuschlag, 'messung-hoehe-zuschlag', () => {
       refreshAbschnittCalc();
       onChange();
     });
@@ -930,19 +1511,14 @@ function createAbschnittRow(data, container, onChange) {
 
     const hoehe2Inp = document.createElement('input');
     hoehe2Inp.type = 'number';
-    hoehe2Inp.className = 'messung-hoehe2 giebel-part';
+    hoehe2Inp.className = 'messung-hoehe2';
     hoehe2Inp.step = '0.01';
     hoehe2Inp.min = '0';
     hoehe2Inp.inputMode = 'decimal';
     hoehe2Inp.placeholder = 'H2 (Spitze)';
     if (mData?.hoehe2 != null && !isNaN(mData.hoehe2)) hoehe2Inp.value = mData.hoehe2;
 
-    const hoehe2Plus2 = document.createElement('button');
-    hoehe2Plus2.type = 'button';
-    hoehe2Plus2.className = 'plus2-btn messung-hoehe2-plus2 giebel-part' + (mData?.hoehe2Plus2 ? ' active' : '');
-    hoehe2Plus2.textContent = '+2m';
-    hoehe2Plus2.addEventListener('click', () => {
-      hoehe2Plus2.classList.toggle('active');
+    const hoehe2ZuschlagCtrl = createZuschlagControl(mData?.hoehe2Zuschlag, 'messung-hoehe2-zuschlag giebel-part', () => {
       refreshAbschnittCalc();
       onChange();
     });
@@ -966,14 +1542,19 @@ function createAbschnittRow(data, container, onChange) {
     laengeInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
     hoeheInp.addEventListener('input',  () => { refreshAbschnittCalc(); onChange(); });
 
-    mRow.appendChild(laengeInp);
-    mRow.appendChild(laengePlus2);
+    const laengeField = wrapMeasField('L', laengeInp);
+    const hoeheField  = wrapMeasField(isGiebelNow ? 'H1' : 'H', hoeheInp);
+    hoeheField.classList.add('meas-field-h');
+    const hoehe2Field = wrapMeasField('H2', hoehe2Inp, 'giebel-part');
+
+    mRow.appendChild(laengeField);
+    mRow.appendChild(laengeZuschlagCtrl);
     mRow.appendChild(mulSign);
-    mRow.appendChild(hoeheInp);
-    mRow.appendChild(hoehePlus2);
+    mRow.appendChild(hoeheField);
+    mRow.appendChild(hoeheZuschlagCtrl);
     mRow.appendChild(giebelSep);
-    mRow.appendChild(hoehe2Inp);
-    mRow.appendChild(hoehe2Plus2);
+    mRow.appendChild(hoehe2Field);
+    mRow.appendChild(hoehe2ZuschlagCtrl);
     mRow.appendChild(calcSpan);
     mRow.appendChild(removeMBtn);
     return mRow;
@@ -981,7 +1562,7 @@ function createAbschnittRow(data, container, onChange) {
 
   const initMessungen = (data.messungen && data.messungen.length > 0)
     ? data.messungen
-    : [{ laenge: null, laengePlus2: false, hoehe: null, hoehePlus2: false }];
+    : [{ laenge: null, laengeZuschlag: null, hoehe: null, hoeheZuschlag: null }];
 
   initMessungen.forEach(m => messungenList.appendChild(createMessungRow(m)));
 
@@ -1033,6 +1614,8 @@ function addSide() {
     name:           'Straßenseite',
     manualName:     '',
     abschnitte:     [{ bezeichnung: '', einzelfeld: false, giebel: false, messungen: [] }],
+    wandabstand:       null,
+    wdvs:              null,
     konsolen:          [],
     innengelaender:    [],
     dachfang:          null,
@@ -1098,6 +1681,12 @@ function createZusatzRow(data) {
   });
   einheitSel.value = data?.einheit || 'm';
 
+  // Beim Wählen einer flächenbasierten Art automatisch die passende Einheit setzen
+  artSel.addEventListener('change', () => {
+    const pref = PREFERRED_EINHEIT[artSel.value];
+    if (pref) einheitSel.value = pref;
+  });
+
   // Menge
   const mengeInp = document.createElement('input');
   mengeInp.type = 'number';
@@ -1143,6 +1732,64 @@ function createZusatzRow(data) {
 //  Hilfsfunktionen für Zubehör-Abschnitt
 // ============================================================
 
+// Eindeutige L/H-Kennzeichnung direkt am Eingabefeld (kleines Badge oben links)
+function wrapMeasField(labelText, input, extraClass) {
+  const wrap = document.createElement('div');
+  wrap.className = 'meas-field' + (extraClass ? ' ' + extraClass : '');
+  const tag = document.createElement('span');
+  tag.className = 'meas-field-tag';
+  tag.textContent = labelText;
+  wrap.appendChild(tag);
+  wrap.appendChild(input);
+  wrap._tag = tag;
+  return wrap;
+}
+
+// Individueller Zuschlag ("+Xm"-Taste) für ein einzelnes Maß-Feld (L/H/H2).
+// Antippen aktiviert den Zuschlag mit dem globalen Standardwert; der Wert kann
+// danach jederzeit individuell für genau dieses Feld überschrieben werden.
+function createZuschlagControl(initValue, extraClass, onChange) {
+  const wrap = document.createElement('span');
+  wrap.className = 'zuschlag-ctrl' + (extraClass ? ' ' + extraClass : '');
+
+  const isActive = initValue != null && !isNaN(initValue) && initValue > 0;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'plus2-btn' + (isActive ? ' active' : '');
+
+  const valInp = document.createElement('input');
+  valInp.type = 'number';
+  valInp.className = 'plus2-value-input';
+  valInp.step = '0.1';
+  valInp.min = '0.1';
+  valInp.inputMode = 'decimal';
+  valInp.placeholder = 'm';
+  if (isActive) valInp.value = initValue;
+
+  function refreshVisual() {
+    const active = btn.classList.contains('active');
+    btn.textContent = active ? '+' : ('+' + fmtNum(ueberstandWert) + 'm');
+    btn.title = active ? 'Zuschlag entfernen' : 'Zuschlag hinzufügen (individuell änderbar)';
+    valInp.style.display = active ? '' : 'none';
+  }
+  refreshVisual();
+
+  btn.addEventListener('click', () => {
+    const wasActive = btn.classList.contains('active');
+    btn.classList.toggle('active', !wasActive);
+    if (!wasActive && !valInp.value) valInp.value = ueberstandWert;
+    refreshVisual();
+    if (onChange) onChange();
+  });
+  valInp.addEventListener('input', () => { if (onChange) onChange(); });
+  valInp.addEventListener('click', e => e.stopPropagation());
+
+  wrap.appendChild(btn);
+  wrap.appendChild(valInp);
+  return wrap;
+}
+
 function makeAccLabel(text) {
   const el = document.createElement('span');
   el.className = 'acc-entry-label';
@@ -1179,10 +1826,10 @@ function createAccessoriesSection(seiteData, card, onChange) {
     const firstMRow = firstAbRow.querySelector('.messung-row');
     if (!firstMRow) return null;
     const l   = parseNum(firstMRow.querySelector('.messung-laenge')?.value);
-    const lP2 = firstMRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+    const lZ  = readZuschlag(firstMRow.querySelector('.messung-laenge-zuschlag'));
     const ef  = firstAbRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
     if (isNaN(l)) return null;
-    let lEff = (l || 0) + (lP2 ? 2 : 0);
+    let lEff = (l || 0) + lZ;
     if (ef) lEff = Math.max(lEff, 2.5);
     return lEff > 0 ? round2(lEff) : null;
   }
@@ -1256,6 +1903,77 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return row;
   }
 
+  // Lage/Ebene-Auswahl (wie im 2D-Programm): Alle / 1 Lage / 2 Lagen / freie Anzahl.
+  // Gemeinsam genutzt von Konsolen- und Innengeländer-Zeilen.
+  function createLageWrap(data, onLageChange) {
+    const lageWrap = document.createElement('div');
+    lageWrap.className = 'acc-lage-wrap';
+
+    const lageBtns = document.createElement('div');
+    lageBtns.className = 'acc-lage-btns';
+    const currentLage   = (data && data.lage != null) ? String(data.lage) : 'alle';
+    const isPresetLage  = ['alle', '1', '2'].includes(currentLage);
+
+    const lageFreeInp = document.createElement('input');
+    lageFreeInp.type = 'number';
+    lageFreeInp.className = 'lage-free-input';
+    lageFreeInp.min = '1';
+    lageFreeInp.step = '1';
+    lageFreeInp.inputMode = 'numeric';
+    lageFreeInp.placeholder = 'Anz.';
+    if (!isPresetLage) lageFreeInp.value = currentLage;
+
+    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']].forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lage-btn' + (isPresetLage && currentLage === val ? ' active' : '');
+      b.dataset.lage = val;
+      b.textContent = lbl;
+      b.addEventListener('click', () => {
+        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        lageFreeInp.value = '';
+        onLageChange();
+      });
+      lageBtns.appendChild(b);
+    });
+
+    lageFreeInp.addEventListener('input', () => {
+      if (lageFreeInp.value.trim() !== '') {
+        lageBtns.querySelectorAll('.lage-btn').forEach(x => x.classList.remove('active'));
+      }
+      onLageChange();
+    });
+
+    lageWrap.appendChild(lageBtns);
+    lageWrap.appendChild(lageFreeInp);
+    return lageWrap;
+  }
+
+  // Live-Anzeige "= X,XX m" (Laenge × Lagenzahl) einer Konsolen-/IG-Zeile
+  function createLageCalc() {
+    const calcEl = document.createElement('span');
+    calcEl.className = 'acc-lage-calc';
+    calcEl.style.display = 'none';
+    return calcEl;
+  }
+
+  function updateLageCalc(row) {
+    const calcEl = row.querySelector('.acc-lage-calc');
+    if (!calcEl) return;
+    const inp = row.querySelector('.accessory-length-input');
+    const v   = inp ? parseNum(inp.value) : NaN;
+    const lage = collectLage(row);
+    const n    = lagenAnzahl(lage);
+    if (!isNaN(v) && v > 0 && n && n !== 1) {
+      calcEl.textContent = '= ' + fmtNum(round2(v * n)) + ' m';
+      calcEl.style.display = '';
+    } else {
+      calcEl.textContent = '';
+      calcEl.style.display = 'none';
+    }
+  }
+
   // Konsolen
   const konsoleTitleRow = document.createElement('div');
   konsoleTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
@@ -1268,7 +1986,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
   konsoleList.className = 'acc-multi-list acc-konsole-list';
 
   const konsoleTotalEl = document.createElement('div');
-  konsoleTotalEl.className = 'konsole-total';
+  konsoleTotalEl.className = 'acc-multi-total';
   konsoleTotalEl.style.display = 'none';
 
   function refreshKonsoleTotal() {
@@ -1276,7 +1994,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
     konsoleList.querySelectorAll('.acc-multi-row').forEach(r => {
       const inp = r.querySelector('.accessory-length-input');
       const v = inp ? parseNum(inp.value) : NaN;
-      if (!isNaN(v) && v > 0) { total += v; hasAny = true; }
+      updateLageCalc(r);
+      if (!isNaN(v) && v > 0) { total += effektiveLaenge(v, collectLage(r)); hasAny = true; }
     });
     if (hasAny) {
       konsoleTotalEl.textContent = 'Gesamt: ' + fmtNum(round2(total)) + ' m';
@@ -1296,22 +2015,36 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
     const typeBtns = document.createElement('div');
     typeBtns.className = 'acc-type-btns';
-    ['0', '30', '50', '70', '109'].forEach(typ => {
+
+    function makeKonsoleTypeBtn(typVal, label, isDachfangBtn, title) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'konsole-btn' + (data && data.typ === typ ? ' active' : '');
-      btn.dataset.typ = typ;
-      btn.textContent = typ;
+      btn.className = 'konsole-btn' + (isDachfangBtn ? ' konsole-btn-df' : '') + (data && data.typ === typVal ? ' active' : '');
+      btn.dataset.typ = typVal;
+      btn.textContent = label;
+      if (title) btn.title = title;
       btn.addEventListener('click', () => {
         const wasActive = btn.classList.contains('active');
         typeBtns.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
         if (!wasActive) btn.classList.add('active');
         onChange();
       });
-      typeBtns.appendChild(btn);
+      return btn;
+    }
+
+    KONSOLE_TYPES.forEach(typ => {
+      typeBtns.appendChild(makeKonsoleTypeBtn(typ, typ, false));
+      // Bei Konsole 0,50 zusätzlich die Sonder-Variante "Dachfang" anbieten
+      // (intern weiterhin Konsole 0,50, aber separat gekennzeichnet).
+      if (typ === '50') {
+        typeBtns.appendChild(makeKonsoleTypeBtn(KONSOLE_DACHFANG_TYP, 'DF', true, 'Dachfang (Konsole 0,50)'));
+      }
     });
 
-    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+    const lenWrap  = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+    const lageWrap = createLageWrap(data, onChange);
+    const calcEl   = createLageCalc();
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'meas-remove-btn';
@@ -1320,6 +2053,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
     row.appendChild(typeBtns);
     row.appendChild(lenWrap);
+    row.appendChild(lageWrap);
+    row.appendChild(calcEl);
     row.appendChild(removeBtn);
     konsoleList.appendChild(row);
   }
@@ -1336,7 +2071,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
   section.appendChild(konsoleList);
   section.appendChild(konsoleTotalEl);
 
-  // Innengeländer
+  // Innengeländer – UI 1:1 wie bei den Konsolen (Laenge + Lage/Ebene-Auswahl,
+  // die Laenge wird bei konkreter Lagenzahl automatisch multipliziert)
   const igTitleRow = document.createElement('div');
   igTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
   const igLbl = document.createElement('span');
@@ -1347,17 +2083,48 @@ function createAccessoriesSection(seiteData, card, onChange) {
   const igList = document.createElement('div');
   igList.className = 'acc-multi-list acc-ig-list';
 
+  const igTotalEl = document.createElement('div');
+  igTotalEl.className = 'acc-multi-total';
+  igTotalEl.style.display = 'none';
+
+  function refreshIgTotal() {
+    let total = 0, hasAny = false;
+    igList.querySelectorAll('.acc-multi-row').forEach(r => {
+      const inp = r.querySelector('.accessory-length-input');
+      const v = inp ? parseNum(inp.value) : NaN;
+      updateLageCalc(r);
+      if (!isNaN(v) && v > 0) { total += effektiveLaenge(v, collectLage(r)); hasAny = true; }
+    });
+    if (hasAny) {
+      igTotalEl.textContent = 'Gesamt: ' + fmtNum(round2(total)) + ' m';
+      igTotalEl.style.display = '';
+    } else {
+      igTotalEl.textContent = '';
+      igTotalEl.style.display = 'none';
+    }
+  }
+
+  igList.addEventListener('input', refreshIgTotal);
+  igList.addEventListener('click', () => requestAnimationFrame(refreshIgTotal));
+
   function addIgRow(data) {
     const row = document.createElement('div');
     row.className = 'acc-multi-row';
     row.appendChild(makeAccLabel('IG'));
-    const lenWrap = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 || false) : false);
+
+    const lenWrap  = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
+    const lageWrap = createLageWrap(data, onChange);
+    const calcEl   = createLageCalc();
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'meas-remove-btn';
     removeBtn.innerHTML = '&times;';
-    removeBtn.addEventListener('click', () => { row.remove(); onChange(); });
+    removeBtn.addEventListener('click', () => { row.remove(); refreshIgTotal(); onChange(); });
+
     row.appendChild(lenWrap);
+    row.appendChild(lageWrap);
+    row.appendChild(calcEl);
     row.appendChild(removeBtn);
     igList.appendChild(row);
   }
@@ -1366,11 +2133,13 @@ function createAccessoriesSection(seiteData, card, onChange) {
     ? seiteData.innengelaender
     : (seiteData.innengelaender ? [seiteData.innengelaender] : []);
   igInit.forEach(ig => addIgRow(ig));
+  refreshIgTotal();
 
-  const addIgBtn = makeAddBtn('+ IG', () => { addIgRow(null); onChange(); });
+  const addIgBtn = makeAddBtn('+ IG', () => { addIgRow(null); refreshIgTotal(); onChange(); });
   igTitleRow.appendChild(addIgBtn);
   section.appendChild(igTitleRow);
   section.appendChild(igList);
+  section.appendChild(igTotalEl);
 
   // Einzelne Zubehör
   section.appendChild(createSingleAcc('df', 'Dachfang (DF)',          seiteData.dachfang          || null));
@@ -1462,6 +2231,15 @@ function updateSummary() {
     let seitenFlaeche = 0;
     const detailParts = [];
 
+    const wandabstandVal = parseNum(card.querySelector('.seite-wandabstand')?.value);
+    const wdvsVal        = parseNum(card.querySelector('.seite-wdvs')?.value);
+    if (!isNaN(wandabstandVal) || !isNaN(wdvsVal)) {
+      const metaParts = [];
+      if (!isNaN(wandabstandVal)) metaParts.push('Wandabstand ' + fmtNum(wandabstandVal) + ' m');
+      if (!isNaN(wdvsVal))        metaParts.push('WDVS ' + fmtNum(wdvsVal) + ' cm');
+      detailParts.push(metaParts.join(' · '));
+    }
+
     card.querySelectorAll('.abschnitt-row').forEach(abRow => {
       const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
       const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
@@ -1469,20 +2247,20 @@ function updateSummary() {
       let abFlaeche  = 0;
       abRow.querySelectorAll('.messung-row').forEach(mRow => {
         const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-        const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-        let lEff  = (l || 0) + (lP2 ? 2 : 0);
+        const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+        let lEff  = (l || 0) + lZ;
         if (ef) lEff = Math.max(lEff, 2.5);
         if (isNaN(l) || lEff <= 0) return;
         const bezPfx = bez ? bez + ': ' : '';
         const efStr  = ef && (l || 0) < 2.5 ? ' (EF)' : '';
         if (isGiebel) {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? 2 : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? 2 : 0);
+            const h1Eff = (h  || 0) + hZ;
+            const h2Eff = (h2 || 0) + h2Z;
             if (h2Eff >= h1Eff && h1Eff >= 0) {
               const pair = round2(lEff * (h1Eff + h2Eff) / 2);
               abFlaeche += pair;
@@ -1491,9 +2269,9 @@ function updateSummary() {
           }
         } else {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? 2 : 0);
+            const hEff = (h || 0) + hZ;
             if (hEff > 0) {
               const pair = round2(lEff * hEff);
               abFlaeche += pair;
@@ -1513,12 +2291,18 @@ function updateSummary() {
       if (!activeTypBtn) return;
       const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('K ' + activeTypBtn.dataset.typ + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      const lage = collectLage(row);
+      const lageStr = lageLabel(lage);
+      const eff = (!isNaN(v) && v > 0) ? effektiveLaenge(v, lage) : null;
+      detailParts.push(konsoleTypLabel(activeTypBtn.dataset.typ, true) + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
     });
     card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
       const lenInp = row.querySelector('.accessory-length-input');
       const v = lenInp ? parseNum(lenInp.value) : NaN;
-      detailParts.push('IG' + (!isNaN(v) && v > 0 ? ': ' + fmtNum(v) + ' m' : ''));
+      const lage = collectLage(row);
+      const lageStr = lageLabel(lage);
+      const eff = (!isNaN(v) && v > 0) ? effektiveLaenge(v, lage) : null;
+      detailParts.push('IG' + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
     });
     [{ acc: 'df', label: 'DF', unit: 'm' }, { acc: 'gt', label: 'GT', unit: 'm' }, { acc: 'ft', label: 'FT', unit: 'm' }, { acc: 'ne', label: 'NE', unit: 'm²' }].forEach(({ acc, label, unit }) => {
       const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
@@ -1576,6 +2360,20 @@ function updateSummary() {
   const ankerAnzahl = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
   if (!isNaN(ankerAnzahl) && ankerAnzahl > 0) {
     html += `<tr><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">Ankeranzahl</td><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">${ankerAnzahl} Stk.</td></tr>`;
+  }
+
+  // Transport / Laufaufwand (für die spätere Kalkulation im Büro)
+  const lg = collectLogistik();
+  const effortRows = [
+    lg.transportM  != null ? ['Laufweg LKW → Objekt', fmtNum(lg.transportM) + ' m'] : null,
+    lg.hoehenmeter != null ? ['Höhenmeter',           fmtNum(lg.hoehenmeter) + ' m'] : null,
+    lg.treppen     != null ? ['Treppen / Stockwerke', String(lg.treppen)] : null
+  ].filter(Boolean);
+  if (effortRows.length > 0) {
+    html += `<tr><td colspan="2" style="padding-top:10px;font-size:0.72rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--color-border);">Transport / Laufaufwand</td></tr>`;
+    effortRows.forEach(([label, val]) => {
+      html += `<tr><td><span class="summary-side-name" style="font-size:0.88rem">${label}</span></td><td>${val}</td></tr>`;
+    });
   }
 
   html += '</table>';
@@ -1722,6 +2520,7 @@ function generatePDF() {
   ].filter(Boolean).join(', ');
   if (addrLine)           { doc.setFontSize(10); doc.text(addrLine, LM, y); y += 5; }
   if (anschrift.bauherr)  { doc.setFontSize(10); doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 5; }
+  if (anschrift.telefon)  { doc.setFontSize(10); doc.text('Telefon: ' + anschrift.telefon, LM, y); y += 5; }
   doc.setFontSize(10); doc.text(geruesttypLabel, LM, y); y += 5;
   y += 2;
 
@@ -1730,7 +2529,7 @@ function generatePDF() {
   secHead('Gerüstfläche');
 
   let totalArea = 0;
-  const totals = { konsolen: {}, ig: 0, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
+  const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
 
   seiten.forEach((seite, idx) => {
     const name = seite.name === '__manual__' ? seite.manualName : seite.name;
@@ -1742,19 +2541,29 @@ function generatePDF() {
     doc.setFont(undefined, 'normal');
     y += 6;
 
+    if (seite.wandabstand != null || seite.wdvs != null) {
+      const metaParts = [];
+      if (seite.wandabstand != null) metaParts.push('Wandabstand ' + fmtNum(seite.wandabstand) + ' m');
+      if (seite.wdvs != null)        metaParts.push('WDVS ' + fmtNum(seite.wdvs) + ' cm');
+      chk(6);
+      doc.setFontSize(9);
+      doc.text(metaParts.join('   '), IND + 3, y);
+      y += 5;
+    }
+
     let seitenFlaeche = 0;
     (seite.abschnitte || []).forEach(a => {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
       (a.messungen || []).forEach(m => {
-        let lEff = (m.laenge || 0) + (m.laengePlus2 ? 2 : 0);
+        let lEff = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
         if (lEff <= 0) return;
         const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
         const efStr  = ef ? ' (EF)' : '';
         if (isGiebel) {
-          const h1Eff = (m.hoehe  || 0) + (m.hoehePlus2  ? 2 : 0);
-          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? 2 : 0);
+          const h1Eff = (m.hoehe  || 0) + (m.hoeheZuschlag  > 0 ? m.hoeheZuschlag  : 0);
+          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Zuschlag > 0 ? m.hoehe2Zuschlag : 0);
           if (h2Eff < h1Eff || h1Eff < 0) return;
           const pair = round2(lEff * (h1Eff + h2Eff) / 2);
           seitenFlaeche += pair;
@@ -1764,7 +2573,7 @@ function generatePDF() {
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
-          const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? 2 : 0);
+          const hEff = (m.hoehe || 0) + (m.hoeheZuschlag > 0 ? m.hoeheZuschlag : 0);
           if (hEff <= 0) return;
           const pair = round2(lEff * hEff);
           seitenFlaeche += pair;
@@ -1787,16 +2596,24 @@ function generatePDF() {
       y += 5;
     }
 
-    // Zubehör-Totals sammeln
+    // Zubehör-Totals sammeln. Konsolen werden ausschließlich nach Typ
+    // zusammengefasst (unabhängig von Lage/Ebene und Seite), damit jeder
+    // Konsolentyp (inkl. Dachfang-Variante von 0,50) nur einmal mit der
+    // Gesamtanzahl in der Materialübersicht erscheint.
     if (Array.isArray(seite.konsolen)) {
       seite.konsolen.forEach(k => {
-        if (k.laenge !== null && !isNaN(k.laenge))
-          totals.konsolen[k.typ] = (totals.konsolen[k.typ] || 0) + k.laenge;
+        if (k.laenge !== null && !isNaN(k.laenge)) {
+          const key = k.typ;
+          totals.konsolen[key] = (totals.konsolen[key] || 0) + effektiveLaenge(k.laenge, k.lage);
+        }
       });
     }
     if (Array.isArray(seite.innengelaender)) {
       seite.innengelaender.forEach(ig => {
-        if (ig.laenge !== null && !isNaN(ig.laenge)) totals.ig += ig.laenge;
+        if (ig.laenge !== null && !isNaN(ig.laenge)) {
+          const key = ig.lage || 'alle';
+          totals.ig[key] = (totals.ig[key] || 0) + effektiveLaenge(ig.laenge, ig.lage);
+        }
       });
     }
     if (seite.dachfang          && seite.dachfang.laenge          != null) totals.df += seite.dachfang.laenge          || 0;
@@ -1816,16 +2633,24 @@ function generatePDF() {
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
   // ── Positionen ─────────────────────────────────────────────────
-  const kTypen = Object.keys(totals.konsolen).sort((a, b) => Number(a) - Number(b));
-  const hasAcc = kTypen.length > 0 || totals.ig > 0 || totals.df > 0 ||
+  // Konsolen: rein numerisch nach Typ sortiert, Dachfang-Variante (z. B. "50df")
+  // direkt hinter der zugehörigen normalen Konsole (z. B. "50").
+  const kKeys  = Object.keys(totals.konsolen).sort((a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b));
+  const igKeys = Object.keys(totals.ig).sort((a, b) => (a === 'alle' ? -1 : b === 'alle' ? 1 : Number(a) - Number(b)));
+  const hasAcc = kKeys.length > 0 || igKeys.length > 0 || totals.df > 0 ||
     totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
 
   if (hasAcc || zusatz.length > 0) {
     y += 1;
     hline(0.3);
     secHead('Positionen');
-    kTypen.forEach(t => pdfRow('Konsole ' + t + ' cm', fmtNum(round2(totals.konsolen[t])) + ' m'));
-    if (totals.ig > 0) pdfRow('Innengeländer',   fmtNum(round2(totals.ig)) + ' m');
+    kKeys.forEach(key => {
+      pdfRow(konsoleTypLabel(key), fmtNum(round2(totals.konsolen[key])) + ' m');
+    });
+    igKeys.forEach(lage => {
+      const lageStr = lageLabel(lage);
+      pdfRow('Innengeländer' + (lageStr ? ' – ' + lageStr : ''), fmtNum(round2(totals.ig[lage])) + ' m');
+    });
     if (totals.df > 0) pdfRow('Dachfang',        fmtNum(round2(totals.df)) + ' m');
     if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
     if (totals.ft > 0) pdfRow('Fußgängertunnel', fmtNum(round2(totals.ft)) + ' m');
@@ -1840,23 +2665,39 @@ function generatePDF() {
 
   // ── Baustelle / Logistik ──────────────────────────────────────
   const logParts = [
-    logistik.anfahrtKm             ? logistik.anfahrtKm + ' km Anfahrt' : '',
-    logistik.untergrund             ? 'Untergrund: ' + logistik.untergrund : '',
-    logistik.stellflaecheNotiz      ? 'Stellfläche: ' + logistik.stellflaecheNotiz : '',
-    logistik.oeffentlicherGrund     ? 'Öffentlicher Grund' : '',
-    logistik.verkehrssicherung      ? 'Verkehrssicherung' : '',
-    logistik.genehmigungErforderlich? 'Genehmigung erforderlich' : ''
+    logistik.anfahrtKm != null              ? ['Anfahrt',                  fmtNum(logistik.anfahrtKm) + ' km'] : null,
+    logistik.untergrund                     ? ['Untergrund',               logistik.untergrund] : null,
+    logistik.stellflaecheNotiz              ? ['Stellfläche',              logistik.stellflaecheNotiz] : null,
+    logistik.oeffentlicherGrund             ? ['Öffentlicher Grund',       ''] : null,
+    logistik.verkehrssicherung              ? ['Verkehrssicherung',        ''] : null,
+    logistik.genehmigungErforderlich        ? ['Genehmigung erforderlich', ''] : null
   ].filter(Boolean);
 
   if (logParts.length > 0) {
     y += 1;
     hline(0.3);
     secHead('Baustelle / Logistik');
-    logParts.forEach(f => pdfRow(f, ''));
+    logParts.forEach(([label, val]) => pdfRow(label, val));
+  }
+
+  // ── Transport / Laufaufwand (für die Kalkulation) ──────────────
+  // Hinweis: "→" wird von der Standard-PDF-Schrift nicht unterstützt und
+  // erscheint sonst als kaputte Zeichenfolge – daher hier "-" statt Pfeil.
+  const transportParts = [
+    logistik.transportM  != null ? ['Laufweg LKW - Objekt', fmtNum(logistik.transportM)  + ' m'] : null,
+    logistik.hoehenmeter  != null ? ['Höhenmeter',           fmtNum(logistik.hoehenmeter) + ' m'] : null,
+    logistik.treppen      != null ? ['Treppen / Stockwerke', String(logistik.treppen)] : null
+  ].filter(Boolean);
+
+  if (transportParts.length > 0) {
+    y += 1;
+    hline(0.3);
+    secHead('Transport / Laufaufwand');
+    transportParts.forEach(([label, val]) => pdfRow(label, val));
   }
 
   const proj = getCurrentProject();
-  const base = proj ? getProjectLabel(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmaß';
+  const base = proj ? getProjectName(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmaß';
   doc.save((base || 'Aufmaß') + '.pdf');
 }
 
@@ -1867,21 +2708,14 @@ function generatePDF() {
 function exportJson() {
   const proj = getCurrentProject();
   if (!proj) return;
-  proj.anschrift        = collectAnschrift();
-  proj.geruesttyp       = collectGeruesttyp();
-  proj.geruesttypName   = document.getElementById('fieldSonderName').value.trim();
-  proj.seiten           = collectSeiten();
-  proj.technik          = collectTechnik();
-  proj.logistik         = collectLogistik();
-  proj.zusatzpositionen = collectZusatzpositionen();
-  proj.geaendert = new Date().toISOString().slice(0, 10);
+  collectProjectFromForm(proj);
   saveProjects();
 
   const blob = new Blob([JSON.stringify(proj, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url;
-  a.download = (getProjectLabel(proj).replace(/[^a-z0-9]/gi, '_') || 'Aufmaß') + '.json';
+  a.download = (getProjectName(proj).replace(/[^a-z0-9]/gi, '_') || 'Aufmaß') + '.json';
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -1894,6 +2728,7 @@ function handleImportFile(e) {
     try {
       const data = JSON.parse(evt.target.result);
       if (!data.seiten) { alert('Unbekanntes Dateiformat.'); return; }
+      migrateProjectMeta(data);
       const existing = projects.findIndex(p => p.id === data.id);
       if (existing >= 0) {
         projects[existing] = data;
@@ -1915,21 +2750,60 @@ function handleImportFile(e) {
 //  Event-Listener & App-Start
 // ============================================================
 
+function goToOverview() {
+  renderProjectOverview();
+  showScreen('homeScreen');
+}
+
+function open2dViewer() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  flushAutosave();
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, proj.id);
+  window.location.href = 'viewer2d.html';
+}
+
 function initApp() {
   loadProjects();
-  renderProjectList();
-  showScreen('homeScreen');
+  loadFolders();
+
+  // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
+  // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
+  const resumeId = new URLSearchParams(window.location.search).get('resume')
+    ? localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY)
+    : null;
+  if (resumeId && projects.some(p => p.id === resumeId)) {
+    openProject(resumeId);
+  } else {
+    renderProjectOverview();
+    showScreen('homeScreen');
+  }
+
+  loadUeberstandWert();
+  const ueberstandInp = document.getElementById('fieldUeberstandWert');
+  if (ueberstandInp) {
+    ueberstandInp.value = ueberstandWert;
+    ueberstandInp.addEventListener('change', () => {
+      const v = parseNum(ueberstandInp.value);
+      if (isNaN(v) || v <= 0) {
+        ueberstandInp.value = ueberstandWert;
+        return;
+      }
+      setUeberstandWert(v);
+      ueberstandInp.value = ueberstandWert;
+    });
+  }
 
   document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
 
   document.getElementById('backBtn').addEventListener('click', () => {
-    saveCurrentProject();
-    renderProjectList();
-    showScreen('homeScreen');
+    flushAutosave();
+    goToOverview();
   });
 
   document.getElementById('deleteProjectBtn').addEventListener('click', deleteCurrentProject);
   document.getElementById('addSideBtn').addEventListener('click', addSide);
+  document.getElementById('addSideBtnBottom').addEventListener('click', addSide);
   document.getElementById('saveProjectBtn').addEventListener('click', saveCurrentProject);
   document.getElementById('exportPdfBtn').addEventListener('click', generatePDF);
   document.getElementById('calcAnfahrtBtn').addEventListener('click', autoCalcAnfahrt);
@@ -1938,11 +2812,13 @@ function initApp() {
     document.getElementById('importFileInput').click();
   });
   document.getElementById('importFileInput').addEventListener('change', handleImportFile);
+  document.getElementById('open2dBtn')?.addEventListener('click', open2dViewer);
 
   document.getElementById('addZusatzBtn').addEventListener('click', () => {
     const container = document.getElementById('zusatzContainer');
     container.appendChild(createZusatzRow({}));
     refreshNoZusatzHint();
+    scheduleAutosave();
   });
 
   // Logistik-Toggles
@@ -1956,26 +2832,47 @@ function initApp() {
     });
   });
 
-  // Gerüsttyp-Toggle
-  document.querySelectorAll('.type-btn').forEach(btn => {
+  // Gerüsttyp-Toggle (nur innerhalb des Gerüsttyp-Auswahlblocks, nicht den
+  // gleich gestylten, aber unabhängigen Status-Buttons)
+  document.querySelectorAll('#geruesttypSelector .type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#geruesttypSelector .type-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('sonderNameRow').style.display =
         btn.dataset.type === 'sonder' ? '' : 'none';
     });
   });
 
-  // Anschrift Auto-Save
-  ['fieldStrasse', 'fieldNummer', 'fieldPlz', 'fieldOrt', 'fieldBauherr'].forEach(id => {
-    document.getElementById(id).addEventListener('change', () => {
-      const proj = getCurrentProject();
-      if (!proj) return;
-      proj.anschrift = collectAnschrift();
-      proj.geaendert = new Date().toISOString().slice(0, 10);
-      document.getElementById('projectScreenTitle').textContent = getProjectLabel(proj);
-      saveProjects();
+  // Status-Toggle (Projekt-Status)
+  document.querySelectorAll('#statusSelector .status-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#statusSelector .status-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
     });
+  });
+
+  // Automatisches Speichern: jede Eingabe/Änderung/jeder Tastendruck im
+  // Projektbildschirm löst (gebündelt) einen Auto-Save aus – deckt Anschrift,
+  // Technik, Logistik, Hausseiten, Positionen, Projektname & Status ab.
+  const projectScreenEl = document.getElementById('projectScreen');
+  projectScreenEl.addEventListener('input',  scheduleAutosave);
+  projectScreenEl.addEventListener('change', scheduleAutosave);
+  projectScreenEl.addEventListener('click', e => {
+    if (e.target.closest('button')) scheduleAutosave();
+  });
+
+  // Projektübersicht: Suche, Status-Filter, Sortierung
+  document.getElementById('searchInput')?.addEventListener('input', e => {
+    overviewState.search = e.target.value;
+    renderProjectOverview();
+  });
+  document.getElementById('statusFilterSelect')?.addEventListener('change', e => {
+    overviewState.status = e.target.value;
+    renderProjectOverview();
+  });
+  document.getElementById('sortSelect')?.addEventListener('change', e => {
+    overviewState.sort = e.target.value;
+    renderProjectOverview();
   });
 }
 
