@@ -33,8 +33,12 @@
       <button id="uShapeBtn" class="secondary">U-Form</button>
       <button id="rectBtn" class="secondary">Rechteck</button>
     </div>
+    <div class="tool-group stats">
+      <span class="area-readout" id="areaReadout" title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">Gesamtfläche: 0,00 m²</span>
+    </div>
     <div class="tool-group actions">
       <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
+      <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
       <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
       <button id="savePlanBtn" class="secondary">Speichern</button>
       <button id="loadPlanBtn" class="secondary">Laden</button>
@@ -73,11 +77,13 @@
           <button class="empty-add-btn" id="emptyAddBtn">Feld&nbsp;hinzufügen</button>
         </div>
       </div>
-      <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Ansicht zurücksetzen">⟲</button>
+      <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
     </div>
   </div>
 
   <!-- Bay editor popup (injected by JS) -->
+
+  <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="viewer2d.js?v=20260701"></script>

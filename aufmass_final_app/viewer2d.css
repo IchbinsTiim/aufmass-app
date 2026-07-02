@@ -39,6 +39,20 @@
 }
 .tool-group.actions { margin-left: auto; }
 
+.tool-group.stats { align-items: center; }
+.area-readout {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1.5px solid #b9d6fb;
+  color: #0a2f58;
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .tool-label {
   display: flex;
   flex-direction: column;
@@ -677,6 +691,26 @@
   font-weight: 700;
   cursor: pointer;
 }
+.bay-pos-copy,
+.bay-pos-paste {
+  padding: 0.2rem 0.5rem;
+  border: 1.5px solid #8a94a3;
+  border-radius: 999px;
+  background: #f4f5f7;
+  color: #5a6472;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bay-pos-paste:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.bay-pos-paste.active {
+  border-color: #34c759;
+  background: #e9fbee;
+  color: #1d8a3d;
+}
 
 /* Direction button row */
 .sheet-dir-row {
@@ -863,6 +897,27 @@
   cursor: pointer;
 }
 
+.sheet-copy-paste-row { margin-bottom: 0.5rem; }
+.sheet-copy,
+.sheet-paste {
+  flex: 1;
+  min-width: 45%;
+  background: #f4f5f7;
+  color: #5a6472;
+  border: 1.5px solid #8a94a3;
+  padding: 0.65rem 0.6rem;
+  border-radius: 9px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sheet-paste:disabled { opacity: 0.45; cursor: not-allowed; }
+.sheet-paste.active {
+  border-color: #34c759;
+  background: #e9fbee;
+  color: #1d8a3d;
+}
+
 .sheet-ok {
   flex: 1;
   background: #007aff;
@@ -1041,6 +1096,7 @@ body[data-mode="iphone"] #toolbar {
 
 body[data-mode="iphone"] .tool-label input[type="text"] { width: 7rem; }
 body[data-mode="iphone"] #scaffDepth { width: 4rem; }
+body[data-mode="iphone"] .area-readout { padding: 0.35rem 0.5rem; font-size: 0.78rem; }
 
 body[data-mode="iphone"] #appLayout {
   height: calc(100dvh - 120px);
