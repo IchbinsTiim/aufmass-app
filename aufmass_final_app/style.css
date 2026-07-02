@@ -415,12 +415,21 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 8px 10px;
   margin-bottom: 12px;
   background: #f9f9fb;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+}
+
+.ueberstand-setting-hint {
+  width: 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
 }
 
 .ueberstand-setting .form-label {
@@ -931,6 +940,17 @@ html, body {
   border-color: var(--color-primary);
   background: #eff6ff;
   color: var(--color-primary);
+}
+.konsole-btn-df {
+  border-style: dashed;
+  border-color: #e67e22;
+  color: #e67e22;
+}
+.konsole-btn-df.active {
+  border-style: solid;
+  border-color: #e67e22;
+  background: #fff4e6;
+  color: #e67e22;
 }
 .accessory-toggle {
   padding: 10px 14px;
@@ -1687,6 +1707,11 @@ html, body {
   display: block;
 }
 
+/* Zuschlag-Steuerelemente sind inline-flex (Taste + Wert-Feld) statt block */
+.abschnitt-row.giebel-active .zuschlag-ctrl.giebel-part {
+  display: inline-flex;
+}
+
 .giebel-sep {
   font-size: 0.9rem;
   color: #e67e22;
@@ -1711,7 +1736,8 @@ html, body {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex-wrap: nowrap;
+  row-gap: 8px;
+  flex-wrap: wrap;
 }
 
 .messung-laenge,
@@ -1735,6 +1761,13 @@ html, body {
   -webkit-appearance: none;
 }
 
+.zuschlag-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
 .plus2-btn {
   padding: 8px 7px;
   border: 1.5px solid var(--color-border);
@@ -1744,6 +1777,7 @@ html, body {
   background: #f9f9fb;
   color: var(--color-text-secondary);
   min-height: 36px;
+  min-width: 36px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1752,6 +1786,28 @@ html, body {
   border-color: var(--color-primary);
   background: #eff6ff;
   color: var(--color-primary);
+}
+
+.plus2-value-input {
+  width: 46px;
+  padding: 8px 4px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  background: #eff6ff;
+  color: var(--color-primary);
+  -moz-appearance: textfield;
+}
+
+.plus2-value-input::-webkit-outer-spin-button,
+.plus2-value-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.plus2-value-input:focus {
+  background: #fff;
 }
 
 .messung-mul {
@@ -1807,6 +1863,13 @@ html, body {
 
   .plus2-btn {
     padding: 10px;
+    min-height: 44px;
+  }
+
+  .plus2-value-input {
+    width: 56px;
+    padding: 10px 6px;
+    font-size: 0.85rem;
     min-height: 44px;
   }
 }

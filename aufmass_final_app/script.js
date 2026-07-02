@@ -18,7 +18,13 @@ const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 // Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
 const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.' };
 
-// Zuschlag der "+Xm"-Tasten bei den Maßen (Standard 2,00 m, vom Nutzer änderbar)
+// Konsolentypen (Breite in cm) + Sonder-Variante "Dachfang" (intern Konsole 0,50)
+const KONSOLE_TYPES = ['0', '19', '30', '50', '70', '109'];
+const KONSOLE_DACHFANG_TYP = '50df';
+
+// Standard-Zuschlag der "+Xm"-Tasten bei den Maßen (Standard 2,00 m). Dient als
+// Vorschlagswert beim erstmaligen Aktivieren einer Zuschlag-Taste – jedes Feld
+// kann seinen eigenen (individuellen) Zuschlagswert erhalten und behalten.
 const UEBERSTAND_STORAGE_KEY = 'aufmass_ueberstand_wert';
 let ueberstandWert = 2;
 
@@ -31,13 +37,10 @@ function setUeberstandWert(v) {
   if (isNaN(v) || v <= 0) return;
   ueberstandWert = v;
   localStorage.setItem(UEBERSTAND_STORAGE_KEY, String(v));
-  document.querySelectorAll('.plus2-btn').forEach(btn => {
+  // Nur noch inaktive Zuschlag-Tasten zeigen den globalen Standardwert als
+  // Vorschlag an. Bereits aktivierte (individuelle) Zuschläge bleiben unverändert.
+  document.querySelectorAll('.plus2-btn:not(.active)').forEach(btn => {
     btn.textContent = '+' + fmtNum(ueberstandWert) + 'm';
-  });
-  // Bestehende Zeilen mit dem neuen Zuschlag neu berechnen (nutzt die
-  // bereits vorhandenen Input-Listener der Maß-Felder).
-  document.querySelectorAll('.messung-laenge, .messung-hoehe, .messung-hoehe2').forEach(el => {
-    el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   updateSummary();
 }
@@ -140,6 +143,33 @@ function effektiveLaenge(laenge, lage) {
   return n ? laenge * n : laenge;
 }
 
+// Aktiven, individuellen Zuschlagwert (m) eines Zuschlag-Steuerelements (DOM)
+// auslesen. 0 = Zuschlag nicht aktiv.
+function readZuschlag(wrapEl) {
+  if (!wrapEl) return 0;
+  const btn = wrapEl.querySelector('.plus2-btn');
+  if (!btn || !btn.classList.contains('active')) return 0;
+  const inp = wrapEl.querySelector('.plus2-value-input');
+  const v = inp ? parseNum(inp.value) : NaN;
+  return (!isNaN(v) && v > 0) ? v : ueberstandWert;
+}
+
+// Konsolentyp (cm-Code, ggf. mit "df"-Suffix für Dachfang) → Meterangabe "0,30"
+function konsoleTypMeter(typ) {
+  const base = String(typ).replace(/[^0-9]/g, '');
+  const n = parseFloat(base);
+  return isNaN(n) ? base : (n / 100).toFixed(2).replace('.', ',');
+}
+
+// Anzeigetext für einen Konsolentyp. short=true → kompaktes App-Präfix ("K"/"DF"),
+// sonst der volle PDF-Text ("Konsole 0,30" / "DF / Konsole 0,50").
+function konsoleTypLabel(typ, short) {
+  const isDachfang = String(typ).endsWith('df');
+  const meter = konsoleTypMeter(typ);
+  if (short) return (isDachfang ? 'DF ' : 'K ') + meter;
+  return (isDachfang ? 'DF / Konsole ' : 'Konsole ') + meter;
+}
+
 function getSeiteName(seite) {
   if (seite.name === '__manual__') return seite.manualName || 'Unbenannte Seite';
   return seite.name || 'Unbenannte Seite';
@@ -152,15 +182,15 @@ function berechneAbschnitt(abschnitt) {
   const isGiebel = abschnitt.giebel    || false;
   let flaeche = 0;
   for (const m of (abschnitt.messungen || [])) {
-    let l = (m.laenge || 0) + (m.laengePlus2 ? ueberstandWert : 0);
+    let l = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
     if (ef) l = Math.max(l, 2.5);
     if (l <= 0) continue;
     if (isGiebel) {
-      const h1 = (m.hoehe  || 0) + (m.hoehePlus2  ? ueberstandWert : 0);
-      const h2 = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? ueberstandWert : 0);
+      const h1 = (m.hoehe  || 0) + (m.hoeheZuschlag  > 0 ? m.hoeheZuschlag  : 0);
+      const h2 = (m.hoehe2 || 0) + (m.hoehe2Zuschlag > 0 ? m.hoehe2Zuschlag : 0);
       if (h2 >= h1 && h1 >= 0) flaeche += l * (h1 + h2) / 2;
     } else {
-      const h = (m.hoehe || 0) + (m.hoehePlus2 ? ueberstandWert : 0);
+      const h = (m.hoehe || 0) + (m.hoeheZuschlag > 0 ? m.hoeheZuschlag : 0);
       if (h > 0) flaeche += l * h;
     }
   }
@@ -175,25 +205,25 @@ function computeCardFlaeche(card) {
     const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
     abRow.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-      let lEff  = (l || 0) + (lP2 ? ueberstandWert : 0);
+      const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+      let lEff  = (l || 0) + lZ;
       if (ef) lEff = Math.max(lEff, 2.5);
       if (isNaN(l) || lEff <= 0) return;
       if (isGiebel) {
         const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
         const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+        const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
         if (!isNaN(h) && !isNaN(h2)) {
-          const h1Eff = (h  || 0) + (hP2  ? ueberstandWert : 0);
-          const h2Eff = (h2 || 0) + (hP22 ? ueberstandWert : 0);
+          const h1Eff = (h  || 0) + hZ;
+          const h2Eff = (h2 || 0) + h2Z;
           if (h2Eff >= h1Eff && h1Eff >= 0) total += lEff * (h1Eff + h2Eff) / 2;
         }
       } else {
         const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+        const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
         if (!isNaN(h)) {
-          const hEff = (h || 0) + (hP2 ? ueberstandWert : 0);
+          const hEff = (h || 0) + hZ;
           if (hEff > 0) total += lEff * hEff;
         }
       }
@@ -202,10 +232,37 @@ function computeCardFlaeche(card) {
   return round2(total);
 }
 
-// Migration alter Projekte → Schema 2.1 (messungen je Abschnitt)
+// Migration eines alten Boolean-Zuschlags ("+2m"-Taste an/aus) auf den neuen
+// individuellen, numerischen Zuschlagwert je Feld (Schema 2.2).
+function migrateMessung(m) {
+  const out = { ...m };
+  if (out.laengeZuschlag === undefined) {
+    out.laengeZuschlag = out.laengePlus2 ? ueberstandWert : null;
+  }
+  if (out.hoeheZuschlag === undefined) {
+    out.hoeheZuschlag = out.hoehePlus2 ? ueberstandWert : null;
+  }
+  if (out.hoehe2Zuschlag === undefined) {
+    out.hoehe2Zuschlag = out.hoehe2Plus2 ? ueberstandWert : null;
+  }
+  delete out.laengePlus2;
+  delete out.hoehePlus2;
+  delete out.hoehe2Plus2;
+  return out;
+}
+
+// Migration alter Projekte → Schema 2.2 (messungen je Abschnitt, individueller Zuschlag)
 function migrateSeite(seite) {
-  // Bereits v2.1 (hat messungen)
-  if (seite.abschnitte && seite.abschnitte.length > 0 && seite.abschnitte[0].messungen) return seite;
+  // Bereits v2.1+ (hat messungen) → nur noch Zuschlag-Felder je Messung migrieren
+  if (seite.abschnitte && seite.abschnitte.length > 0 && seite.abschnitte[0].messungen) {
+    return {
+      ...seite,
+      abschnitte: seite.abschnitte.map(a => ({
+        ...a,
+        messungen: (a.messungen || []).map(migrateMessung)
+      }))
+    };
+  }
 
   // v2.0: abschnitte mit laenge/hoeheBisBelag, aber noch ohne messungen
   if (seite.abschnitte && seite.abschnitte.length > 0) {
@@ -216,11 +273,11 @@ function migrateSeite(seite) {
         bezeichnung: a.bezeichnung || '',
         einzelfeld:  a.einzelfeld  || false,
         messungen: [{
-          id:          genId('m'),
-          laenge:      a.laenge      ?? null,
-          laengePlus2: false,
-          hoehe:       a.hoeheBisBelag ?? null,
-          hoehePlus2:  false
+          id:             genId('m'),
+          laenge:         a.laenge      ?? null,
+          laengeZuschlag: null,
+          hoehe:          a.hoeheBisBelag ?? null,
+          hoeheZuschlag:  null
         }]
       }))
     };
@@ -242,13 +299,13 @@ function migrateSeite(seite) {
     const eff = round2((l.wert || 0) + ex);
     return {
       id: genId('ab'), bezeichnung: '', einzelfeld: false,
-      messungen: [{ id: genId('m'), laenge: eff > 0 ? eff : null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+      messungen: [{ id: genId('m'), laenge: eff > 0 ? eff : null, laengeZuschlag: null, hoehe: avgHoehe, hoeheZuschlag: null }]
     };
   });
   if (abschnitte.length === 0) {
     abschnitte.push({
       id: genId('ab'), bezeichnung: '', einzelfeld: false,
-      messungen: [{ id: genId('m'), laenge: null, laengePlus2: false, hoehe: avgHoehe, hoehePlus2: false }]
+      messungen: [{ id: genId('m'), laenge: null, laengeZuschlag: null, hoehe: avgHoehe, hoeheZuschlag: null }]
     });
   }
   return { ...seite, abschnitte };
@@ -483,17 +540,17 @@ function collectSeiten() {
         const lV   = parseNum(mRow.querySelector('.messung-laenge')?.value);
         const hV   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
         const h2V  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const lP2  = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active')  || false;
-        const hP2  = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')   || false;
-        const hP22 = mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active')  || false;
+        const lZ   = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+        const hZ   = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+        const h2Z  = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
         messungen.push({
-          id:           genId('m'),
-          laenge:       isNaN(lV)  ? null : lV,
-          laengePlus2:  lP2,
-          hoehe:        isNaN(hV)  ? null : hV,
-          hoehePlus2:   hP2,
-          hoehe2:       isNaN(h2V) ? null : h2V,
-          hoehe2Plus2:  hP22
+          id:             genId('m'),
+          laenge:         isNaN(lV)  ? null : lV,
+          laengeZuschlag: lZ > 0 ? lZ : null,
+          hoehe:          isNaN(hV)  ? null : hV,
+          hoeheZuschlag:  hZ > 0 ? hZ : null,
+          hoehe2:         isNaN(h2V) ? null : h2V,
+          hoehe2Zuschlag: h2Z > 0 ? h2Z : null
         });
       });
       abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
@@ -950,27 +1007,27 @@ function createAbschnittRow(data, container, onChange) {
     let total = 0;
     messungenList.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-      const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+      const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
       const calcEl = mRow.querySelector('.messung-calc');
-      let lEff = (l || 0) + (lP2 ? ueberstandWert : 0);
+      let lEff = (l || 0) + lZ;
       if (ef) lEff = Math.max(lEff, 2.5);
       let f = 0;
       if (!isNaN(l) && lEff > 0) {
         if (isGiebel) {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? ueberstandWert : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? ueberstandWert : 0);
+            const h1Eff = (h  || 0) + hZ;
+            const h2Eff = (h2 || 0) + h2Z;
             if (h2Eff >= h1Eff && h1Eff >= 0) f = round2(lEff * (h1Eff + h2Eff) / 2);
           }
         } else {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? ueberstandWert : 0);
+            const hEff = (h || 0) + hZ;
             if (hEff > 0) f = round2(lEff * hEff);
           }
         }
@@ -997,12 +1054,7 @@ function createAbschnittRow(data, container, onChange) {
     laengeInp.placeholder = 'L';
     if (mData?.laenge != null && !isNaN(mData.laenge)) laengeInp.value = mData.laenge;
 
-    const laengePlus2 = document.createElement('button');
-    laengePlus2.type = 'button';
-    laengePlus2.className = 'plus2-btn messung-laenge-plus2' + (mData?.laengePlus2 ? ' active' : '');
-    laengePlus2.textContent = '+' + fmtNum(ueberstandWert) + 'm';
-    laengePlus2.addEventListener('click', () => {
-      laengePlus2.classList.toggle('active');
+    const laengeZuschlagCtrl = createZuschlagControl(mData?.laengeZuschlag, 'messung-laenge-zuschlag', () => {
       refreshAbschnittCalc();
       onChange();
     });
@@ -1020,12 +1072,7 @@ function createAbschnittRow(data, container, onChange) {
     hoeheInp.placeholder = isGiebelNow ? 'H1 (Rinne)' : 'H';
     if (mData?.hoehe != null && !isNaN(mData.hoehe)) hoeheInp.value = mData.hoehe;
 
-    const hoehePlus2 = document.createElement('button');
-    hoehePlus2.type = 'button';
-    hoehePlus2.className = 'plus2-btn messung-hoehe-plus2' + (mData?.hoehePlus2 ? ' active' : '');
-    hoehePlus2.textContent = '+' + fmtNum(ueberstandWert) + 'm';
-    hoehePlus2.addEventListener('click', () => {
-      hoehePlus2.classList.toggle('active');
+    const hoeheZuschlagCtrl = createZuschlagControl(mData?.hoeheZuschlag, 'messung-hoehe-zuschlag', () => {
       refreshAbschnittCalc();
       onChange();
     });
@@ -1044,12 +1091,7 @@ function createAbschnittRow(data, container, onChange) {
     hoehe2Inp.placeholder = 'H2 (Spitze)';
     if (mData?.hoehe2 != null && !isNaN(mData.hoehe2)) hoehe2Inp.value = mData.hoehe2;
 
-    const hoehe2Plus2 = document.createElement('button');
-    hoehe2Plus2.type = 'button';
-    hoehe2Plus2.className = 'plus2-btn messung-hoehe2-plus2 giebel-part' + (mData?.hoehe2Plus2 ? ' active' : '');
-    hoehe2Plus2.textContent = '+' + fmtNum(ueberstandWert) + 'm';
-    hoehe2Plus2.addEventListener('click', () => {
-      hoehe2Plus2.classList.toggle('active');
+    const hoehe2ZuschlagCtrl = createZuschlagControl(mData?.hoehe2Zuschlag, 'messung-hoehe2-zuschlag giebel-part', () => {
       refreshAbschnittCalc();
       onChange();
     });
@@ -1079,13 +1121,13 @@ function createAbschnittRow(data, container, onChange) {
     const hoehe2Field = wrapMeasField('H2', hoehe2Inp, 'giebel-part');
 
     mRow.appendChild(laengeField);
-    mRow.appendChild(laengePlus2);
+    mRow.appendChild(laengeZuschlagCtrl);
     mRow.appendChild(mulSign);
     mRow.appendChild(hoeheField);
-    mRow.appendChild(hoehePlus2);
+    mRow.appendChild(hoeheZuschlagCtrl);
     mRow.appendChild(giebelSep);
     mRow.appendChild(hoehe2Field);
-    mRow.appendChild(hoehe2Plus2);
+    mRow.appendChild(hoehe2ZuschlagCtrl);
     mRow.appendChild(calcSpan);
     mRow.appendChild(removeMBtn);
     return mRow;
@@ -1093,7 +1135,7 @@ function createAbschnittRow(data, container, onChange) {
 
   const initMessungen = (data.messungen && data.messungen.length > 0)
     ? data.messungen
-    : [{ laenge: null, laengePlus2: false, hoehe: null, hoehePlus2: false }];
+    : [{ laenge: null, laengeZuschlag: null, hoehe: null, hoeheZuschlag: null }];
 
   initMessungen.forEach(m => messungenList.appendChild(createMessungRow(m)));
 
@@ -1276,6 +1318,51 @@ function wrapMeasField(labelText, input, extraClass) {
   return wrap;
 }
 
+// Individueller Zuschlag ("+Xm"-Taste) für ein einzelnes Maß-Feld (L/H/H2).
+// Antippen aktiviert den Zuschlag mit dem globalen Standardwert; der Wert kann
+// danach jederzeit individuell für genau dieses Feld überschrieben werden.
+function createZuschlagControl(initValue, extraClass, onChange) {
+  const wrap = document.createElement('span');
+  wrap.className = 'zuschlag-ctrl' + (extraClass ? ' ' + extraClass : '');
+
+  const isActive = initValue != null && !isNaN(initValue) && initValue > 0;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'plus2-btn' + (isActive ? ' active' : '');
+
+  const valInp = document.createElement('input');
+  valInp.type = 'number';
+  valInp.className = 'plus2-value-input';
+  valInp.step = '0.1';
+  valInp.min = '0.1';
+  valInp.inputMode = 'decimal';
+  valInp.placeholder = 'm';
+  if (isActive) valInp.value = initValue;
+
+  function refreshVisual() {
+    const active = btn.classList.contains('active');
+    btn.textContent = active ? '+' : ('+' + fmtNum(ueberstandWert) + 'm');
+    btn.title = active ? 'Zuschlag entfernen' : 'Zuschlag hinzufügen (individuell änderbar)';
+    valInp.style.display = active ? '' : 'none';
+  }
+  refreshVisual();
+
+  btn.addEventListener('click', () => {
+    const wasActive = btn.classList.contains('active');
+    btn.classList.toggle('active', !wasActive);
+    if (!wasActive && !valInp.value) valInp.value = ueberstandWert;
+    refreshVisual();
+    if (onChange) onChange();
+  });
+  valInp.addEventListener('input', () => { if (onChange) onChange(); });
+  valInp.addEventListener('click', e => e.stopPropagation());
+
+  wrap.appendChild(btn);
+  wrap.appendChild(valInp);
+  return wrap;
+}
+
 function makeAccLabel(text) {
   const el = document.createElement('span');
   el.className = 'acc-entry-label';
@@ -1312,10 +1399,10 @@ function createAccessoriesSection(seiteData, card, onChange) {
     const firstMRow = firstAbRow.querySelector('.messung-row');
     if (!firstMRow) return null;
     const l   = parseNum(firstMRow.querySelector('.messung-laenge')?.value);
-    const lP2 = firstMRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
+    const lZ  = readZuschlag(firstMRow.querySelector('.messung-laenge-zuschlag'));
     const ef  = firstAbRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
     if (isNaN(l)) return null;
-    let lEff = (l || 0) + (lP2 ? ueberstandWert : 0);
+    let lEff = (l || 0) + lZ;
     if (ef) lEff = Math.max(lEff, 2.5);
     return lEff > 0 ? round2(lEff) : null;
   }
@@ -1501,19 +1588,30 @@ function createAccessoriesSection(seiteData, card, onChange) {
 
     const typeBtns = document.createElement('div');
     typeBtns.className = 'acc-type-btns';
-    ['0', '19', '30', '50', '70', '109'].forEach(typ => {
+
+    function makeKonsoleTypeBtn(typVal, label, isDachfangBtn, title) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'konsole-btn' + (data && data.typ === typ ? ' active' : '');
-      btn.dataset.typ = typ;
-      btn.textContent = typ;
+      btn.className = 'konsole-btn' + (isDachfangBtn ? ' konsole-btn-df' : '') + (data && data.typ === typVal ? ' active' : '');
+      btn.dataset.typ = typVal;
+      btn.textContent = label;
+      if (title) btn.title = title;
       btn.addEventListener('click', () => {
         const wasActive = btn.classList.contains('active');
         typeBtns.querySelectorAll('.konsole-btn').forEach(b => b.classList.remove('active'));
         if (!wasActive) btn.classList.add('active');
         onChange();
       });
-      typeBtns.appendChild(btn);
+      return btn;
+    }
+
+    KONSOLE_TYPES.forEach(typ => {
+      typeBtns.appendChild(makeKonsoleTypeBtn(typ, typ, false));
+      // Bei Konsole 0,50 zusätzlich die Sonder-Variante "Dachfang" anbieten
+      // (intern weiterhin Konsole 0,50, aber separat gekennzeichnet).
+      if (typ === '50') {
+        typeBtns.appendChild(makeKonsoleTypeBtn(KONSOLE_DACHFANG_TYP, 'DF', true, 'Dachfang (Konsole 0,50)'));
+      }
     });
 
     const lenWrap  = createInlineLength(null, data ? data.laenge : null, data ? (data.autoL1 !== undefined ? data.autoL1 : true) : true);
@@ -1722,20 +1820,20 @@ function updateSummary() {
       let abFlaeche  = 0;
       abRow.querySelectorAll('.messung-row').forEach(mRow => {
         const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
-        const lP2 = mRow.querySelector('.messung-laenge-plus2')?.classList.contains('active') || false;
-        let lEff  = (l || 0) + (lP2 ? ueberstandWert : 0);
+        const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+        let lEff  = (l || 0) + lZ;
         if (ef) lEff = Math.max(lEff, 2.5);
         if (isNaN(l) || lEff <= 0) return;
         const bezPfx = bez ? bez + ': ' : '';
         const efStr  = ef && (l || 0) < 2.5 ? ' (EF)' : '';
         if (isGiebel) {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active')  || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const hP22= mRow.querySelector('.messung-hoehe2-plus2')?.classList.contains('active') || false;
+          const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
           if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + (hP2  ? ueberstandWert : 0);
-            const h2Eff = (h2 || 0) + (hP22 ? ueberstandWert : 0);
+            const h1Eff = (h  || 0) + hZ;
+            const h2Eff = (h2 || 0) + h2Z;
             if (h2Eff >= h1Eff && h1Eff >= 0) {
               const pair = round2(lEff * (h1Eff + h2Eff) / 2);
               abFlaeche += pair;
@@ -1744,9 +1842,9 @@ function updateSummary() {
           }
         } else {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hP2 = mRow.querySelector('.messung-hoehe-plus2')?.classList.contains('active') || false;
+          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
           if (!isNaN(h)) {
-            const hEff = (h || 0) + (hP2 ? ueberstandWert : 0);
+            const hEff = (h || 0) + hZ;
             if (hEff > 0) {
               const pair = round2(lEff * hEff);
               abFlaeche += pair;
@@ -1769,7 +1867,7 @@ function updateSummary() {
       const lage = collectLage(row);
       const lageStr = lageLabel(lage);
       const eff = (!isNaN(v) && v > 0) ? effektiveLaenge(v, lage) : null;
-      detailParts.push('K ' + activeTypBtn.dataset.typ + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
+      detailParts.push(konsoleTypLabel(activeTypBtn.dataset.typ, true) + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
     });
     card.querySelectorAll('.acc-ig-list .acc-multi-row').forEach(row => {
       const lenInp = row.querySelector('.accessory-length-input');
@@ -2031,14 +2129,14 @@ function generatePDF() {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
       (a.messungen || []).forEach(m => {
-        let lEff = (m.laenge || 0) + (m.laengePlus2 ? ueberstandWert : 0);
+        let lEff = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
         if (lEff <= 0) return;
         const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
         const efStr  = ef ? ' (EF)' : '';
         if (isGiebel) {
-          const h1Eff = (m.hoehe  || 0) + (m.hoehePlus2  ? ueberstandWert : 0);
-          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Plus2 ? ueberstandWert : 0);
+          const h1Eff = (m.hoehe  || 0) + (m.hoeheZuschlag  > 0 ? m.hoeheZuschlag  : 0);
+          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Zuschlag > 0 ? m.hoehe2Zuschlag : 0);
           if (h2Eff < h1Eff || h1Eff < 0) return;
           const pair = round2(lEff * (h1Eff + h2Eff) / 2);
           seitenFlaeche += pair;
@@ -2048,7 +2146,7 @@ function generatePDF() {
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
-          const hEff = (m.hoehe || 0) + (m.hoehePlus2 ? ueberstandWert : 0);
+          const hEff = (m.hoehe || 0) + (m.hoeheZuschlag > 0 ? m.hoeheZuschlag : 0);
           if (hEff <= 0) return;
           const pair = round2(lEff * hEff);
           seitenFlaeche += pair;
@@ -2071,11 +2169,14 @@ function generatePDF() {
       y += 5;
     }
 
-    // Zubehör-Totals sammeln (Konsolen/Innengeländer je Lage getrennt, Laenge × Lagenzahl)
+    // Zubehör-Totals sammeln. Konsolen werden ausschließlich nach Typ
+    // zusammengefasst (unabhängig von Lage/Ebene und Seite), damit jeder
+    // Konsolentyp (inkl. Dachfang-Variante von 0,50) nur einmal mit der
+    // Gesamtanzahl in der Materialübersicht erscheint.
     if (Array.isArray(seite.konsolen)) {
       seite.konsolen.forEach(k => {
         if (k.laenge !== null && !isNaN(k.laenge)) {
-          const key = k.typ + '|' + (k.lage || 'alle');
+          const key = k.typ;
           totals.konsolen[key] = (totals.konsolen[key] || 0) + effektiveLaenge(k.laenge, k.lage);
         }
       });
@@ -2105,7 +2206,9 @@ function generatePDF() {
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
   // ── Positionen ─────────────────────────────────────────────────
-  const kKeys  = Object.keys(totals.konsolen).sort((a, b) => Number(a.split('|')[0]) - Number(b.split('|')[0]));
+  // Konsolen: rein numerisch nach Typ sortiert, Dachfang-Variante (z. B. "50df")
+  // direkt hinter der zugehörigen normalen Konsole (z. B. "50").
+  const kKeys  = Object.keys(totals.konsolen).sort((a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b));
   const igKeys = Object.keys(totals.ig).sort((a, b) => (a === 'alle' ? -1 : b === 'alle' ? 1 : Number(a) - Number(b)));
   const hasAcc = kKeys.length > 0 || igKeys.length > 0 || totals.df > 0 ||
     totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
@@ -2115,9 +2218,7 @@ function generatePDF() {
     hline(0.3);
     secHead('Positionen');
     kKeys.forEach(key => {
-      const [typ, lage] = key.split('|');
-      const lageStr = lageLabel(lage);
-      pdfRow('Konsole ' + typ + ' cm' + (lageStr ? ' – ' + lageStr : ''), fmtNum(round2(totals.konsolen[key])) + ' m');
+      pdfRow(konsoleTypLabel(key), fmtNum(round2(totals.konsolen[key])) + ' m');
     });
     igKeys.forEach(lage => {
       const lageStr = lageLabel(lage);
