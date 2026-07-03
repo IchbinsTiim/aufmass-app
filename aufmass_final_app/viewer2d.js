@@ -2096,6 +2096,45 @@ function renderSections() {
 
       top.appendChild(num); top.appendChild(inp); top.appendChild(rmBay);
 
+      // Zeile 1b: Höhen links/rechts direkt im Seitenpanel – so muss man für die
+      // (häufigste) Änderung nicht extra das Bearbeiten-Sheet öffnen.
+      const heightRow = document.createElement('div');
+      heightRow.className = 'bay-height-row';
+
+      const makeSideHeight = (labelTxt, key) => {
+        const field = document.createElement('div');
+        field.className = 'bay-height-field';
+        const lab = document.createElement('span');
+        lab.className = 'bay-height-label';
+        lab.textContent = labelTxt;
+        const hInp = document.createElement('input');
+        hInp.type = 'number'; hInp.className = 'bay-height-inp';
+        hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
+        hInp.value = bay[key] == null ? '' : bay[key].toFixed(2);
+        hInp.addEventListener('input', () => {
+          const v = parseFloat(hInp.value);
+          bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
+          renderSvg();
+        });
+        field.appendChild(lab); field.appendChild(hInp);
+        return { field, input: hInp };
+      };
+      const hLeftSide  = makeSideHeight('H links',  'hL');
+      const hRightSide = makeSideHeight('H rechts', 'hR');
+      const hEqBtnSide = document.createElement('button');
+      hEqBtnSide.type = 'button'; hEqBtnSide.className = 'bay-height-eq';
+      hEqBtnSide.title = 'Beide Höhen gleich setzen'; hEqBtnSide.textContent = '=';
+      hEqBtnSide.addEventListener('click', () => {
+        const src = bay.hL != null ? bay.hL : bay.hR;
+        if (src == null) return;
+        bay.hL = src; bay.hR = src;
+        hLeftSide.input.value = src.toFixed(2); hRightSide.input.value = src.toFixed(2);
+        renderSvg();
+      });
+      heightRow.appendChild(hLeftSide.field);
+      heightRow.appendChild(hEqBtnSide);
+      heightRow.appendChild(hRightSide.field);
+
       // Zeile 2: Längen-Schnellwahl
       const bottom = document.createElement('div');
       bottom.className = 'bay-row-bottom';
@@ -2148,7 +2187,7 @@ function renderSections() {
       pasteBtn.addEventListener('click', () => { pasteBayPositions(bay); renderAll(); });
       posLine.appendChild(pasteBtn);
 
-      row.appendChild(top); row.appendChild(bottom); row.appendChild(posLine);
+      row.appendChild(top); row.appendChild(heightRow); row.appendChild(bottom); row.appendChild(posLine);
       baysDiv.appendChild(row);
     });
 
