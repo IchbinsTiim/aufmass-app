@@ -217,6 +217,64 @@
 }
 .quick-btn:hover { background: #007aff; color: #fff; border-color: #007aff; }
 
+/* Höhen links/rechts direkt im Seitenpanel (kompakte Variante des Sheet-Felds) */
+.bay-height-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.3rem;
+}
+.bay-height-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.bay-height-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #1f7a3d;
+  text-align: center;
+}
+.bay-height-inp {
+  width: 100%;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1a3a2a;
+  padding: 0.25rem 0.3rem;
+  border: 1.5px solid #cfe6d6;
+  background: #f3fbf5;
+  border-radius: 6px;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+}
+.bay-height-inp:focus {
+  outline: none;
+  border-color: #34c759;
+  background: #fff;
+}
+.bay-height-inp::-webkit-outer-spin-button,
+.bay-height-inp::-webkit-inner-spin-button { -webkit-appearance: none; }
+.bay-height-inp::placeholder { color: #9bbfa6; font-weight: 600; }
+.bay-height-eq {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 28px;
+  margin-bottom: 1px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  border: 1.5px solid #34c759;
+  border-radius: 6px;
+  background: #f3fbf5;
+  color: #34c759;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bay-height-eq:active { background: #34c759; color: #fff; }
+
 .remove-btn.small {
   padding: 0.2rem 0.4rem;
   font-size: 0.85rem;
