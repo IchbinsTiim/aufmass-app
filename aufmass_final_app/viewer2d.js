@@ -35,7 +35,7 @@ const POSITIONS = [
   { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a', unit: 'm2' },
   { key: 'dachfang',      label: 'Dachfang',         short: 'DF',   color: '#b08900', unit: 'm' },
   { key: 'treppenturm',   label: 'Treppenturm',      short: 'TT',   color: '#8e44ec', unit: 'stgm' },
-  { key: 'durchgang',     label: 'Durchgang',        short: 'DG',   color: '#1f5f9e', unit: 'stk' },
+  { key: 'durchgang',     label: 'Tunnelrahmen',     short: 'TR',   color: '#1f5f9e', unit: 'stk' },
   { key: 'geruesttreppe', label: 'Gerüsttreppe',     short: 'GT',   color: '#4659c9', unit: 'stk' },
   { key: 'verbreiterung', label: 'Verbreiterung',    short: 'VB',   color: '#0f9b8e', unit: 'lagen' },
   { key: 'ueberbrueckung',label: 'Überbrückung',     short: 'ÜB',   color: '#a5612c', unit: 'stk' },
@@ -242,6 +242,17 @@ let pdfMode        = false;  // when true: render clean plan (no handles)
 // Konfiguration eines Feldes (Höhen + alle Kategorien/Mengen/Zuschläge), die
 // per Klick auf beliebig viele andere Felder übertragen werden kann.
 let copiedBayData = null;
+
+// ── Mehrfachauswahl ──────────────────────────────────────────────────────────
+// Ergänzt Kopieren/Einfügen (ganzes Feld → ein Ziel) um "eine Position auf
+// viele Felder anwenden", ohne Höhen/andere Positionen der Ziel-Felder
+// anzutasten – wichtig bei großen Objekten, wo z. B. ein Tunnelrahmen auf
+// zehn verstreuten Feldern liegt, aber jedes Feld eigene Höhen/Konsolen hat.
+let bulkMode        = false;
+const bulkSelected  = new Set();   // Set von bay.id
+let bulkKonsTyp     = KONSOLE_TYPES[0];
+let bulkKonsLagen   = '1';
+let bulkKonsBilling = 'lagen';
 
 // ── Projektverwaltung (gemeinsam mit der Aufmaß-Hauptapp) ───────────────────
 // Wird der 2D-Zeichner aus einem Projekt heraus geöffnet, teilt er sich die
@@ -2024,6 +2035,179 @@ function closeSheet() {
 
 // ── Side panel ─────────────────────────────────────────────────────────────
 
+/** Alle Felder (bays) über alle Sektionen hinweg, unabhängig von Reihenfolge. */
+function allBaysFlat() {
+  return state.sections.flatMap(s => s.bays);
+}
+
+/** Leiste über der Feldliste: Mehrfachauswahl an/aus + Sammel-Aktionen.
+ *  Erlaubt, EINE Position (Konsole, Netz, Tunnelrahmen …) auf beliebig viele,
+ *  auch nicht benachbarte Felder anzuwenden, ohne deren Höhen oder sonstige
+ *  Positionen zu verändern – Ergänzung zu Kopieren/Einfügen (das ein ganzes
+ *  Feld 1:1 auf ein einzelnes Ziel überträgt). */
+function renderBulkBar() {
+  const el = document.getElementById('bulkBar');
+  if (!el) return;
+  el.innerHTML = '';
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'bulk-toggle-btn' + (bulkMode ? ' active' : '');
+  toggleBtn.textContent = bulkMode ? '✕ Mehrfachauswahl beenden' : '☑ Mehrere Felder bearbeiten';
+  toggleBtn.addEventListener('click', () => {
+    bulkMode = !bulkMode;
+    if (!bulkMode) bulkSelected.clear();
+    renderAll();
+  });
+  el.appendChild(toggleBtn);
+  if (!bulkMode) return;
+
+  const bays = allBaysFlat();
+  if (!bays.length) {
+    const hint = document.createElement('p');
+    hint.className = 'bulk-hint';
+    hint.textContent = 'Zuerst Felder anlegen.';
+    el.appendChild(hint);
+    return;
+  }
+
+  const info = document.createElement('div');
+  info.className = 'bulk-info';
+  info.textContent = `${bulkSelected.size} von ${bays.length} Feldern ausgewählt`;
+  el.appendChild(info);
+
+  const selRow = document.createElement('div');
+  selRow.className = 'bulk-sel-row';
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button'; allBtn.className = 'bulk-sel-btn';
+  allBtn.textContent = 'Alle';
+  allBtn.addEventListener('click', () => { bays.forEach(b => bulkSelected.add(b.id)); renderAll(); });
+  const noneBtn = document.createElement('button');
+  noneBtn.type = 'button'; noneBtn.className = 'bulk-sel-btn';
+  noneBtn.textContent = 'Keine';
+  noneBtn.addEventListener('click', () => { bulkSelected.clear(); renderAll(); });
+  selRow.appendChild(allBtn); selRow.appendChild(noneBtn);
+  el.appendChild(selRow);
+
+  const selectedBays = bays.filter(b => bulkSelected.has(b.id));
+  if (!selectedBays.length) {
+    const hint = document.createElement('p');
+    hint.className = 'bulk-hint';
+    hint.textContent = 'Felder unten in der Liste ankreuzen, dann hier eine Position anwenden.';
+    el.appendChild(hint);
+    return;
+  }
+
+  // Einfache Positionen: Chip togglet die Kategorie auf ALLEN ausgewählten
+  // Feldern gleichzeitig ein/aus. Menge bleibt je Feld automatisch (Länge/
+  // Höhe/Feldlänge) – wie beim einzelnen "+ Positionen"-Toggle.
+  const posLabel = document.createElement('div');
+  posLabel.className = 'bulk-section-label';
+  posLabel.textContent = 'Position für Auswahl';
+  el.appendChild(posLabel);
+
+  const chipRow = document.createElement('div');
+  chipRow.className = 'bulk-chip-row';
+  POSITIONS.filter(p => !p.konsole).forEach(p => {
+    const allHave  = selectedBays.every(b => (b.positions || []).some(x => x.cat === p.key));
+    const someHave = !allHave && selectedBays.some(b => (b.positions || []).some(x => x.cat === p.key));
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'bulk-pos-chip' + (allHave ? ' active' : '') + (someHave ? ' partial' : '');
+    chip.textContent = p.label;
+    chip.style.setProperty('--pos-color', p.color);
+    chip.title = someHave ? 'Bei einem Teil der Auswahl schon vorhanden' : '';
+    chip.addEventListener('click', () => {
+      const turnOn = !allHave;   // an, außer alle ausgewählten haben sie schon → dann aus
+      selectedBays.forEach(bay => {
+        normalizeBay(bay);
+        const idx = bay.positions.findIndex(x => x.cat === p.key);
+        if (turnOn) { if (idx < 0) bay.positions.push({ id: ++_bId, cat: p.key, qty: null, unit: defaultUnit(p.key) }); }
+        else if (idx >= 0) bay.positions.splice(idx, 1);
+      });
+      renderAll();
+    });
+    chipRow.appendChild(chip);
+  });
+  el.appendChild(chipRow);
+
+  // Konsole: braucht Typ + Lagen/Meter, daher eigenes Mini-Formular statt
+  // einfachem Toggle-Chip. "+ Hinzufügen" legt auf jedem ausgewählten Feld
+  // eine neue Konsolen-Position mit dieser Konfiguration an.
+  const konsLabel = document.createElement('div');
+  konsLabel.className = 'bulk-section-label';
+  konsLabel.textContent = 'Konsole für Auswahl hinzufügen';
+  el.appendChild(konsLabel);
+
+  const konsForm = document.createElement('div');
+  konsForm.className = 'bulk-kons-form';
+
+  const typRow = document.createElement('div');
+  typRow.className = 'bulk-kons-typ-row';
+  KONSOLE_TYPES.forEach(typ => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bulk-ktype-btn' + (bulkKonsTyp === typ ? ' active' : '');
+    b.textContent = typ;
+    b.addEventListener('click', () => {
+      bulkKonsTyp = typ;
+      typRow.querySelectorAll('.bulk-ktype-btn').forEach(x => x.classList.toggle('active', x.textContent === typ));
+    });
+    typRow.appendChild(b);
+  });
+  konsForm.appendChild(typRow);
+
+  const billRow = document.createElement('div');
+  billRow.className = 'bulk-kons-bill-row';
+  [['lagen', 'pro Lage'], ['meter', 'in Metern']].forEach(([val, lbl]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bulk-kbill-btn' + (bulkKonsBilling === val ? ' active' : '');
+    b.textContent = lbl;
+    b.addEventListener('click', () => {
+      bulkKonsBilling = val;
+      billRow.querySelectorAll('.bulk-kbill-btn').forEach(x => x.classList.toggle('active', x === b));
+      lagenRow.style.display = val === 'meter' ? 'none' : '';
+    });
+    billRow.appendChild(b);
+  });
+  konsForm.appendChild(billRow);
+
+  const lagenRow = document.createElement('div');
+  lagenRow.className = 'bulk-kons-lagen-row';
+  lagenRow.style.display = bulkKonsBilling === 'meter' ? 'none' : '';
+  [['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen'], ['alle', 'alle Lagen']].forEach(([val, lbl]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bulk-klagen-btn' + (bulkKonsLagen === val ? ' active' : '');
+    b.textContent = lbl;
+    b.addEventListener('click', () => {
+      bulkKonsLagen = val;
+      lagenRow.querySelectorAll('.bulk-klagen-btn').forEach(x => x.classList.toggle('active', x === b));
+    });
+    lagenRow.appendChild(b);
+  });
+  konsForm.appendChild(lagenRow);
+
+  const addKonsBtn = document.createElement('button');
+  addKonsBtn.type = 'button'; addKonsBtn.className = 'bulk-kons-add-btn';
+  addKonsBtn.textContent = '+ Auf ' + selectedBays.length + ' Feld' + (selectedBays.length === 1 ? '' : 'er') + ' anwenden';
+  addKonsBtn.addEventListener('click', () => {
+    selectedBays.forEach(bay => {
+      normalizeBay(bay);
+      bay.positions.push({
+        id: ++_bId, cat: 'konsole', typ: bulkKonsTyp,
+        lagen: bulkKonsLagen, billing: bulkKonsBilling
+      });
+    });
+    renderAll();
+    showToast('Konsole auf ' + selectedBays.length + ' Feldern ergänzt');
+  });
+  konsForm.appendChild(addKonsBtn);
+
+  el.appendChild(konsForm);
+}
+
 function renderSections() {
   const container = document.getElementById('sectionsContainer');
   const hint      = document.getElementById('noSectionsHint');
@@ -2075,12 +2259,23 @@ function renderSections() {
     sec.bays.forEach((bay, bi) => {
       normalizeBay(bay);
       const row = document.createElement('div');
-      row.className = 'bay-row';
+      row.className = 'bay-row' + (bulkMode && bulkSelected.has(bay.id) ? ' bulk-selected' : '');
       row.style.borderLeft = '4px solid #2c6fa8';
 
-      // Zeile 1: Nummer · Längen-Eingabe · Löschen
+      // Zeile 1: [Mehrfachauswahl] · Nummer · Längen-Eingabe · Löschen
       const top = document.createElement('div');
       top.className = 'bay-row-top';
+
+      if (bulkMode) {
+        const chk = document.createElement('input');
+        chk.type = 'checkbox'; chk.className = 'bulk-bay-check';
+        chk.checked = bulkSelected.has(bay.id);
+        chk.addEventListener('change', () => {
+          if (chk.checked) bulkSelected.add(bay.id); else bulkSelected.delete(bay.id);
+          renderAll();
+        });
+        top.appendChild(chk);
+      }
 
       const num = document.createElement('span');
       num.className = 'bay-num'; num.textContent = `F${bi + 1}`;
@@ -2210,7 +2405,7 @@ function renderSections() {
   });
 }
 
-function renderAll() { renderSections(); renderSvg(); }
+function renderAll() { renderBulkBar(); renderSections(); renderSvg(); }
 
 // ── Preset layouts ─────────────────────────────────────────────────────────
 
