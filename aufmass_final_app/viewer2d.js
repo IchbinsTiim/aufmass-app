@@ -68,7 +68,8 @@ function hasOwnQty(pos) {
   return pos.qty != null && pos.qty !== '' && !isNaN(parseFloat(pos.qty));
 }
 
-/** Fläche eines Feldes (Länge × Gerüsttiefe) – Vorschlagswert für Netz-m². */
+/** Fläche eines Feldes (Länge × Gerüsttiefe) – generischer m²-Vorschlagswert
+ *  für Positionen ohne feldspezifische Flächenformel. */
 function bayArea(bayLen) {
   return bayLen != null ? +(bayLen * state.depth).toFixed(3) : null;
 }
@@ -80,6 +81,13 @@ function bayFlaecheM2(bay) {
   const heights = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
   if (!heights.length || !bay.len) return 0;
   return bay.len * Math.min(...heights);
+}
+
+/** Vorschlagswert für Netz-m²: Länge × kleinere Höhe (wie Gerüstfläche).
+ *  Ohne gesetzte Höhe gibt es keinen Vorschlag (null). */
+function netzArea(bay) {
+  const flaeche = bayFlaecheM2(bay);
+  return flaeche > 0 ? +flaeche.toFixed(3) : null;
 }
 
 /** Gesamtgerüstfläche (m²) über alle Felder der Zeichnung. */
@@ -97,19 +105,21 @@ function updateAreaReadout() {
 }
 
 /** Effektive Menge einer Position. Bei Einheit 'm' ohne eigenen Wert gilt
- *  standardmäßig die Feldlänge, bei 'm2' die Feldfläche – der Nutzer kann
- *  den Wert jederzeit überschreiben. */
-function effQty(pos, bayLen) {
+ *  standardmäßig die Feldlänge, bei 'm2' die Feldfläche (bei Netz: Länge ×
+ *  kleinere Höhe, sonst Länge × Gerüsttiefe) – der Nutzer kann den Wert
+ *  jederzeit überschreiben. */
+function effQty(pos, bay) {
   if (hasOwnQty(pos)) return parseFloat(pos.qty);
+  const bayLen = bay && bay.len;
   const u = pos.unit || defaultUnit(pos.cat);
   if (u === 'm'  && bayLen != null) return +bayLen;
-  if (u === 'm2' && bayLen != null) return bayArea(bayLen);
+  if (u === 'm2') return pos.cat === 'netz' ? netzArea(bay) : (bayLen != null ? bayArea(bayLen) : null);
   return null;
 }
 
 /** Lesbare Mengenangabe einer Position, z.B. "3 Lagen" / "12,5 m" / "4 Stk". */
-function qtyLabel(pos, bayLen) {
-  const v = effQty(pos, bayLen);
+function qtyLabel(pos, bay) {
+  const v = effQty(pos, bay);
   if (v == null) return '';
   const u = pos.unit || defaultUnit(pos.cat);
   if (u === 'lagen') return v === 1 ? '1 Lage' : fmtQty(v) + ' Lagen';
@@ -131,11 +141,24 @@ function lagenCount(lagen) {
   return isNaN(n) ? null : n;
 }
 
-/** Errechnete laufende Meter = Lagen × Feldlänge. Nur für Lagen-Mengen und
- *  Konsolen sinnvoll; sonst (m / Stk oder ohne konkrete Lagenzahl) → null. */
-function posMeters(pos, bayLen) {
+/** Ist die Konsolen-Abrechnungsart einer Position "laufende Meter" (statt
+ *  "pro Lage")? Fehlt das Feld (ältere Daten), gilt weiter "pro Lage". */
+function isMeterBilling(pos) {
+  return pos.billing === 'meter';
+}
+
+/** Errechnete laufende Meter. Konsolen "pro Lage" sowie andere Lagen-Mengen:
+ *  Lagen × Feldlänge. Konsolen "in Metern": der eingetragene Meterwert, ohne
+ *  eigenen Wert standardmäßig die Feldlänge. Sonst (m / Stk ohne Lagenzahl)
+ *  → null. */
+function posMeters(pos, bay) {
   const p = POS_BY_KEY[pos.cat];
+  const bayLen = bay && bay.len;
   if (!p || !bayLen) return null;
+  if (p.konsole && isMeterBilling(pos)) {
+    const v = parseFloat(pos.meterValue);
+    return !isNaN(v) && pos.meterValue !== '' && pos.meterValue != null ? v : bayLen;
+  }
   let lagen;
   if (p.konsole) lagen = lagenCount(pos.lagen);
   else if ((pos.unit || defaultUnit(pos.cat)) === 'lagen') lagen = lagenCount(pos.qty);
@@ -145,31 +168,34 @@ function posMeters(pos, bayLen) {
 }
 
 /** Vollständiger Positions-Name (für Sheet/Seitenpanel/PDF).
- *  Mit bayLen wird bei Lagen-Mengen die errechnete Meterzahl angehängt. */
-function posTitle(pos, bayLen) {
+ *  Mit bay wird bei Lagen-Mengen die errechnete Meterzahl angehängt. */
+function posTitle(pos, bay) {
   const p = POS_BY_KEY[pos.cat];
   if (!p) return '?';
   let base;
-  if (p.konsole) base = 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · ' + lagenLabel(pos.lagen);
-  else { const q = qtyLabel(pos, bayLen); base = q ? p.label + ' · ' + q : p.label; }
-  const m = posMeters(pos, bayLen);
+  if (p.konsole) {
+    base = 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · '
+      + (isMeterBilling(pos) ? 'lfd. Meter' : lagenLabel(pos.lagen));
+  }
+  else { const q = qtyLabel(pos, bay); base = q ? p.label + ' · ' + q : p.label; }
+  const m = posMeters(pos, bay);
   if (m != null) base += ' = ' + fmtQty(m) + ' m';
   return base;
 }
 
 /** Kompakte Positions-Beschriftung für den Plan (Badge). */
-function posBadge(pos, bayLen) {
+function posBadge(pos, bay) {
   const p = POS_BY_KEY[pos.cat];
   if (!p) return '?';
-  const m = posMeters(pos, bayLen);
+  const m = posMeters(pos, bay);
   if (p.konsole) {
-    const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '')
+    const lg = isMeterBilling(pos) || pos.lagen == null || pos.lagen === 'alle' || pos.lagen === ''
       ? '' : '×' + (parseInt(pos.lagen, 10) || '');
     const base = 'K' + (pos.typ || '') + lg;
     return m != null ? base + ' ' + fmtQty(m) + 'm' : base;
   }
   if (m != null) return p.short + ' ' + fmtQty(m) + 'm';
-  const v = effQty(pos, bayLen);
+  const v = effQty(pos, bay);
   if (v != null) {
     const u = pos.unit || defaultUnit(pos.cat);
     const suf = (u === 'm' || u === 'stgm') ? 'm' : (u === 'm2' ? 'm²' : '×');
@@ -430,7 +456,8 @@ function snapLen(len) {
      gegen ALLE Ecken aller anderen Felder geprüft.
    • Das nächstgelegene (Quell-Ecke → Ziel-Ecke)-Paar innerhalb des
      Magnetradius bestimmt die Andockposition – pixelgenau.
-   • Kandidaten, die eine Überlappung erzeugen würden, werden übersprungen.
+   • Felder dürfen sich bewusst überlappen (z. B. für komplexe Grundrisse);
+     das Andocken selbst wird dadurch nicht verhindert.
    • Während des Ziehens wird die Andockposition als Vorschau angezeigt;
      erst beim Loslassen rastet das Feld endgültig ein.
    ────────────────────────────────────────────────────────────────────────── */
@@ -497,37 +524,12 @@ function collectTargetAnchors(excludeSi) {
   return anchors;
 }
 
-/** Überlappen zwei achsparallele Feld-Rechtecke mit positiver Fläche?
-    Gemeinsame Kanten/Ecken (Fläche 0) gelten NICHT als Überlappung. */
-function polysOverlap(a, b, eps = 1.0) {
-  const ax0 = Math.min(a[0].x, a[1].x, a[2].x, a[3].x);
-  const ax1 = Math.max(a[0].x, a[1].x, a[2].x, a[3].x);
-  const ay0 = Math.min(a[0].y, a[1].y, a[2].y, a[3].y);
-  const ay1 = Math.max(a[0].y, a[1].y, a[2].y, a[3].y);
-  const bx0 = Math.min(b[0].x, b[1].x, b[2].x, b[3].x);
-  const bx1 = Math.max(b[0].x, b[1].x, b[2].x, b[3].x);
-  const by0 = Math.min(b[0].y, b[1].y, b[2].y, b[3].y);
-  const by1 = Math.max(b[0].y, b[1].y, b[2].y, b[3].y);
-  return ax0 < bx1 - eps && bx0 < ax1 - eps &&
-         ay0 < by1 - eps && by0 < ay1 - eps;
-}
-
-/** Würde die Sektion an (x0,y0) irgendein fremdes Feld überlappen? */
-function sectionOverlaps(sec, x0, y0, excludeSi) {
-  const mine = sectionBayPolys(sec, x0, y0);
-  for (let i = 0; i < state.sections.length; i++) {
-    if (i === excludeSi || state.sections[i].bays.length === 0) continue;
-    const other = sectionBayPolys(state.sections[i], state.sections[i].x0, state.sections[i].y0);
-    for (const m of mine) for (const o of other) if (polysOverlap(m, o)) return true;
-  }
-  return false;
-}
-
 /**
- * Beste gültige Andockposition für die gezogene Sektion.
+ * Beste Andockposition für die gezogene Sektion.
  * Prüft alle (Quell-Ecke → Ziel-Ecke)-Paare, sortiert nach Nähe und nimmt
- * das erste Paar, das KEINE Überlappung erzeugt → eindeutiges, pixelgenaues
- * Einrasten an genau einer gültigen Position.
+ * das nächstgelegene Paar → eindeutiges, pixelgenaues Einrasten an genau
+ * einer Position. Ob das Feld dabei ein anderes überlappt, spielt für das
+ * Andocken keine Rolle – Überlappungen sind eine bewusste Nutzerentscheidung.
  * @returns {{x0:number, y0:number, anchor:{x,y}}} | null
  */
 function findSnap(sec, rawX, rawY, excludeSi, threshold) {
@@ -542,13 +544,9 @@ function findSnap(sec, rawX, rawY, excludeSi, threshold) {
       if (d2 <= thr2) cands.push({ d2, x0: ta.x - la.dx, y0: ta.y - la.dy, anchor: ta });
     }
   }
+  if (!cands.length) return null;
   cands.sort((p, q) => p.d2 - q.d2);
-  for (const c of cands) {
-    if (!sectionOverlaps(sec, c.x0, c.y0, excludeSi)) {
-      return { x0: c.x0, y0: c.y0, anchor: c.anchor };
-    }
-  }
-  return null;
+  return { x0: cands[0].x0, y0: cands[0].y0, anchor: cands[0].anchor };
 }
 
 /** Rohposition aufs 0,25-m-Grundraster runden (sanfte Ausrichtung). */
@@ -845,7 +843,7 @@ function renderSvg() {
         const px = ecx + outx * d;
         const py = ecy + outy * d;
         const p  = POS_BY_KEY[pos.cat];
-        const label = posBadge(pos, bayData.len);
+        const label = posBadge(pos, bayData);
         const col   = (p && p.color) || '#333';
         // Lange Labels (z. B. Konsolen „K0,30×2 5,14m") werden so weit
         // verkleinert, dass die Pille innerhalb der Feldbreite bleibt und nicht
@@ -1190,15 +1188,12 @@ function onSvgPointerUp(e) {
   }
   if (d.type === 'move') {
     const sec = state.sections[d.si];
-    if (d.moved) {
-      if (d.snap) {
-        // pixelgenau an der hervorgehobenen Andockstelle einrasten
-        sec.x0 = d.snap.x0; sec.y0 = d.snap.y0;
-      } else if (sectionOverlaps(sec, sec.x0, sec.y0, d.si)) {
-        // freie Platzierung würde überlappen → zurück an die Ausgangsposition
-        sec.x0 = d.startX0; sec.y0 = d.startY0;
-      }
+    if (d.moved && d.snap) {
+      // pixelgenau an der hervorgehobenen Andockstelle einrasten
+      sec.x0 = d.snap.x0; sec.y0 = d.snap.y0;
     }
+    // Ohne Andock-Treffer bleibt das Feld an der frei gezogenen Position –
+    // auch wenn es dabei ein anderes Feld überlappt (bewusst erlaubt).
     movePreview = null;
     renderAll();
     return;
@@ -1566,12 +1561,12 @@ function openEditSheet(si, bi) {
 
   // Feldlänge ist Standardwert der Meter-Positionen → bei Änderung deren
   // Platzhalter/Anzeige mitführen.
-  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); renderSvg(); };
+  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); buildKonsole(); renderSvg(); };
   minusBtn.addEventListener('click', () => { bay.len = Math.max(0.25, +(bay.len - 0.25).toFixed(2)); syncInp(); });
   plusBtn.addEventListener('click',  () => { bay.len = +(bay.len + 0.25).toFixed(2); syncInp(); });
   inp.addEventListener('change', () => {
     const v = parseFloat(inp.value);
-    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); renderSvg(); }
+    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); buildKonsole(); renderSvg(); }
   });
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
@@ -1652,6 +1647,7 @@ function openEditSheet(si, bi) {
     hInp.addEventListener('input', () => {
       const v = parseFloat(hInp.value);
       bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
+      buildPosDetails();   // Netz-m²-Vorschlag (Länge × kleinere Höhe) live nachführen
       renderSvg();
     });
     field.appendChild(lab); field.appendChild(hInp);
@@ -1667,6 +1663,7 @@ function openEditSheet(si, bi) {
     if (src == null) return;
     bay.hL = src; bay.hR = src;
     hLeft.input.value = src.toFixed(2); hRight.input.value = src.toFixed(2);
+    buildPosDetails();
     renderSvg();
   });
   hRow.appendChild(hLeft.field); hRow.appendChild(hEqBtn); hRow.appendChild(hRight.field);
@@ -1719,19 +1716,24 @@ function openEditSheet(si, bi) {
     const calc = document.createElement('span');
     calc.className = 'pos-detail-calc';
     const updateCalc = () => {
-      const m = posMeters(pos, bay.len);
+      const m = posMeters(pos, bay);
       calc.textContent = m != null ? '= ' + fmtQty(m) + ' m' : '';
     };
 
     const qtyInp = document.createElement('input');
     qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
     qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
-    // Bei Einheit 'm' zeigt der Platzhalter die Feldlänge, bei 'm2' die Feldfläche
-    // an (Vorschlagswert); der Nutzer kann die Zahl jederzeit überschreiben.
+    // Bei Einheit 'm' zeigt der Platzhalter die Feldlänge, bei 'm2' die Fläche
+    // an (bei Netz: Länge × kleinere Höhe, sonst Länge × Gerüsttiefe) –
+    // Vorschlagswert, den der Nutzer jederzeit überschreiben kann.
     const syncPlaceholder = () => {
       const u = pos.unit || defaultUnit(pos.cat);
       if (u === 'm'  && bay.len) { qtyInp.placeholder = fmtQty(bay.len); return; }
-      if (u === 'm2' && bay.len) { qtyInp.placeholder = fmtQty(bayArea(bay.len)); return; }
+      if (u === 'm2') {
+        const suggestion = pos.cat === 'netz' ? netzArea(bay) : (bay.len ? bayArea(bay.len) : null);
+        qtyInp.placeholder = suggestion != null ? fmtQty(suggestion) : 'Anz.';
+        return;
+      }
       qtyInp.placeholder = 'Anz.';
     };
     syncPlaceholder();
@@ -1802,7 +1804,7 @@ function openEditSheet(si, bi) {
     const calc = document.createElement('span');
     calc.className = 'pos-detail-calc konsole-row-calc';
     const updateCalc = () => {
-      const m = posMeters(pos, bay.len);
+      const m = posMeters(pos, bay);
       calc.textContent = m != null ? '= ' + fmtQty(m) + ' m' : '';
     };
     head.appendChild(title); head.appendChild(calc); head.appendChild(rm);
@@ -1822,6 +1824,11 @@ function openEditSheet(si, bi) {
       });
       typeRow.appendChild(b);
     });
+
+    // Abrechnungsart: pro Lage (bisher) oder in laufenden Metern.
+    const billingRow = document.createElement('div');
+    billingRow.className = 'konsole-billing-row';
+    const billingOpts = [['lagen', 'pro Lage'], ['meter', 'in Metern']];
 
     // Lagen-Auswahl
     const lagenRow = document.createElement('div');
@@ -1855,8 +1862,49 @@ function openEditSheet(si, bi) {
     });
     lagenRow.appendChild(freeInp);
 
+    // Meter-Auswahl: standardmäßig die Feldlänge (Platzhalter), manuell überschreibbar.
+    const meterRow = document.createElement('div');
+    meterRow.className = 'konsole-meter-row';
+    const meterInp = document.createElement('input');
+    meterInp.type = 'number'; meterInp.className = 'kmeter-inp';
+    meterInp.min = '0'; meterInp.step = 'any'; meterInp.inputMode = 'decimal';
+    meterInp.placeholder = fmtQty(bay.len);
+    meterInp.value = (pos.meterValue != null) ? pos.meterValue : '';
+    meterInp.addEventListener('input', () => {
+      const v = parseFloat(meterInp.value);
+      pos.meterValue = (meterInp.value === '' || isNaN(v)) ? null : v;
+      updateCalc();
+      renderSvg();
+    });
+    const meterUnit = document.createElement('span');
+    meterUnit.className = 'kmeter-unit';
+    meterUnit.textContent = 'm';
+    meterRow.appendChild(meterInp); meterRow.appendChild(meterUnit);
+
+    const syncBillingRows = () => {
+      const isMeter = isMeterBilling(pos);
+      lagenRow.style.display = isMeter ? 'none' : '';
+      meterRow.style.display = isMeter ? '' : 'none';
+    };
+    billingOpts.forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'kbill-btn' + ((pos.billing === 'meter' ? 'meter' : 'lagen') === val ? ' active' : '');
+      b.textContent = lbl;
+      b.addEventListener('click', () => {
+        pos.billing = val;
+        billingRow.querySelectorAll('.kbill-btn').forEach(x => x.classList.toggle('active', x === b));
+        syncBillingRows();
+        updateCalc();
+        renderSvg();
+      });
+      billingRow.appendChild(b);
+    });
+    syncBillingRows();
+
     updateCalc();
-    row.appendChild(head); row.appendChild(typeRow); row.appendChild(lagenRow);
+    row.appendChild(head); row.appendChild(typeRow); row.appendChild(billingRow);
+    row.appendChild(lagenRow); row.appendChild(meterRow);
     return row;
   };
 
@@ -1870,7 +1918,7 @@ function openEditSheet(si, bi) {
   addKonsBtn.type = 'button'; addKonsBtn.className = 'pos-add-konsole';
   addKonsBtn.textContent = '+ Konsole';
   addKonsBtn.addEventListener('click', () => {
-    bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1' });
+    bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1', billing: 'lagen' });
     buildKonsole(); renderSvg();
   });
 
@@ -2069,7 +2117,7 @@ function renderSections() {
           const p = POS_BY_KEY[pos.cat];
           const chip = document.createElement('span');
           chip.className = 'bay-pos-chip';
-          chip.textContent = posTitle(pos, bay.len);
+          chip.textContent = posTitle(pos, bay);
           if (p) { chip.style.color = p.color; chip.style.borderColor = p.color; }
           posLine.appendChild(chip);
         });
@@ -2278,25 +2326,32 @@ function aggregatePositions(bays) {
     (bay.positions || []).forEach(pos => {
       const p = POS_BY_KEY[pos.cat];
       if (!p) return;
-      const key   = p.konsole ? 'konsole|' + (pos.typ || '') : pos.cat;
-      const label = p.konsole ? 'Konsole ' + (pos.typ || '') : p.label;
+      // Konsolen "pro Lage" und "in Metern" werden als getrennte Zeilen
+      // geführt, damit beide Abrechnungsarten sauber getrennt bleiben.
+      const billing = p.konsole ? (isMeterBilling(pos) ? 'meter' : 'lagen') : null;
+      const key   = p.konsole ? 'konsole|' + (pos.typ || '') + '|' + billing : pos.cat;
+      const label = p.konsole
+        ? 'Konsole ' + (pos.typ || '') + (billing === 'meter' ? ' (m)' : ' (Lagen)')
+        : p.label;
       const a = agg[key] || (agg[key] = {
         color: p.color, label, n: 0, lagen: 0, qtyByUnit: {}, meters: 0,
         sort: POSITIONS.findIndex(x => x.key === pos.cat)
       });
       a.n++;
       if (p.konsole) {
-        const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
-        a.lagen += lg;
+        if (billing === 'lagen') {
+          const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
+          a.lagen += lg;
+        }
       } else {
         const u = pos.unit || defaultUnit(pos.cat);
-        const v = effQty(pos, bay.len);
+        const v = effQty(pos, bay);
         if (v != null) {
           a.qtyByUnit[u] = (a.qtyByUnit[u] || 0) + v;
           if (u === 'm' || u === 'stgm') a.meters += v;   // Meter-/Steigemeter-Mengen zählen direkt als lfd. Meter
         }
       }
-      const m = posMeters(pos, bay.len);   // Lagen × Feldlänge (Lagen-Mengen + Konsolen)
+      const m = posMeters(pos, bay);   // Lagen × Feldlänge bzw. Meterwert (Konsolen "in Metern")
       if (m != null) a.meters += m;
     });
   });

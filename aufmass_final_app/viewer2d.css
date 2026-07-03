@@ -646,6 +646,48 @@
   color: #0a2f58;
   background: #fff;
 }
+.konsole-billing-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.kbill-btn {
+  padding: 0.4rem 0.6rem;
+  border: 2px solid #8a8f98;
+  border-radius: 8px;
+  background: #fff;
+  color: #556;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.kbill-btn.active {
+  background: #0a2f58;
+  border-color: #0a2f58;
+  color: #fff;
+}
+.konsole-meter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.kmeter-inp {
+  width: 4.4rem;
+  padding: 0.45rem 0.4rem;
+  border: 2px solid #cc7a00;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+  color: #0a2f58;
+  background: #fff;
+}
+.kmeter-unit {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #667;
+}
 .pos-add-konsole {
   align-self: flex-start;
   padding: 0.5rem 0.9rem;
