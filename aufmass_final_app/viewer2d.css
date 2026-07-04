@@ -1426,3 +1426,9 @@ body[data-mode="ipad"] .bottom-sheet.open {
 /* snap toggle */
 #snapToggleBtn { font-size: 1.05rem; padding: 0.4rem 0.55rem; }
 #snapToggleBtn.snap-off { opacity: 0.4; text-decoration: line-through; }
+
+/* undo / redo / Schütteln-Umschalter */
+#undoBtn, #redoBtn { font-size: 1.15rem; padding: 0.4rem 0.6rem; }
+#undoBtn:disabled, #redoBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+#shakeUndoBtn { font-size: 1.05rem; padding: 0.4rem 0.55rem; }
+#shakeUndoBtn.active { background: #ffe6a8; border-color: #c0591a; }

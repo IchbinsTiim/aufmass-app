@@ -239,6 +239,21 @@ let selectedBi     = null;   // index of currently selected bay within selectedS
 let snapEnabled    = true;   // magnetic grid snapping on/off
 let pdfMode        = false;  // when true: render clean plan (no handles)
 
+// ── Rückgängig / Wiederholen ──────────────────────────────────────────────
+// Snapshot-basiert statt pro-Aktion instrumentiert: bei jedem renderSvg()
+// wird (außer während einer laufenden Zieh-/Pinch-Geste) geprüft, ob sich die
+// eigentlichen Aufmaß-Daten (project/depth/sections) gegenüber dem letzten
+// Snapshot geändert haben. Ein kurzes Debounce fasst schnelle Änderungsfolgen
+// (z. B. Tippen in ein Zahlenfeld, Regler ziehen) zu einem Undo-Schritt
+// zusammen. UI-Zustand (Auswahl, Zoom, Mehrfachauswahl) ist bewusst NICHT Teil
+// des Snapshots – nur die tatsächlichen Daten sollen rückgängig machbar sein.
+let undoStack              = [];
+let redoStack               = [];
+let lastUndoSnapshot        = null;
+let undoSnapshotTimer       = null;
+const UNDO_STACK_LIMIT       = 60;
+const UNDO_SNAPSHOT_DEBOUNCE_MS = 600;
+
 // Zwischenablage für "Position kopieren/einfügen": vollständige Positions-
 // Konfiguration eines Feldes (Höhen + alle Kategorien/Mengen/Zuschläge), die
 // per Klick auf beliebig viele andere Felder übertragen werden kann.
@@ -328,6 +343,132 @@ function showToast(msg) {
   el.classList.add('show');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ── Rückgängig / Wiederholen ────────────────────────────────────────────────
+
+function serializeUndoState() {
+  return JSON.stringify({ project: state.project, depth: state.depth, sections: state.sections });
+}
+
+function updateUndoRedoButtons() {
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+
+/** Schließt eine ggf. noch "offene" Änderungsfolge ab (z. B. gerade eben
+ *  getippte Zahl) und legt bei tatsächlicher Änderung einen Undo-Schritt an. */
+function finalizeUndoSnapshot() {
+  if (undoSnapshotTimer) { clearTimeout(undoSnapshotTimer); undoSnapshotTimer = null; }
+  const current = serializeUndoState();
+  if (lastUndoSnapshot === null) { lastUndoSnapshot = current; updateUndoRedoButtons(); return; }
+  if (current === lastUndoSnapshot) return;
+  undoStack.push(lastUndoSnapshot);
+  if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+  redoStack = [];
+  lastUndoSnapshot = current;
+  updateUndoRedoButtons();
+}
+
+/** Von renderSvg() bei (fast) jedem Aufruf angestoßen: plant einen Undo-
+ *  Snapshot, sofern gerade keine Zieh-/Pinch-Geste läuft (sonst gäbe es pro
+ *  Zwischenschritt einen eigenen Undo-Schritt). */
+function scheduleUndoSnapshot() {
+  if (drag || canvasGesture) return;
+  if (undoSnapshotTimer) clearTimeout(undoSnapshotTimer);
+  undoSnapshotTimer = setTimeout(finalizeUndoSnapshot, UNDO_SNAPSHOT_DEBOUNCE_MS);
+}
+
+function applyUndoState(json) {
+  const data = JSON.parse(json);
+  state.project  = data.project;
+  state.depth    = data.depth;
+  state.sections = data.sections;
+  selectedSi = null; selectedBi = null;
+  bulkSelected.clear();
+  const nameInp  = document.getElementById('projectName');
+  const depthInp = document.getElementById('scaffDepth');
+  if (nameInp)  nameInp.value  = state.project;
+  if (depthInp) depthInp.value = state.depth;
+  lastUndoSnapshot = json;
+  renderAll();
+  updateUndoRedoButtons();
+}
+
+function performUndo() {
+  finalizeUndoSnapshot();   // eine gerade noch laufende Änderung zuerst sichern
+  if (!undoStack.length) return;
+  redoStack.push(lastUndoSnapshot);
+  applyUndoState(undoStack.pop());
+  showToast('Rückgängig gemacht');
+}
+
+function performRedo() {
+  if (!redoStack.length) return;
+  undoStack.push(lastUndoSnapshot);
+  applyUndoState(redoStack.pop());
+  showToast('Wiederholt');
+}
+
+// ── Schütteln zum Rückgängigmachen (iOS: Bewegungssensor-Freigabe nötig) ───
+
+let shakeUndoEnabled = false;
+let lastShakeAccel   = null;
+let lastShakeTime    = 0;
+const SHAKE_THRESHOLD_MS = 1200;
+const SHAKE_THRESHOLD_ACC = 26;
+
+function handleDeviceMotionForShake(e) {
+  const acc = e.accelerationIncludingGravity || e.acceleration;
+  if (!acc || acc.x == null) return;
+  if (lastShakeAccel) {
+    const delta = Math.abs(acc.x - lastShakeAccel.x) + Math.abs(acc.y - lastShakeAccel.y) + Math.abs(acc.z - lastShakeAccel.z);
+    const now = Date.now();
+    if (delta > SHAKE_THRESHOLD_ACC && now - lastShakeTime > SHAKE_THRESHOLD_MS) {
+      lastShakeTime = now;
+      performUndo();
+    }
+  }
+  lastShakeAccel = acc;
+}
+
+function updateShakeBtn() {
+  const btn = document.getElementById('shakeUndoBtn');
+  if (!btn) return;
+  btn.classList.toggle('active', shakeUndoEnabled);
+  btn.title = shakeUndoEnabled
+    ? 'Schütteln zum Rückgängigmachen: An (zum Ausschalten tippen)'
+    : 'Schütteln zum Rückgängigmachen aktivieren';
+}
+
+function toggleShakeUndo() {
+  if (shakeUndoEnabled) {
+    shakeUndoEnabled = false;
+    window.removeEventListener('devicemotion', handleDeviceMotionForShake);
+    updateShakeBtn();
+    showToast('Schütteln zum Rückgängigmachen deaktiviert');
+    return;
+  }
+  const start = () => {
+    shakeUndoEnabled = true;
+    lastShakeAccel = null;
+    window.addEventListener('devicemotion', handleDeviceMotionForShake);
+    updateShakeBtn();
+    showToast('Schütteln zum Rückgängigmachen aktiviert');
+  };
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+    // iOS 13+: Zugriff auf Bewegungssensoren muss explizit per Nutzer-Geste angefragt werden.
+    DeviceMotionEvent.requestPermission().then(res => {
+      if (res === 'granted') start();
+      else showToast('Zugriff auf Bewegungssensor abgelehnt');
+    }).catch(() => showToast('Bewegungssensor nicht verfügbar'));
+  } else if (typeof DeviceMotionEvent !== 'undefined') {
+    start();
+  } else {
+    showToast('Schütteln wird auf diesem Gerät nicht unterstützt');
+  }
 }
 
 /** Kopiert Höhen + alle Positionen (Konsolen, Innengeländer, Netze, Dachfang
@@ -603,6 +744,89 @@ function sectionEnd(sec) {
 /** Rounded key for deduplicating junction positions. */
 function jKey(x, y) { return `${Math.round(x)},${Math.round(y)}`; }
 
+// ── Wand-Erkennung & Spiegeln ────────────────────────────────────────────────
+// Eine "Wand" ist hier eine Kette direkt aneinanderhängender Felder mit
+// gleichem Winkel (das Ende des einen ist der Start des nächsten) – genau wie
+// die Vorlagen (L-/U-Form/Rechteck) sie erzeugen. Nützlich, um bei
+// symmetrischen Gebäuden die gegenüberliegende Wand nicht Feld für Feld neu
+// aufbauen zu müssen.
+
+/** Indizes aller Felder derselben Wand wie state.sections[si], in Reihenfolge. */
+function findWallChain(si) {
+  const sections = state.sections;
+  const start = sections[si];
+  if (!start) return [si];
+  const ang = secAngle(start);
+  const sameAngle = a => Math.abs(normDeg(a) - normDeg(ang)) < 0.5;
+  const samePoint = (x1, y1, x2, y2) => Math.abs(x1 - x2) < 2 && Math.abs(y1 - y2) < 2;
+
+  const chain = [si];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const last = sections[chain[chain.length - 1]];
+    const end = sectionEnd(last);
+    const idx = sections.findIndex((s, i) =>
+      !chain.includes(i) && sameAngle(secAngle(s)) && samePoint(s.x0, s.y0, end.x, end.y));
+    if (idx >= 0) { chain.push(idx); changed = true; }
+  }
+  changed = true;
+  while (changed) {
+    changed = false;
+    const first = sections[chain[0]];
+    const idx = sections.findIndex((s, i) => {
+      if (chain.includes(i) || !sameAngle(secAngle(s))) return false;
+      const e = sectionEnd(s);
+      return samePoint(e.x, e.y, first.x0, first.y0);
+    });
+    if (idx >= 0) { chain.unshift(idx); changed = true; }
+  }
+  return chain;
+}
+
+/** Spiegelt die Wand, zu der `si` gehört, punktsymmetrisch (180°) durch den
+ *  Mittelpunkt der gesamten aktuellen Zeichnung – ergibt bei rechteckigen/
+ *  L-/U-förmigen Grundrissen genau die gegenüberliegende Wand (gleiche
+ *  Feldlängen/Höhen/Positionen, gespiegelte Richtung). */
+function mirrorWallAt(si) {
+  const chainIdx = findWallChain(si);
+  if (!chainIdx.length) return;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  state.sections.forEach(sec => {
+    const e = sectionEnd(sec);
+    [[sec.x0, sec.y0], [e.x, e.y]].forEach(([x, y]) => {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    });
+  });
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+  const mirrored = chainIdx.map(i => {
+    const sec = state.sections[i];
+    const copy = JSON.parse(JSON.stringify(sec));
+    copy.id = ++_sId;
+    copy.name = (sec.name || '').trim() ? `${sec.name} (Spiegel)` : `Wand ${copy.id}`;
+    copy.x0 = 2 * cx - sec.x0;
+    copy.y0 = 2 * cy - sec.y0;
+    copy.angle = normDeg(secAngle(sec) + 180);
+    copy.dir = nearestCardinal(copy.angle);
+    copy.bays = sec.bays.map(b => {
+      const nb = JSON.parse(JSON.stringify(b));
+      nb.id = ++_bId;
+      nb.positions = (nb.positions || []).map(p => ({ ...p, id: ++_bId }));
+      return nb;
+    });
+    return copy;
+  });
+
+  state.sections.push(...mirrored);
+  selectedSi = state.sections.length - mirrored.length;
+  selectedBi = 0;
+  renderAll();
+  showToast(mirrored.length === 1 ? 'Feld gespiegelt' : `Wand gespiegelt (${mirrored.length} Felder)`);
+}
+
 // ── Layout computation ─────────────────────────────────────────────────────
 
 function computeLayout() {
@@ -711,6 +935,7 @@ function renderSvg() {
   g.innerHTML = '';
   updateAreaReadout();
   scheduleAutosave2d();
+  scheduleUndoSnapshot();
 
   const hasBays = state.sections.some(s => s.bays.length > 0);
   if (!hasBays) {
@@ -2046,6 +2271,22 @@ function openEditSheet(si, bi) {
   copyPasteRow.appendChild(copyBtn);
   copyPasteRow.appendChild(pasteBtn);
 
+  // ── Wand spiegeln ────────────────────────────────────────────────────────
+  // Dupliziert die gesamte Wand (alle direkt verbundenen Felder mit
+  // gleichem Winkel), gespiegelt zur gegenüberliegenden Seite – praktisch bei
+  // symmetrischen Gebäuden, bei denen die andere Seite identisch ist.
+  const mirrorRow = document.createElement('div');
+  mirrorRow.className = 'sheet-actions sheet-copy-paste-row';
+  const mirrorBtn = document.createElement('button');
+  mirrorBtn.type = 'button'; mirrorBtn.className = 'sheet-copy';
+  mirrorBtn.textContent = '⧉ Wand spiegeln';
+  mirrorBtn.title = 'Diese Wand gespiegelt auf die gegenüberliegende Seite kopieren';
+  mirrorBtn.addEventListener('click', () => {
+    mirrorWallAt(si);
+    closeSheet();
+  });
+  mirrorRow.appendChild(mirrorBtn);
+
   actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
 
   sheet.appendChild(hdr);
@@ -2064,6 +2305,7 @@ function openEditSheet(si, bi) {
   sheet.appendChild(konsWrap);
   sheet.appendChild(addKonsBtn);
   sheet.appendChild(copyPasteRow);
+  sheet.appendChild(mirrorRow);
   sheet.appendChild(actRow);
 
   document.body.appendChild(overlay);
@@ -2940,6 +3182,11 @@ function showDevicePicker(onPicked) {
 
 function init() {
   loadFromLinkedProject();
+  // Ausgangs-Snapshot SOFORT (synchron) setzen, nicht erst über das Debounce –
+  // sonst würde eine schnelle erste Aktion (z. B. direkt nach dem Laden eine
+  // Vorlage wählen) den Ausgangszustand überschreiben, bevor er als
+  // Vergleichsbasis übernommen wurde, und der erste Undo-Schritt ginge verloren.
+  lastUndoSnapshot = serializeUndoState();
   document.getElementById('projectName').value = state.project;
   document.getElementById('scaffDepth').value  = state.depth;
   if (linkedProjectId) {
@@ -2983,6 +3230,25 @@ function init() {
     const btn = document.getElementById('snapToggleBtn');
     btn.classList.toggle('snap-off', !snapEnabled);
     btn.title = snapEnabled ? 'Magnetraster: An – tippen zum Ausschalten' : 'Magnetraster: Aus – tippen zum Einschalten';
+  });
+
+  document.getElementById('undoBtn')?.addEventListener('click', performUndo);
+  document.getElementById('redoBtn')?.addEventListener('click', performRedo);
+  document.getElementById('shakeUndoBtn')?.addEventListener('click', toggleShakeUndo);
+  updateUndoRedoButtons();
+
+  // Tastaturkürzel Strg/Cmd+Z (Rückgängig) und Strg/Cmd+Umschalt+Z bzw. +Y
+  // (Wiederholen) – nicht aktiv, während in einem Text-/Zahlenfeld getippt
+  // wird, damit das native Undo dort (z. B. einen Tippfehler rückgängig
+  // machen) weiter normal funktioniert.
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const active = document.activeElement;
+    const tag = active && active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (active && active.isContentEditable)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); performUndo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); performRedo(); }
   });
 
   const svg = document.getElementById('planSvg');

@@ -383,6 +383,51 @@ html, body {
 }
 
 /* ============================================================
+   Backup-Erinnerung (Gesamt-Export lange her)
+   ============================================================ */
+.backup-reminder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #fff4e0;
+  color: #a15c00;
+  border: 1px solid #f5d9a8;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+}
+.backup-reminder-text { flex: 1; min-width: 220px; }
+.backup-reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.backup-reminder-export {
+  background: #a15c00;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.backup-reminder-dismiss {
+  background: none;
+  border: none;
+  color: #a15c00;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+/* ============================================================
    Empty state
    ============================================================ */
 .empty-state {

@@ -7,8 +7,8 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Gerüst 2D-Ansicht</title>
-  <link rel="stylesheet" href="style.css?v=20260705" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260705" />
+  <link rel="stylesheet" href="style.css?v=20260706" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260706" />
 </head>
 <body>
 
@@ -38,6 +38,9 @@
     </div>
     <div class="tool-group actions">
       <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
+      <button id="undoBtn" class="secondary" title="Rückgängig (Strg/Cmd+Z)" disabled>↶</button>
+      <button id="redoBtn" class="secondary" title="Wiederholen (Strg/Cmd+Umschalt+Z)" disabled>↷</button>
+      <button id="shakeUndoBtn" class="secondary" title="Schütteln zum Rückgängigmachen aktivieren">📳</button>
       <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
       <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
       <button id="savePlanBtn" class="secondary">Speichern</button>
@@ -87,6 +90,6 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js?v=20260705"></script>
+  <script src="viewer2d.js?v=20260706"></script>
 </body>
 </html>
