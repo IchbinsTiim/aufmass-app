@@ -176,6 +176,30 @@
   background: var(--pos-color, #999);
   color: #fff;
 }
+.bulk-height-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1.5px solid #cfe6d6;
+  background: #f3fbf5;
+  border-radius: 8px;
+  padding: 0.45rem 0.5rem;
+}
+.bulk-height-apply-btn {
+  align-self: flex-start;
+  padding: 0.35rem 0.6rem;
+  border: none;
+  border-radius: 7px;
+  background: #1f7a3d;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bulk-height-apply-btn:disabled {
+  background: #b8cdbf;
+  cursor: not-allowed;
+}
 .bulk-kons-form {
   display: flex;
   flex-direction: column;
@@ -244,6 +268,12 @@
   outline: 2px solid #6a4bd1;
   background: #f4f0ff;
 }
+.bay-row.active-selected {
+  outline: 2px solid #007aff;
+  background: #eaf4ff;
+  box-shadow: 0 0 0 4px rgba(0,122,255,0.12);
+}
+.bay-row.active-selected .bay-num { background: #007aff; }
 
 /* ── Section card ────────────────────────────────────────────────────── */
 .section-card {
@@ -334,10 +364,17 @@
 }
 .bay-num {
   font-size: 0.72rem;
-  color: #888;
+  color: #fff;
+  background: #0a2f58;
   min-width: 1.6rem;
-  text-align: right;
-  font-weight: 600;
+  max-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-weight: 700;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
 }
 .bay-inp {
   width: 5.5rem;
