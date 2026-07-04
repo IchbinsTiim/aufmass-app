@@ -2048,3 +2048,81 @@ html, body {
     min-height: 44px;
   }
 }
+
+/* ============================================================
+   Hub (start.html): Auswahl-Dialog "Aufmaß" / "2D-Aufmaß"
+   ============================================================ */
+.app-chooser-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.app-chooser-overlay.hidden { display: none; }
+.app-chooser-box {
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 24px 20px;
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+}
+.app-chooser-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-chooser-sub {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 18px;
+}
+.app-chooser-options {
+  display: flex;
+  gap: 12px;
+}
+.app-chooser-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 20px 12px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.app-chooser-option:hover  { border-color: var(--color-primary); }
+.app-chooser-option:active { background: #eaf2ff; }
+.app-chooser-icon  { font-size: 2rem; }
+.app-chooser-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.app-chooser-desc {
+  font-size: 0.74rem;
+  color: var(--color-text-secondary);
+}
+.app-chooser-cancel {
+  margin-top: 16px;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px;
+}

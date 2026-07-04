@@ -684,7 +684,7 @@ function deleteProjectFromOverview(proj) {
 
 function openProjectActionMenu(proj, anchorEl) {
   openFloatingMenu(anchorEl, [
-    { label: 'Öffnen', onClick: () => openProject(proj.id) },
+    { label: 'Öffnen', onClick: () => requestOpenProject(proj) },
     { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
     { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
     { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
@@ -731,7 +731,7 @@ function createProjectCard(proj) {
     ev.stopPropagation();
     openProjectActionMenu(proj, ev.currentTarget);
   });
-  card.addEventListener('click', () => openProject(proj.id));
+  card.addEventListener('click', () => requestOpenProject(proj));
   return card;
 }
 
@@ -762,6 +762,16 @@ function renderProjectOverview() {
 //  Projekt erstellen / öffnen
 // ============================================================
 
+// Zentrale Stelle für "dieses Projekt jetzt öffnen": Auf Seiten mit
+// eingebettetem Editor (index.html) öffnet das wie bisher direkt den
+// Projekt-Editor. Der Hub (start.html) definiert stattdessen
+// `window.onProjectOpenRequest`, um vorher zwischen Aufmaß und 2D-Aufmaß
+// wählen zu lassen – ohne dass sich an index.html selbst etwas ändert.
+function requestOpenProject(proj) {
+  if (typeof window.onProjectOpenRequest === 'function') { window.onProjectOpenRequest(proj); return; }
+  openProject(proj.id);
+}
+
 function createNewProject() {
   const today = new Date().toISOString().slice(0, 10);
   const proj = {
@@ -782,7 +792,7 @@ function createNewProject() {
   };
   projects.push(proj);
   saveProjects();
-  openProject(proj.id);
+  requestOpenProject(proj);
 }
 
 function openProject(projectId, opts) {
@@ -2828,27 +2838,31 @@ function initApp() {
     });
   }
 
-  document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
+  document.getElementById('newProjectBtn')?.addEventListener('click', createNewProject);
 
-  document.getElementById('backBtn').addEventListener('click', () => {
+  // Die folgenden Elemente existieren nur auf Seiten mit eingebettetem
+  // Projekt-Editor (#projectScreen, z. B. index.html). Auf reinen
+  // Übersichtsseiten (z. B. start.html) fehlen sie – daher optional verknüpft,
+  // ohne dass sich am bestehenden Verhalten dort etwas ändert, wo sie existieren.
+  document.getElementById('backBtn')?.addEventListener('click', () => {
     flushAutosave();
     goToOverview();
   });
 
-  document.getElementById('deleteProjectBtn').addEventListener('click', deleteCurrentProject);
-  document.getElementById('addSideBtn').addEventListener('click', addSide);
-  document.getElementById('addSideBtnBottom').addEventListener('click', addSide);
-  document.getElementById('saveProjectBtn').addEventListener('click', saveCurrentProject);
-  document.getElementById('exportPdfBtn').addEventListener('click', generatePDF);
-  document.getElementById('calcAnfahrtBtn').addEventListener('click', autoCalcAnfahrt);
-  document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
-  document.getElementById('importJsonBtn').addEventListener('click', () => {
+  document.getElementById('deleteProjectBtn')?.addEventListener('click', deleteCurrentProject);
+  document.getElementById('addSideBtn')?.addEventListener('click', addSide);
+  document.getElementById('addSideBtnBottom')?.addEventListener('click', addSide);
+  document.getElementById('saveProjectBtn')?.addEventListener('click', saveCurrentProject);
+  document.getElementById('exportPdfBtn')?.addEventListener('click', generatePDF);
+  document.getElementById('calcAnfahrtBtn')?.addEventListener('click', autoCalcAnfahrt);
+  document.getElementById('exportJsonBtn')?.addEventListener('click', exportJson);
+  document.getElementById('importJsonBtn')?.addEventListener('click', () => {
     document.getElementById('importFileInput').click();
   });
-  document.getElementById('importFileInput').addEventListener('change', handleImportFile);
+  document.getElementById('importFileInput')?.addEventListener('change', handleImportFile);
   document.getElementById('open2dBtn')?.addEventListener('click', open2dViewer);
 
-  document.getElementById('addZusatzBtn').addEventListener('click', () => {
+  document.getElementById('addZusatzBtn')?.addEventListener('click', () => {
     const container = document.getElementById('zusatzContainer');
     container.appendChild(createZusatzRow({}));
     refreshNoZusatzHint();
@@ -2895,11 +2909,13 @@ function initApp() {
   // Projektbildschirm löst (gebündelt) einen Auto-Save aus – deckt Anschrift,
   // Technik, Logistik, Hausseiten, Positionen, Projektname & Status ab.
   const projectScreenEl = document.getElementById('projectScreen');
-  projectScreenEl.addEventListener('input',  scheduleAutosave);
-  projectScreenEl.addEventListener('change', scheduleAutosave);
-  projectScreenEl.addEventListener('click', e => {
-    if (e.target.closest('button')) scheduleAutosave();
-  });
+  if (projectScreenEl) {
+    projectScreenEl.addEventListener('input',  scheduleAutosave);
+    projectScreenEl.addEventListener('change', scheduleAutosave);
+    projectScreenEl.addEventListener('click', e => {
+      if (e.target.closest('button')) scheduleAutosave();
+    });
+  }
 
   // Projektübersicht: Suche, Status-Filter, Sortierung
   document.getElementById('searchInput')?.addEventListener('input', e => {
