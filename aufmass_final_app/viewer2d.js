@@ -831,34 +831,41 @@ function renderSvg() {
       g.appendChild(t);
     };
 
-    // Feldbezeichnung (z. B. "A1") – als deutlich sichtbares Schild oberhalb der
-    // Feldlänge, unabhängig von der Feld-Drehung immer aufrecht lesbar. Färbt
-    // sich je nach Auswahlzustand ein, damit auch klar ist, WELCHES Feld gerade
-    // ausgewählt bzw. in der Mehrfachauswahl markiert ist.
-    const fieldLabel   = bayLabel(state.sections[el.si], el.bi);
-    const nameFontMax  = Math.max(depth * 0.44, 12);
-    let   nameFont     = nameFontMax;
-    const maxNameW     = el.len * PX_PER_M * 0.92;
-    let   nameW        = fieldLabel.length * nameFont * 0.64 + nameFont * 1.1;
-    if (nameW > maxNameW) { nameFont *= maxNameW / nameW; nameW = maxNameW; }
-    const namePillH  = nameFont * 1.55;
-    const nameY      = ecy - (bayFontSize * 0.5 + namePillH * 0.5 + nameFont * 0.2);
-    const namePillBg = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : '#0a2f58');
-    const nameRot    = labelRot ? `rotate(${labelRot.toFixed(1)},${ecx},${nameY})` : '';
-    g.appendChild(svgEl('rect', {
-      x: ecx - nameW / 2, y: nameY - namePillH / 2, width: nameW, height: namePillH,
-      rx: namePillH * 0.28, fill: namePillBg, transform: nameRot, 'pointer-events': 'none'
-    }));
-    const nameTxt = svgEl('text', {
-      x: ecx, y: nameY,
-      'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': nameFont, 'font-family': 'system-ui, sans-serif',
-      fill: '#fff', 'font-weight': '800',
-      transform: nameRot,
-      'pointer-events': 'none'
-    });
-    nameTxt.textContent = fieldLabel;
-    g.appendChild(nameTxt);
+    // Feldbezeichnung (z. B. "A1") – als kleines Kästchen in der Feld-Ecke,
+    // nicht im PDF-Export (dort zählen nur Maße/Positionen). Färbt sich je
+    // nach Auswahlzustand ein, damit klar ist, WELCHES Feld gerade ausgewählt
+    // bzw. in der Mehrfachauswahl markiert ist.
+    if (!pdfMode) {
+      const fieldLabel = bayLabel(state.sections[el.si], el.bi);
+      const cornerFont = Math.max(depth * 0.24, 9);
+      const padX       = cornerFont * 0.45;
+      const boxH       = cornerFont * 1.4;
+      let   labelFont  = cornerFont;
+      let   boxW       = fieldLabel.length * labelFont * 0.62 + padX * 2;
+      const maxBoxW    = el.len * PX_PER_M * 0.55;
+      if (boxW > maxBoxW) { labelFont *= maxBoxW / boxW; boxW = maxBoxW; }
+      const cornerPad  = Math.max(depth * 0.08, 3);
+      const bbMinX     = Math.min(p0.x, p1.x, p2.x, p3.x);
+      const bbMinY     = Math.min(p0.y, p1.y, p2.y, p3.y);
+      const boxX = bbMinX + cornerPad, boxY = bbMinY + cornerPad;
+      const boxCx = boxX + boxW / 2, boxCy = boxY + boxH / 2;
+      const boxBg  = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : '#0a2f58');
+      const boxRot = labelRot ? `rotate(${labelRot.toFixed(1)},${boxCx},${boxCy})` : '';
+      g.appendChild(svgEl('rect', {
+        x: boxX, y: boxY, width: boxW, height: boxH,
+        rx: boxH * 0.25, fill: boxBg, transform: boxRot, 'pointer-events': 'none'
+      }));
+      const nameTxt = svgEl('text', {
+        x: boxCx, y: boxCy,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': labelFont, 'font-family': 'system-ui, sans-serif',
+        fill: '#fff', 'font-weight': '800',
+        transform: boxRot,
+        'pointer-events': 'none'
+      });
+      nameTxt.textContent = fieldLabel;
+      g.appendChild(nameTxt);
+    }
 
     // Feldlänge mittig.
     const txt = svgEl('text', {
