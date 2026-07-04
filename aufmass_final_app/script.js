@@ -304,6 +304,28 @@ function computeCardFlaeche(card) {
   return round2(total);
 }
 
+// Größte eingetragene Höhe einer Karte (über alle Abschnitte/Messungen hinweg,
+// inkl. Zuschlag und – bei Giebeln – der Spitzenhöhe H2). Dient als
+// Vorschlagsgrundlage für Positionen, die sich an der Wandhöhe orientieren
+// (z. B. Treppenturm: Höhe der Seite + Überstand).
+function computeCardMaxHoehe(card) {
+  let max = 0;
+  card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+    const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active') || false;
+    abRow.querySelectorAll('.messung-row').forEach(mRow => {
+      const h  = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+      const hZ = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+      if (!isNaN(h)) { const hEff = (h || 0) + hZ; if (hEff > max) max = hEff; }
+      if (isGiebel) {
+        const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+        const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
+        if (!isNaN(h2)) { const h2Eff = (h2 || 0) + h2Z; if (h2Eff > max) max = h2Eff; }
+      }
+    });
+  });
+  return round2(max);
+}
+
 // Migration eines alten Boolean-Zuschlags ("+2m"-Taste an/aus) auf den neuen
 // individuellen, numerischen Zuschlagwert je Feld (Schema 2.2).
 function migrateMessung(m) {
@@ -688,6 +710,7 @@ function createProjectCard(proj) {
     statsParts.push(stats2d.felder + ' Feld' + (stats2d.felder !== 1 ? 'er' : ''));
     statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
   }
+  const vzList = Array.isArray(proj.technik?.verwendungszweck) ? proj.technik.verwendungszweck : [];
 
   card.innerHTML = `
     <div class="project-card2-top">
@@ -699,6 +722,7 @@ function createProjectCard(proj) {
     ${bauherr ? `<div class="project-card2-line">${bauherr}</div>` : ''}
     ${addrParts ? `<div class="project-card2-line project-card2-addr">${addrParts}</div>` : ''}
     ${proj.anschrift?.telefon ? `<div class="project-card2-line">${proj.anschrift.telefon}</div>` : ''}
+    ${vzList.length ? `<div class="project-card2-vz">${vzList.map(v => `<span class="project-card2-vz-tag">${v}</span>`).join('')}</div>` : ''}
     <div class="project-card2-stats">${statsParts.join(' · ')}</div>
     <div class="project-card2-dates">Erstellt ${fmtDate(proj.erstellt)} · Geändert ${fmtDate(proj.geaendert)}</div>
   `;
@@ -842,20 +866,30 @@ function collectGeruesttyp() {
 
 function collectTechnik() {
   const ankerVal = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
+  const verwendungszweck = Array.from(
+    document.querySelectorAll('#verwendungszweckSelector .chip-btn.active')
+  ).map(b => b.dataset.vz);
   return {
     lastklasse:        document.getElementById('fieldLastklasse')?.value        || '',
     breitenklasse:     document.getElementById('fieldBreitenklasse')?.value     || '',
-    verwendungszweck:  document.getElementById('fieldVerwendungszweck')?.value  || '',
+    verwendungszweck,
     verankerungsgrund: document.getElementById('fieldVerankerungsgrund')?.value || '',
     ankerAnzahl:       isNaN(ankerVal) ? null : ankerVal
   };
 }
 
 function loadTechnik(t) {
+  document.querySelectorAll('#verwendungszweckSelector .chip-btn').forEach(b => b.classList.remove('active'));
   if (!t) return;
   document.getElementById('fieldLastklasse').value        = t.lastklasse        || '';
   document.getElementById('fieldBreitenklasse').value     = t.breitenklasse     || '';
-  document.getElementById('fieldVerwendungszweck').value  = t.verwendungszweck  || '';
+  // Alte Projekte speichern hier einen einzelnen String statt eines Arrays.
+  const vzList = Array.isArray(t.verwendungszweck)
+    ? t.verwendungszweck
+    : (t.verwendungszweck ? [t.verwendungszweck] : []);
+  document.querySelectorAll('#verwendungszweckSelector .chip-btn').forEach(b => {
+    b.classList.toggle('active', vzList.includes(b.dataset.vz));
+  });
   document.getElementById('fieldVerankerungsgrund').value = t.verankerungsgrund || '';
   document.getElementById('fieldAnkerAnzahl').value       = t.ankerAnzahl != null ? t.ankerAnzahl : '';
 }
@@ -984,6 +1018,7 @@ function collectSeiten() {
 
     const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
     const ttInp    = card.querySelector('.accessory-length-input[data-acc="tt"]');
+    const ttL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="tt"]');
     const ttVal    = ttInp ? parseNum(ttInp.value) : NaN;
 
     const ksInp  = card.querySelector('.ks-input');
@@ -1005,7 +1040,7 @@ function collectSeiten() {
       gittertraeger:     collectSingleToggle('gt'),
       fussgaengertunnel: collectSingleToggle('ft'),
       treppenturm: (ttToggle && ttToggle.classList.contains('active'))
-        ? { hoehe: isNaN(ttVal) ? null : ttVal }
+        ? { hoehe: isNaN(ttVal) ? null : ttVal, autoL1: ttL1Btn ? ttL1Btn.dataset.active === '1' : false }
         : null,
       netze:    collectSingleToggle('ne'),
       ks:       isNaN(ksVal) ? null : ksVal,
@@ -1311,11 +1346,15 @@ function createSeiteCard(seiteData) {
     chevron.classList.toggle('open', !isOpen);
   });
 
-  // Initialer KS-Sync
+  // Initialer Sync: KS-Feld sowie alle aktiven Auto-Positionen (Konsole/IG "= L1",
+  // Treppenturm "= H+Ü", Netze "= Fläche") – muss erst NACH dem vollständigen
+  // Zusammenbau der Karte laufen, da die Abschnitts-Messwerte bis dahin noch
+  // nicht im DOM von `card` stehen.
   if (ksInputRef && !ksInputRef._ksManual) {
     const fl = computeCardFlaeche(card);
     if (fl > 0) ksInputRef.value = fl.toFixed(2);
   }
+  if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
 
   updateCardPreview(card, previewEl);
   return card;
@@ -1834,7 +1873,14 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return lEff > 0 ? round2(lEff) : null;
   }
 
-  function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel) {
+  // `getAutoValue`/`autoLabel` erlauben abweichende Vorschlagsquellen statt der
+  // Standard-Länge des ersten Abschnitts (L1) – z. B. Fläche der Seite (Netze)
+  // oder Höhe + Überstand (Treppenturm). Ohne Angabe verhält sich die Funktion
+  // wie bisher (Länge von L1).
+  function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel, autoLabel, getAutoValue) {
+    autoLabel     = autoLabel || '= L1';
+    getAutoValue  = getAutoValue || getL1;
+
     const wrap = document.createElement('div');
     wrap.className = 'acc-inline-length';
 
@@ -1843,8 +1889,9 @@ function createAccessoriesSection(seiteData, card, onChange) {
     l1Btn.className = 'accessory-l1-btn' + (initAutoL1 ? ' active' : '');
     l1Btn.dataset.active = initAutoL1 ? '1' : '0';
     if (accKey) l1Btn.dataset.acc = accKey;
-    l1Btn.textContent = '= L1';
-    l1Btn.title = 'Länge vom ersten Abschnitt übernehmen';
+    l1Btn.textContent = autoLabel;
+    l1Btn._getAutoValue = getAutoValue;
+    l1Btn.title = autoLabel === '= L1' ? 'Länge vom ersten Abschnitt übernehmen' : 'Automatisch berechneten Vorschlagswert übernehmen';
 
     const inp = document.createElement('input');
     inp.type = 'number';
@@ -1856,14 +1903,14 @@ function createAccessoriesSection(seiteData, card, onChange) {
     inp.placeholder = '0,00';
     if (initLaenge !== null && initLaenge !== undefined && !isNaN(initLaenge)) inp.value = initLaenge;
     inp.disabled = initAutoL1;
-    if (initAutoL1) { const v = getL1(); if (v !== null && !isNaN(v)) inp.value = v; }
+    if (initAutoL1) { const v = getAutoValue(); if (v !== null && !isNaN(v)) inp.value = v; }
 
     l1Btn.addEventListener('click', () => {
       const nowActive = l1Btn.dataset.active === '1';
       l1Btn.dataset.active = nowActive ? '0' : '1';
       l1Btn.classList.toggle('active', !nowActive);
       inp.disabled = !nowActive;
-      if (!nowActive) { const v = getL1(); if (v !== null && !isNaN(v)) inp.value = v; }
+      if (!nowActive) { const v = getAutoValue(); if (v !== null && !isNaN(v)) inp.value = v; }
       onChange();
     });
     inp.addEventListener('input', onChange);
@@ -1878,7 +1925,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return wrap;
   }
 
-  function createSingleAcc(accKey, labelText, initData, unitLabel) {
+  function createSingleAcc(accKey, labelText, initData, unitLabel, autoLabel, getAutoValue, defaultAuto, valueField) {
+    valueField = valueField || 'laenge';
     const row = document.createElement('div');
     row.className = 'acc-single-row';
 
@@ -1888,7 +1936,13 @@ function createAccessoriesSection(seiteData, card, onChange) {
     toggleBtn.dataset.acc = accKey;
     toggleBtn.textContent = labelText;
 
-    const lenWrap = createInlineLength(accKey, initData ? initData.laenge : null, initData ? (initData.autoL1 || false) : false, unitLabel);
+    // Neue (noch nie gespeicherte) Position: startet im übergebenen `defaultAuto`-
+    // Modus (z. B. Netze/Treppenturm sofort mit Vorschlagswert). Bereits
+    // gespeicherte Positionen behalten ihren zuletzt gewählten Auto/Manuell-Zustand.
+    const initAutoL1 = initData
+      ? (initData.autoL1 !== undefined ? initData.autoL1 : !!defaultAuto)
+      : !!defaultAuto;
+    const lenWrap = createInlineLength(accKey, initData ? initData[valueField] : null, initAutoL1, unitLabel, autoLabel, getAutoValue);
     lenWrap.style.display = initData ? '' : 'none';
 
     toggleBtn.addEventListener('click', () => {
@@ -1912,7 +1966,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     const lageBtns = document.createElement('div');
     lageBtns.className = 'acc-lage-btns';
     const currentLage   = (data && data.lage != null) ? String(data.lage) : 'alle';
-    const isPresetLage  = ['alle', '1', '2'].includes(currentLage);
+    const isPresetLage  = ['alle', '1', '2', '3', '4', '5'].includes(currentLage);
 
     const lageFreeInp = document.createElement('input');
     lageFreeInp.type = 'number';
@@ -1923,7 +1977,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     lageFreeInp.placeholder = 'Anz.';
     if (!isPresetLage) lageFreeInp.value = currentLage;
 
-    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']].forEach(([val, lbl]) => {
+    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen']].forEach(([val, lbl]) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'lage-btn' + (isPresetLage && currentLage === val ? ' active' : '');
@@ -2146,49 +2200,25 @@ function createAccessoriesSection(seiteData, card, onChange) {
   section.appendChild(createSingleAcc('gt', 'Gitterträger (GT)',       seiteData.gittertraeger     || null));
   section.appendChild(createSingleAcc('ft', 'Fußgängertunnel (FT)',   seiteData.fussgaengertunnel || null));
 
-  // Treppenturm (Höhe)
-  const ttData = seiteData.treppenturm || null;
-  const ttRow  = document.createElement('div');
-  ttRow.className = 'acc-single-row';
+  // Treppenturm: Vorschlagshöhe = größte Höhe der Seite + Überstand (Standard
+  // 2,00 m, wie bei den anderen "+Xm"-Zuschlägen einstellbar). Bei mehreren
+  // Höhen auf der Seite wird die größte verwendet. Der Vorschlag bleibt jederzeit
+  // manuell überschreibbar (Auto-Taste deaktivieren oder Wert direkt ändern).
+  section.appendChild(createSingleAcc(
+    'tt', 'Treppenturm (TT)', seiteData.treppenturm || null, 'm (H)',
+    '= H+' + fmtNum(ueberstandWert) + 'm',
+    () => { const h = computeCardMaxHoehe(card); return h > 0 ? round2(h + ueberstandWert) : null; },
+    true,
+    'hoehe'
+  ));
 
-  const ttBtn = document.createElement('button');
-  ttBtn.type = 'button';
-  ttBtn.className = 'accessory-toggle' + (ttData ? ' active' : '');
-  ttBtn.dataset.acc = 'tt';
-  ttBtn.textContent = 'Treppenturm (TT)';
-
-  const ttWrap = document.createElement('div');
-  ttWrap.className = 'acc-inline-length';
-  ttWrap.style.display = ttData ? '' : 'none';
-
-  const ttInp = document.createElement('input');
-  ttInp.type = 'number';
-  ttInp.className = 'accessory-length-input';
-  ttInp.dataset.acc = 'tt';
-  ttInp.step = '0.01';
-  ttInp.min = '0';
-  ttInp.inputMode = 'decimal';
-  ttInp.placeholder = '0,00';
-  if (ttData && ttData.hoehe !== null && !isNaN(ttData.hoehe)) ttInp.value = ttData.hoehe;
-  ttInp.addEventListener('input', onChange);
-
-  const ttUnit = document.createElement('span');
-  ttUnit.className = 'accessory-length-unit';
-  ttUnit.textContent = 'm (H)';
-
-  ttWrap.appendChild(ttInp);
-  ttWrap.appendChild(ttUnit);
-  ttBtn.addEventListener('click', () => {
-    const wasActive = ttBtn.classList.contains('active');
-    ttBtn.classList.toggle('active', !wasActive);
-    ttWrap.style.display = wasActive ? 'none' : '';
-    onChange();
-  });
-  ttRow.appendChild(ttBtn);
-  ttRow.appendChild(ttWrap);
-  section.appendChild(ttRow);
-
-  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null, 'm²'));
+  // Netze: Vorschlags-m² = Gerüstfläche der Seite (wie beim KS-Feld).
+  section.appendChild(createSingleAcc(
+    'ne', 'Netze (NE)', seiteData.netze || null, 'm²',
+    '= Fläche',
+    () => { const fl = computeCardFlaeche(card); return fl > 0 ? fl : null; },
+    true
+  ));
 
   // L1-Sync
   section._syncL1 = function() {
@@ -2197,7 +2227,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
       if (!wrap) return;
       const inp = wrap.querySelector('.accessory-length-input');
       if (!inp) return;
-      const v = getL1();
+      const v = (l1Btn._getAutoValue || getL1)();
       if (v !== null && !isNaN(v)) inp.value = v;
     });
   };
@@ -2448,6 +2478,7 @@ async function autoCalcAnfahrt() {
 function generatePDF() {
   const anschrift  = collectAnschrift();
   const geruesttyp = collectGeruesttyp();
+  const technik    = collectTechnik();
   const seiten     = collectSeiten();
   const logistik   = collectLogistik();
   const zusatz     = collectZusatzpositionen();
@@ -2522,6 +2553,9 @@ function generatePDF() {
   if (anschrift.bauherr)  { doc.setFontSize(10); doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 5; }
   if (anschrift.telefon)  { doc.setFontSize(10); doc.text('Telefon: ' + anschrift.telefon, LM, y); y += 5; }
   doc.setFontSize(10); doc.text(geruesttypLabel, LM, y); y += 5;
+  if (technik.verwendungszweck.length) {
+    doc.text('Verwendungszweck: ' + technik.verwendungszweck.join(', '), LM, y); y += 5;
+  }
   y += 2;
 
   // ── Gerüstfläche ──────────────────────────────────────────────
@@ -2841,6 +2875,12 @@ function initApp() {
       document.getElementById('sonderNameRow').style.display =
         btn.dataset.type === 'sonder' ? '' : 'none';
     });
+  });
+
+  // Verwendungszweck: Mehrfachauswahl – jeder Chip lässt sich unabhängig
+  // von den anderen ein-/ausschalten (oft mehrere Gewerke am selben Objekt).
+  document.querySelectorAll('#verwendungszweckSelector .chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => btn.classList.toggle('active'));
   });
 
   // Status-Toggle (Projekt-Status)
