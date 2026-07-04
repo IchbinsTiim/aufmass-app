@@ -235,6 +235,7 @@ let pendingDir     = 'S';
 let pendingLen     = null;
 let addCtxDirFixed = false;  // true when direction already chosen via directional button
 let selectedSi     = null;   // index of currently selected section (shows + buttons)
+let selectedBi     = null;   // index of currently selected bay within selectedSi (highlight + label)
 let snapEnabled    = true;   // magnetic grid snapping on/off
 let pdfMode        = false;  // when true: render clean plan (no handles)
 
@@ -253,6 +254,9 @@ const bulkSelected  = new Set();   // Set von bay.id
 let bulkKonsTyp     = KONSOLE_TYPES[0];
 let bulkKonsLagen   = '1';
 let bulkKonsBilling = 'lagen';
+// Höhen, die per "Übernehmen" auf alle ausgewählten Felder übertragen werden.
+let bulkHL          = null;
+let bulkHR          = null;
 
 // ── Projektverwaltung (gemeinsam mit der Aufmaß-Hauptapp) ───────────────────
 // Wird der 2D-Zeichner aus einem Projekt heraus geöffnet, teilt er sich die
@@ -395,6 +399,15 @@ function normalizeBay(bay) {
 function mkSection(dir = 'S', x0 = 0, y0 = 0) {
   const id = ++_sId;
   return { id, name: `A${id}`, dir, angle: DIR_TO_ANGLE[dir] ?? 90, bays: [], x0, y0 };
+}
+
+/** Eindeutige, gut lesbare Feldbezeichnung (z. B. "A1", "Ost 3") – basiert auf
+ *  dem (frei editierbaren) Sektionsnamen. Eine Sektion hat in der Praxis genau
+ *  ein Feld; besitzt sie ausnahmsweise mehrere (ältere Daten), wird die
+ *  Feldnummer angehängt, damit jedes Feld weiter eindeutig benennbar bleibt. */
+function bayLabel(sec, bi) {
+  const base = (sec && sec.name && sec.name.trim()) || `S${sec ? sec.id : '?'}`;
+  return sec && sec.bays.length > 1 ? `${base}.${bi + 1}` : base;
 }
 
 // ── Geometry helpers ───────────────────────────────────────────────────────
@@ -759,18 +772,22 @@ function renderSvg() {
     const bayData    = state.sections[el.si].bays[el.bi];
     normalizeBay(bayData);
     const positions  = bayData.positions || [];
-    const isSelected = el.si === selectedSi;
+    const isSelected     = el.si === selectedSi && el.bi === selectedBi;
+    const isBulkSelected = bulkMode && bulkSelected.has(bayData.id);
     const poly = svgEl('polygon', {
       points: ptsStr(el.pts),
-      fill: '#deeeff',
-      stroke: isSelected ? '#0a2f58' : '#2c6fa8',
-      'stroke-width': isSelected ? 3.5 : 2,
+      fill: isBulkSelected ? '#6a4bd1' : (isSelected ? '#8ec4f5' : '#deeeff'),
+      'fill-opacity': isBulkSelected ? 0.30 : 1,
+      stroke: isBulkSelected ? '#6a4bd1' : (isSelected ? '#0a2f58' : '#2c6fa8'),
+      'stroke-width': (isSelected || isBulkSelected) ? 4 : 2,
+      style: isSelected ? 'filter:drop-shadow(0 0 6px rgba(0,122,255,0.75))' : '',
       cursor: 'pointer'
     });
     poly.addEventListener('click', ev => {
       ev.stopPropagation();
       if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → kein Öffnen
       selectedSi = el.si;
+      selectedBi = el.bi;
       renderSvg();
       openEditSheet(el.si, el.bi);
     });
@@ -813,6 +830,35 @@ function renderSvg() {
       t.textContent = str;
       g.appendChild(t);
     };
+
+    // Feldbezeichnung (z. B. "A1") – als deutlich sichtbares Schild oberhalb der
+    // Feldlänge, unabhängig von der Feld-Drehung immer aufrecht lesbar. Färbt
+    // sich je nach Auswahlzustand ein, damit auch klar ist, WELCHES Feld gerade
+    // ausgewählt bzw. in der Mehrfachauswahl markiert ist.
+    const fieldLabel   = bayLabel(state.sections[el.si], el.bi);
+    const nameFontMax  = Math.max(depth * 0.44, 12);
+    let   nameFont     = nameFontMax;
+    const maxNameW     = el.len * PX_PER_M * 0.92;
+    let   nameW        = fieldLabel.length * nameFont * 0.64 + nameFont * 1.1;
+    if (nameW > maxNameW) { nameFont *= maxNameW / nameW; nameW = maxNameW; }
+    const namePillH  = nameFont * 1.55;
+    const nameY      = ecy - (bayFontSize * 0.5 + namePillH * 0.5 + nameFont * 0.2);
+    const namePillBg = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : '#0a2f58');
+    const nameRot    = labelRot ? `rotate(${labelRot.toFixed(1)},${ecx},${nameY})` : '';
+    g.appendChild(svgEl('rect', {
+      x: ecx - nameW / 2, y: nameY - namePillH / 2, width: nameW, height: namePillH,
+      rx: namePillH * 0.28, fill: namePillBg, transform: nameRot, 'pointer-events': 'none'
+    }));
+    const nameTxt = svgEl('text', {
+      x: ecx, y: nameY,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': nameFont, 'font-family': 'system-ui, sans-serif',
+      fill: '#fff', 'font-weight': '800',
+      transform: nameRot,
+      'pointer-events': 'none'
+    });
+    nameTxt.textContent = fieldLabel;
+    g.appendChild(nameTxt);
 
     // Feldlänge mittig.
     const txt = svgEl('text', {
@@ -1096,6 +1142,7 @@ function quickExtend(si, side) {
   ns.bays.push(mkBay(len));
   state.sections.push(ns);
   selectedSi = state.sections.length - 1;   // neues Feld direkt auswählen
+  selectedBi = 0;
   renderAll();
 }
 
@@ -1106,6 +1153,7 @@ function onRotateHandleDown(e) {
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
   selectedSi = si;
+  selectedBi = 0;
   drag = {
     type: 'rotate', si,
     startAngle: secAngle(state.sections[si]),
@@ -1120,6 +1168,7 @@ function onMoveHandleDown(e) {
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
   selectedSi = si;
+  selectedBi = 0;
   const sec = state.sections[si];
   drag = {
     type: 'move', si,
@@ -1499,6 +1548,7 @@ function commitAddField(dir, len) {
   sec.bays.push(newBay);
   state.sections.push(sec);
   selectedSi = state.sections.length - 1;
+  selectedBi = 0;
   addCtx = null;
   renderAll();
 }
@@ -1511,6 +1561,8 @@ function openEditSheet(si, bi) {
   const bay = sec && sec.bays[bi];
   if (!sec || !bay) return;
   normalizeBay(bay);
+  selectedSi = si;
+  selectedBi = bi;
 
   const overlay = document.createElement('div');
   overlay.id = 'sheetOverlay';
@@ -1524,7 +1576,7 @@ function openEditSheet(si, bi) {
 
   const hdr = document.createElement('div');
   hdr.className = 'sheet-header';
-  hdr.textContent = `Feld ${sec.name}`;
+  hdr.textContent = `Feld ${bayLabel(sec, bi)}`;
 
   // Direction row (always shown – essential on iPhone where side panel is hidden)
   const dirRow = document.createElement('div');
@@ -1942,6 +1994,7 @@ function openEditSheet(si, bi) {
   delBtn.addEventListener('click', () => {
     sec.bays.splice(bi, 1);
     if (sec.bays.length === 0) state.sections.splice(si, 1);
+    selectedSi = null; selectedBi = null;
     renderAll(); closeSheet();
   });
 
@@ -1954,6 +2007,7 @@ function openEditSheet(si, bi) {
     ns.bays.push(mkBay(bay.len));
     state.sections.splice(si + 1, 0, ns);
     selectedSi = si + 1;
+    selectedBi = 0;
     renderAll(); closeSheet();
   });
 
@@ -2056,7 +2110,7 @@ function renderBulkBar() {
   toggleBtn.textContent = bulkMode ? '✕ Mehrfachauswahl beenden' : '☑ Mehrere Felder bearbeiten';
   toggleBtn.addEventListener('click', () => {
     bulkMode = !bulkMode;
-    if (!bulkMode) bulkSelected.clear();
+    if (!bulkMode) { bulkSelected.clear(); bulkHL = null; bulkHR = null; }
     renderAll();
   });
   el.appendChild(toggleBtn);
@@ -2097,6 +2151,74 @@ function renderBulkBar() {
     el.appendChild(hint);
     return;
   }
+
+  // Höhe für die gesamte Auswahl: einmal eingeben, per Klick auf alle
+  // markierten Felder übertragen – ohne deren sonstige Positionen anzutasten.
+  const heightLabel = document.createElement('div');
+  heightLabel.className = 'bulk-section-label';
+  heightLabel.textContent = 'Höhe für Auswahl übernehmen';
+  el.appendChild(heightLabel);
+
+  const heightForm = document.createElement('div');
+  heightForm.className = 'bulk-height-form';
+
+  const heightRow = document.createElement('div');
+  heightRow.className = 'bay-height-row';
+
+  const applyHeightBtn = document.createElement('button');
+  applyHeightBtn.type = 'button'; applyHeightBtn.className = 'bulk-height-apply-btn';
+
+  const syncApplyHeightBtn = () => {
+    const n = selectedBays.length;
+    applyHeightBtn.textContent = 'Höhe auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' übernehmen';
+    applyHeightBtn.disabled = bulkHL == null && bulkHR == null;
+  };
+
+  const makeBulkHeight = (labelTxt, get, set) => {
+    const field = document.createElement('div');
+    field.className = 'bay-height-field';
+    const lab = document.createElement('span');
+    lab.className = 'bay-height-label'; lab.textContent = labelTxt;
+    const hInp = document.createElement('input');
+    hInp.type = 'number'; hInp.className = 'bay-height-inp';
+    hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
+    hInp.value = get() == null ? '' : get().toFixed(2);
+    hInp.addEventListener('input', () => {
+      const v = parseFloat(hInp.value);
+      set((isNaN(v) || v < 0) ? null : +v.toFixed(2));
+      syncApplyHeightBtn();
+    });
+    field.appendChild(lab); field.appendChild(hInp);
+    return { field, input: hInp };
+  };
+  const bulkHLeft  = makeBulkHeight('H links',  () => bulkHL, v => bulkHL = v);
+  const bulkHRight = makeBulkHeight('H rechts', () => bulkHR, v => bulkHR = v);
+  const bulkHEqBtn = document.createElement('button');
+  bulkHEqBtn.type = 'button'; bulkHEqBtn.className = 'bay-height-eq';
+  bulkHEqBtn.title = 'Beide Höhen gleich setzen'; bulkHEqBtn.textContent = '=';
+  bulkHEqBtn.addEventListener('click', () => {
+    const src = bulkHL != null ? bulkHL : bulkHR;
+    if (src == null) return;
+    bulkHL = src; bulkHR = src;
+    bulkHLeft.input.value = src.toFixed(2); bulkHRight.input.value = src.toFixed(2);
+    syncApplyHeightBtn();
+  });
+  heightRow.appendChild(bulkHLeft.field);
+  heightRow.appendChild(bulkHEqBtn);
+  heightRow.appendChild(bulkHRight.field);
+  heightForm.appendChild(heightRow);
+
+  syncApplyHeightBtn();
+  applyHeightBtn.addEventListener('click', () => {
+    selectedBays.forEach(bay => {
+      if (bulkHL != null) bay.hL = bulkHL;
+      if (bulkHR != null) bay.hR = bulkHR;
+    });
+    renderAll();
+    showToast('Höhe auf ' + selectedBays.length + ' Feldern übernommen');
+  });
+  heightForm.appendChild(applyHeightBtn);
+  el.appendChild(heightForm);
 
   // Einfache Positionen: Chip togglet die Kategorie auf ALLEN ausgewählten
   // Feldern gleichzeitig ein/aus. Menge bleibt je Feld automatisch (Länge/
@@ -2259,7 +2381,9 @@ function renderSections() {
     sec.bays.forEach((bay, bi) => {
       normalizeBay(bay);
       const row = document.createElement('div');
-      row.className = 'bay-row' + (bulkMode && bulkSelected.has(bay.id) ? ' bulk-selected' : '');
+      row.className = 'bay-row'
+        + (bulkMode && bulkSelected.has(bay.id) ? ' bulk-selected' : '')
+        + (si === selectedSi && bi === selectedBi ? ' active-selected' : '');
       row.style.borderLeft = '4px solid #2c6fa8';
 
       // Zeile 1: [Mehrfachauswahl] · Nummer · Längen-Eingabe · Löschen
@@ -2278,7 +2402,7 @@ function renderSections() {
       }
 
       const num = document.createElement('span');
-      num.className = 'bay-num'; num.textContent = `F${bi + 1}`;
+      num.className = 'bay-num'; num.textContent = bayLabel(sec, bi);
 
       const inp = document.createElement('input');
       inp.type = 'number'; inp.className = 'bay-inp';
@@ -2363,7 +2487,7 @@ function renderSections() {
       const editBtn = document.createElement('button');
       editBtn.type = 'button'; editBtn.className = 'bay-pos-edit';
       editBtn.textContent = '+ Positionen';
-      editBtn.addEventListener('click', () => { selectedSi = si; renderSvg(); openEditSheet(si, bi); });
+      editBtn.addEventListener('click', () => { selectedSi = si; selectedBi = bi; renderSvg(); openEditSheet(si, bi); });
       posLine.appendChild(editBtn);
 
       const copyBtn = document.createElement('button');
@@ -2396,6 +2520,7 @@ function renderSections() {
       ns.bays.push(mkBay(sec.bays[sec.bays.length - 1]?.len ?? 2.57));
       state.sections.splice(si + 1, 0, ns);
       selectedSi = si + 1;
+      selectedBi = 0;
       renderAll();
     });
 
@@ -2416,7 +2541,7 @@ function renderAll() { renderBulkBar(); renderSections(); renderSvg(); }
  * @param {Array<{dir:string,len:number,name?:string}>} defs
  */
 function buildFieldChain(defs) {
-  selectedSi = null; _sId = 0; _bId = 0;
+  selectedSi = null; selectedBi = null; _sId = 0; _bId = 0;
   let x = 0, y = 0;
   state.sections = defs.map(def => {
     const s = mkSection(def.dir, x, y);
@@ -2603,8 +2728,10 @@ function aggQtyText(a) {
 // ── PDF Export ─────────────────────────────────────────────────────────────
 
 async function exportPdf() {
-  const prevSelected = selectedSi;
+  const prevSelected   = selectedSi;
+  const prevSelectedBi = selectedBi;
   selectedSi = null;
+  selectedBi = null;
   pdfMode    = true;
   renderSvg();
   try {
@@ -2754,6 +2881,7 @@ async function exportPdf() {
   } finally {
     pdfMode    = false;
     selectedSi = prevSelected;
+    selectedBi = prevSelectedBi;
     renderSvg();
   }
 }
@@ -2857,7 +2985,7 @@ function init() {
   // Tap empty canvas → deselect section (hides + buttons)
   const deselect = () => {
     if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → nicht abwählen
-    if (selectedSi !== null) { selectedSi = null; renderSvg(); }
+    if (selectedSi !== null) { selectedSi = null; selectedBi = null; renderSvg(); }
   };
   svg.addEventListener('click',       deselect);
   svg.addEventListener('pointerdown', e => { if (e.target === svg || e.target.id === 'gridBg') deselect(); });
