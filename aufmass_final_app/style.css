@@ -315,6 +315,20 @@ html, body {
   text-overflow: ellipsis;
 }
 .project-card2-addr { font-weight: 500; color: var(--color-text); }
+.project-card2-vz {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.project-card2-vz-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: #eff6ff;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
 .project-card2-stats {
   margin-top: 6px;
   font-size: 0.78rem;
@@ -455,6 +469,13 @@ html, body {
   letter-spacing: 0.05em;
 }
 
+.form-label-hint {
+  text-transform: none;
+  font-weight: 500;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
 .form-subhead {
   font-size: 0.72rem;
   font-weight: 700;
@@ -513,6 +534,38 @@ html, body {
 }
 
 .type-btn:active {
+  opacity: 0.75;
+}
+
+/* ============================================================
+   Chip-Mehrfachauswahl (z. B. Verwendungszweck: Fenster/Maler/Dach ...)
+   ============================================================ */
+.chip-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-btn {
+  padding: 9px 14px;
+  border: 2px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #f9f9fb;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+.chip-btn.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+
+.chip-btn:active {
   opacity: 0.75;
 }
 

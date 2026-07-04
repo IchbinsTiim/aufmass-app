@@ -149,18 +149,18 @@
             </select>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Verwendungszweck</label>
-            <select class="form-input" id="fieldVerwendungszweck">
-              <option value="">– wählen –</option>
-              <option value="Maler">Maler</option>
-              <option value="Putz">Putz</option>
-              <option value="Klempner">Klempner</option>
-              <option value="Dach">Dach</option>
-              <option value="WDVS">WDVS</option>
-            </select>
+        <div class="form-group">
+          <label class="form-label">Verwendungszweck <span class="form-label-hint">(Mehrfachauswahl möglich)</span></label>
+          <div class="chip-selector" id="verwendungszweckSelector">
+            <button type="button" class="chip-btn" data-vz="Fenster">Fenster</button>
+            <button type="button" class="chip-btn" data-vz="Maler">Maler</button>
+            <button type="button" class="chip-btn" data-vz="Putz">Putz</button>
+            <button type="button" class="chip-btn" data-vz="Klempner">Klempner</button>
+            <button type="button" class="chip-btn" data-vz="Dach">Dach</button>
+            <button type="button" class="chip-btn" data-vz="WDVS">WDVS</button>
           </div>
+        </div>
+        <div class="form-row">
           <div class="form-group">
             <label class="form-label">Verankerungsgrund</label>
             <select class="form-input" id="fieldVerankerungsgrund">
