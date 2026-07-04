@@ -11,6 +11,14 @@ const FOLDERS_STORAGE_KEY = 'aufmass_folders_v1';
 // 2D-Zeichnung) gerade bearbeitet wird, und teilen sich dieselbe Projektliste.
 const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
 
+// Backup-Erinnerung: alles liegt nur in localStorage (kein Cloud-Sync) – bei
+// Gerätewechsel/-defekt wäre sonst alles weg. Erinnert sanft an einen
+// Gesamt-Export, wenn länger keiner gemacht wurde.
+const LAST_BACKUP_STORAGE_KEY      = 'aufmass_last_backup_ts';
+const BACKUP_DISMISS_STORAGE_KEY   = 'aufmass_backup_reminder_dismissed_until';
+const BACKUP_REMIND_AFTER_DAYS     = 7;
+const BACKUP_SNOOZE_DAYS           = 3;
+
 const PROJECT_STATUS = ['in_bearbeitung', 'abgeschlossen', 'archiviert'];
 const PROJECT_STATUS_LABEL = {
   in_bearbeitung: 'In Bearbeitung',
@@ -742,6 +750,7 @@ function renderProjectOverview() {
   if (!gridEl) return;
 
   renderFolderBar();
+  renderBackupReminder();
 
   gridEl.innerHTML = '';
 
@@ -2748,6 +2757,67 @@ function generatePDF() {
 // ============================================================
 //  JSON-Export / Import
 // ============================================================
+
+/** Exportiert ALLE Projekte + Ordner in einer Datei (Gesamt-Backup) – anders
+ *  als exportJson(), das nur das gerade geöffnete Projekt sichert. Wird vom
+ *  Backup-Reminder-Banner sowie optional manuell genutzt. */
+function exportAllProjectsBackup() {
+  const payload = { exportedAt: new Date().toISOString(), projects, folders };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'Aufmass_Backup_' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  localStorage.setItem(LAST_BACKUP_STORAGE_KEY, String(Date.now()));
+  renderBackupReminder();
+  showToast('Backup exportiert');
+}
+
+/** Zeigt/aktualisiert ein dezentes Hinweisbanner über der Projektübersicht,
+ *  wenn länger kein Gesamt-Backup (JSON-Export aller Projekte) gemacht wurde.
+ *  Rein additiv per JS erzeugt – keine Änderung an index.html/start.html nötig. */
+function renderBackupReminder() {
+  const host = document.getElementById('homeScreen');
+  if (!host) return;
+  const content = host.querySelector('main.screen-content');
+  let banner = document.getElementById('backupReminderBanner');
+  if (!content) return;
+
+  const remove = () => { if (banner) banner.remove(); };
+
+  if (projects.length === 0) return remove();
+
+  const dismissedUntil = parseInt(localStorage.getItem(BACKUP_DISMISS_STORAGE_KEY) || '0', 10);
+  if (Date.now() < dismissedUntil) return remove();
+
+  const lastTsRaw = localStorage.getItem(LAST_BACKUP_STORAGE_KEY);
+  const lastTs    = lastTsRaw ? parseInt(lastTsRaw, 10) : null;
+  const days      = lastTs ? Math.floor((Date.now() - lastTs) / 86400000) : null;
+  if (lastTs !== null && days < BACKUP_REMIND_AFTER_DAYS) return remove();
+
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'backupReminderBanner';
+    banner.className = 'backup-reminder';
+    content.prepend(banner);
+  }
+  const msg = lastTs === null
+    ? 'Noch kein Backup erstellt.'
+    : `Seit ${days} Tagen kein Backup.`;
+  banner.innerHTML = `
+    <span class="backup-reminder-text">💾 ${msg} Alle Projekte liegen nur auf diesem Gerät.</span>
+    <span class="backup-reminder-actions">
+      <button type="button" class="backup-reminder-export" id="backupReminderExportBtn">Jetzt exportieren</button>
+      <button type="button" class="backup-reminder-dismiss" id="backupReminderDismissBtn" aria-label="Später erinnern">×</button>
+    </span>`;
+  banner.querySelector('#backupReminderExportBtn').addEventListener('click', exportAllProjectsBackup);
+  banner.querySelector('#backupReminderDismissBtn').addEventListener('click', () => {
+    localStorage.setItem(BACKUP_DISMISS_STORAGE_KEY, String(Date.now() + BACKUP_SNOOZE_DAYS * 86400000));
+    banner.remove();
+  });
+}
 
 function exportJson() {
   const proj = getCurrentProject();
