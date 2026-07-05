@@ -8,7 +8,7 @@
   <meta http-equiv="Expires" content="0" />
   <title>Gerüst 2D-Ansicht</title>
   <link rel="stylesheet" href="style.css?v=20260707" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260707" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260708" />
 </head>
 <body>
 
@@ -35,6 +35,7 @@
     </div>
     <div class="tool-group stats">
       <span class="area-readout" id="areaReadout" title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">Gesamtfläche: 0,00 m²</span>
+      <span class="warnings-readout hidden" id="warningsReadout" title="Felder mit fehlenden oder unvollständigen Angaben"></span>
     </div>
     <div class="tool-group actions">
       <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
@@ -45,10 +46,12 @@
       <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
       <button id="savePlanBtn" class="secondary">Speichern</button>
       <button id="loadPlanBtn" class="secondary">Laden</button>
+      <button id="photosBtn" class="secondary" title="Projekt-Fotos ansehen/hinzufügen">📷 Fotos</button>
       <button id="exportPdfBtn" class="primary">PDF</button>
       <button id="deviceToggleBtn" class="secondary" title="Gerät wechseln">📱</button>
     </div>
     <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
+    <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none" />
   </div>
 
   <div id="appLayout">
@@ -90,6 +93,6 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js?v=20260707"></script>
+  <script src="viewer2d.js?v=20260708"></script>
 </body>
 </html>

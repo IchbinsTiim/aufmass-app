@@ -1432,3 +1432,194 @@ body[data-mode="ipad"] .bottom-sheet.open {
 #undoBtn:disabled, #redoBtn:disabled { opacity: 0.35; cursor: not-allowed; }
 #shakeUndoBtn { font-size: 1.05rem; padding: 0.4rem 0.55rem; }
 #shakeUndoBtn.active { background: #ffe6a8; border-color: #c0591a; }
+
+/* ── Plausibilitätsprüfung (Warnhinweise) ─────────────────────────────── */
+.warnings-readout {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: #fff6e0;
+  border: 1.5px solid #e8c86a;
+  color: #8a6100;
+  font-size: 0.85rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.warnings-readout.hidden { display: none; }
+
+.bay-note-icon,
+.bay-warn-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: help;
+}
+.bay-warn-icon {
+  color: #a86400;
+  font-weight: 700;
+}
+
+.sheet-warn-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: -0.15rem 0 0.6rem;
+}
+.sheet-warn-banner.hidden { display: none; }
+.sheet-warn-chip {
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  background: #fff6e0;
+  border: 1.5px solid #e8c86a;
+  color: #8a6100;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* ── Notiz pro Feld ────────────────────────────────────────────────────── */
+.sheet-note-inp {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem 0.65rem;
+  border: 1.5px solid #d2d6db;
+  border-radius: 9px;
+  font-size: 0.92rem;
+  font-family: inherit;
+  color: #333;
+  resize: vertical;
+  margin-bottom: 0.7rem;
+}
+
+/* ── Favoriten / Vorlagen ──────────────────────────────────────────────── */
+.fav-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.fav-chip {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1.5px solid #8e44ec;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.fav-chip-name,
+.fav-chip-rm {
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+}
+.fav-chip-name {
+  padding: 0.4rem 0.7rem;
+  background: #f6efff;
+  color: #6c2bd9;
+  font-size: 0.82rem;
+}
+.fav-chip-rm {
+  padding: 0.4rem 0.55rem;
+  background: #efe3ff;
+  color: #6c2bd9;
+  font-size: 0.85rem;
+}
+.fav-save-btn { width: 100%; margin-bottom: 0.7rem; }
+
+/* ── Projekt-Fotos ─────────────────────────────────────────────────────── */
+.photos-sheet { max-height: 82vh; }
+.photos-add-btn {
+  width: 100%;
+  padding: 0.7rem;
+  margin-bottom: 0.7rem;
+  border: none;
+  border-radius: 9px;
+  background: #007aff;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+.photo-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #eee;
+  border: 1.5px solid #e0e0e0;
+}
+.photo-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+  display: block;
+}
+.photo-include-toggle {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(10, 47, 88, 0.78);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.photo-include-toggle input { margin: 0; }
+.photos-hint {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.photo-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.photo-lightbox-img {
+  max-width: 92vw;
+  max-height: 84vh;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.photo-lightbox-close,
+.photo-lightbox-delete {
+  position: absolute;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.photo-lightbox-close {
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  width: 2.4rem;
+  height: 2.4rem;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 1.1rem;
+}
+.photo-lightbox-delete {
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.7rem 1.2rem;
+  background: #ff3b30;
+  color: #fff;
+  font-size: 0.95rem;
+}

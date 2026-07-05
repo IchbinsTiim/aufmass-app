@@ -204,6 +204,46 @@ function posBadge(pos, bay) {
   return p.short;
 }
 
+/** Plausibilitätsprüfung: liefert eine Liste kurzer Warnhinweise für ein Feld
+ *  (fehlende Höhe, Position ohne Menge/Lagen/Meter …). Blockiert nichts – die
+ *  Hinweise sind rein informativ (siehe bayWarningBadge/Sidebar/Sheet). */
+function bayWarnings(bay) {
+  const warnings = [];
+  if (bay.hL == null && bay.hR == null) warnings.push('Höhe fehlt');
+  (bay.positions || []).forEach(pos => {
+    const p = POS_BY_KEY[pos.cat];
+    if (!p) return;
+    if (p.konsole) {
+      if (isMeterBilling(pos)) {
+        // Meter-Abrechnung fällt ohne eigenen Wert automatisch auf die
+        // Feldlänge zurück (siehe posMeters) – kein Hinweis nötig.
+      } else if (pos.lagen == null || pos.lagen === '') {
+        warnings.push('Konsole: Lagen oder Meter fehlt');
+      }
+    } else if (effQty(pos, bay) == null) {
+      warnings.push(p.label + ': Menge fehlt');
+    }
+  });
+  return warnings;
+}
+
+/** Gesamtzahl aller Warnhinweise über die ganze Zeichnung – für die
+ *  Toolbar-Sammelanzeige. */
+function computeTotalWarnings() {
+  let total = 0;
+  state.sections.forEach(sec => sec.bays.forEach(bay => { total += bayWarnings(bay).length; }));
+  return total;
+}
+
+/** Aktualisiert die Hinweis-Sammelanzeige im Toolbar. */
+function updateWarningsReadout() {
+  const el = document.getElementById('warningsReadout');
+  if (!el) return;
+  const n = computeTotalWarnings();
+  el.textContent = n ? '⚠ ' + n + ' Hinweis' + (n === 1 ? '' : 'e') : '';
+  el.classList.toggle('hidden', !n);
+}
+
 const DIR_META = {
   N: { dx:  0, dy: -1, label: 'N ↑' },
   E: { dx:  1, dy:  0, label: 'O →' },
@@ -331,6 +371,106 @@ function scheduleAutosave2d() {
     list[idx].geaendert = new Date().toISOString().slice(0, 10);
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
   }, 700);
+}
+
+// ── Projekt-Fotos ────────────────────────────────────────────────────────────
+// Fotos (Baustelle, Aufbau, Details, Schäden) gehören zum Projekt, nicht zur
+// Zeichnung – sie werden daher unabhängig von state.sections in IndexedDB
+// gespeichert (deutlich höheres Speicherlimit als localStorage, wo die
+// Projektliste selbst liegt). Jedes Projekt bekommt seine Fotos über den
+// Index `projectId`; nur Foto-IDs müssten im Projekt-Datensatz verlinkt
+// werden – aktuell reicht der direkte Bezug per projectId völlig aus.
+const PHOTOS_DB_NAME  = 'av2d_photos_db';
+const PHOTOS_STORE    = 'photos';
+const PHOTO_MAX_DIM   = 1600;   // Pixel, lange Kante
+const PHOTO_QUALITY   = 0.72;   // JPEG-Qualität
+let _photosDbPromise  = null;
+
+function openPhotosDB() {
+  if (_photosDbPromise) return _photosDbPromise;
+  _photosDbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTOS_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(PHOTOS_STORE)) {
+        const store = db.createObjectStore(PHOTOS_STORE, { keyPath: 'id' });
+        store.createIndex('projectId', 'projectId', { unique: false });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+  return _photosDbPromise;
+}
+
+/** Verkleinert/komprimiert eine Bilddatei clientseitig (Canvas → JPEG), damit
+ *  Fotos vom iPad (oft mehrere MB) nicht unnötig Speicher verbrauchen. */
+function compressImageFile(file, maxDim = PHOTO_MAX_DIM, quality = PHOTO_QUALITY) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > maxDim || h > maxDim) {
+        const scale = maxDim / Math.max(w, h);
+        w = Math.round(w * scale); h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), w, h });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Bild konnte nicht geladen werden')); };
+    img.src = url;
+  });
+}
+
+/** Komprimiert + speichert ein Foto für ein Projekt, liefert den Datensatz. */
+async function addProjectPhoto(projectId, file) {
+  const { dataUrl, w, h } = await compressImageFile(file);
+  const photo = {
+    id: 'ph' + Date.now() + Math.floor(Math.random() * 1e6),
+    projectId, dataUrl, w, h,
+    createdAt: Date.now(), include: true
+  };
+  const db = await openPhotosDB();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+    tx.objectStore(PHOTOS_STORE).add(photo);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  });
+  return photo;
+}
+
+function listProjectPhotos(projectId) {
+  return openPhotosDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(PHOTOS_STORE, 'readonly');
+    const req = tx.objectStore(PHOTOS_STORE).index('projectId').getAll(IDBKeyRange.only(projectId));
+    req.onsuccess = () => resolve(req.result.sort((a, b) => a.createdAt - b.createdAt));
+    req.onerror   = () => reject(req.error);
+  }));
+}
+
+function deleteProjectPhoto(id) {
+  return openPhotosDB().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+    tx.objectStore(PHOTOS_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  }));
+}
+
+function setPhotoIncluded(id, included) {
+  return openPhotosDB().then(db => new Promise((resolve, reject) => {
+    const tx    = db.transaction(PHOTOS_STORE, 'readwrite');
+    const store = tx.objectStore(PHOTOS_STORE);
+    const req   = store.get(id);
+    req.onsuccess = () => { const rec = req.result; if (rec) { rec.include = included; store.put(rec); } };
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  }));
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -492,6 +632,51 @@ function pasteBayPositions(bay) {
   showToast('Position eingefügt');
 }
 
+// ── Favoriten / Vorlagen ─────────────────────────────────────────────────────
+// Häufig verwendete Feld-Konfigurationen (Höhen + alle Positionen: Konsolen,
+// Netz, Dachfang, Treppenturm …) unter einem Namen dauerhaft sichern und per
+// Klick auf ein oder mehrere Felder anwenden – projektübergreifend in
+// localStorage, unabhängig vom flüchtigen Kopieren/Einfügen.
+const FAV_STORAGE_KEY = 'av_2d_favorites_v1';
+
+function loadFavorites() {
+  try { return JSON.parse(localStorage.getItem(FAV_STORAGE_KEY)) || []; }
+  catch (_) { return []; }
+}
+
+function saveFavoritesList(list) {
+  localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(list));
+}
+
+/** Sichert Höhen + Positionen eines Feldes als neue, benannte Vorlage. */
+function saveFavoriteFromBay(bay) {
+  const name = prompt('Name für diese Vorlage (z. B. "Standardfassade", "Dachfang", "Treppenturm"):');
+  if (!name || !name.trim()) return;
+  const list = loadFavorites();
+  list.push({
+    id: 'fav' + Date.now() + Math.floor(Math.random() * 1000),
+    name: name.trim(),
+    data: {
+      hL: bay.hL, hR: bay.hR,
+      positions: JSON.parse(JSON.stringify(bay.positions || []))
+    }
+  });
+  saveFavoritesList(list);
+  showToast('Vorlage „' + name.trim() + '" gespeichert');
+}
+
+/** Wendet eine gespeicherte Vorlage auf ein Feld an (überschreibt dessen
+ *  Höhen + Positionen komplett, wie Einfügen). */
+function applyFavoriteToBay(fav, bay) {
+  bay.hL = fav.data.hL != null ? fav.data.hL : null;
+  bay.hR = fav.data.hR != null ? fav.data.hR : null;
+  bay.positions = fav.data.positions.map(p => ({ ...p, id: ++_bId }));
+}
+
+function deleteFavorite(id) {
+  saveFavoritesList(loadFavorites().filter(f => f.id !== id));
+}
+
 /* ── Zeichenfläche: Pinch-Zoom & Pan ──────────────────────────────────────────
    `view` legt die Kamera relativ zur automatisch berechneten "Fit"-Box (die
    gesamten Inhalt zeigende, in renderSvg() ermittelte Bounding-Box) fest:
@@ -516,14 +701,15 @@ function mkBay(len = 2.57) {
   return {
     id: ++_bId, len: +parseFloat(len).toFixed(2),
     hL: null, hR: null,
-    positions: []
+    positions: [], note: ''
   };
 }
 
-/** Stellt sicher, dass ein (auch geladenes/älteres) Bay ein positions[] hat und
- *  migriert die alte Einzel-Kategorie in eine Position. */
+/** Stellt sicher, dass ein (auch geladenes/älteres) Bay ein positions[] und
+ *  note besitzt und migriert die alte Einzel-Kategorie in eine Position. */
 function normalizeBay(bay) {
   if (!Array.isArray(bay.positions)) bay.positions = [];
+  if (typeof bay.note !== 'string') bay.note = '';
   // Migration: früheres Einzel-Kategorie-Modell → Position
   if (bay.category && bay.category !== 'geruest' && POS_BY_KEY[bay.category]) {
     const pos = { id: ++_bId, cat: bay.category };
@@ -553,7 +739,12 @@ function bayLabel(sec, bi) {
 
 // ── Geometry helpers ───────────────────────────────────────────────────────
 
-function outVec(dir) { return { dx: dir.dy, dy: -dir.dx }; }
+/** Senkrechte Auswärtsrichtung zur Laufrichtung `dir`. Gespiegelte Sektionen
+ *  (sec.flip) haben umgekehrte Händigkeit – ohne `flip` würde ihre Gerüsttiefe
+ *  auf die falsche (Gebäude-Innen-)Seite zeigen, siehe mirrorSections(). */
+function outVec(dir, flip) {
+  return flip ? { dx: -dir.dy, dy: dir.dx } : { dx: dir.dy, dy: -dir.dx };
+}
 
 // ── Section rotation ─────────────────────────────────────────────────────────
 // Eine Sektion besitzt einen stufenlosen Winkel `angle` (Grad). Die kardinale
@@ -646,7 +837,7 @@ function worldPerScreenPx() {
 /** Die vier Eck-Polygone aller Felder einer Sektion an Position (x0,y0). */
 function sectionBayPolys(sec, x0, y0) {
   const dir   = secVec(sec);
-  const out   = outVec(dir);
+  const out   = outVec(dir, sec.flip);
   const depth = state.depth * PX_PER_M;
   let x = x0, y = y0;
   const polys = [];
@@ -784,14 +975,10 @@ function findWallChain(si) {
   return chain;
 }
 
-/** Spiegelt die Wand, zu der `si` gehört, punktsymmetrisch (180°) durch den
- *  Mittelpunkt der gesamten aktuellen Zeichnung – ergibt bei rechteckigen/
- *  L-/U-förmigen Grundrissen genau die gegenüberliegende Wand (gleiche
- *  Feldlängen/Höhen/Positionen, gespiegelte Richtung). */
-function mirrorWallAt(si) {
-  const chainIdx = findWallChain(si);
-  if (!chainIdx.length) return;
-
+/** Bounding-Box-Mittelpunkt der gesamten aktuellen Zeichnung – gemeinsamer
+ *  Spiegel-Pivot für alle Mirror-Operationen (Achse verläuft durch diesen
+ *  Punkt, senkrecht bzw. waagerecht). */
+function drawingCenter() {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   state.sections.forEach(sec => {
     const e = sectionEnd(sec);
@@ -800,17 +987,36 @@ function mirrorWallAt(si) {
       if (y < minY) minY = y; if (y > maxY) maxY = y;
     });
   });
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+}
 
-  const mirrored = chainIdx.map(i => {
+/** Spiegelt beliebige Sektionen (per Index) an einer waagerechten oder
+ *  senkrechten Achse durch den Mittelpunkt der gesamten Zeichnung und fügt sie
+ *  als neue Kopien hinzu. `axis: 'v'` spiegelt an einer SENKRECHTEN Achse
+ *  (Feld wandert links↔rechts), `axis: 'h'` an einer WAAGERECHTEN Achse
+ *  (Feld wandert oben↔unten). Alle Eigenschaften (Höhen, Positionen, Konsolen,
+ *  Netze, Dachfang, Treppenturm, Notizen …) werden 1:1 übernommen – eine echte
+ *  Achsenspiegelung kehrt die Händigkeit um, daher wird `flip` gegenüber dem
+ *  Original umgeschaltet, damit die Gerüsttiefe weiter auf der richtigen
+ *  (Gebäude-Außen-)Seite liegt, siehe outVec(). */
+function mirrorSections(sectionIndices, axis) {
+  if (!sectionIndices || !sectionIndices.length) return;
+  const { cx, cy } = drawingCenter();
+
+  const mirrored = sectionIndices.map(i => {
     const sec = state.sections[i];
     const copy = JSON.parse(JSON.stringify(sec));
     copy.id = ++_sId;
     copy.name = (sec.name || '').trim() ? `${sec.name} (Spiegel)` : `Wand ${copy.id}`;
-    copy.x0 = 2 * cx - sec.x0;
-    copy.y0 = 2 * cy - sec.y0;
-    copy.angle = normDeg(secAngle(sec) + 180);
-    copy.dir = nearestCardinal(copy.angle);
+    if (axis === 'v') {
+      copy.x0 = 2 * cx - sec.x0;
+      copy.angle = normDeg(180 - secAngle(sec));
+    } else {
+      copy.y0 = 2 * cy - sec.y0;
+      copy.angle = normDeg(360 - secAngle(sec));
+    }
+    copy.dir  = nearestCardinal(copy.angle);
+    copy.flip = !sec.flip;
     copy.bays = sec.bays.map(b => {
       const nb = JSON.parse(JSON.stringify(b));
       nb.id = ++_bId;
@@ -823,8 +1029,32 @@ function mirrorWallAt(si) {
   state.sections.push(...mirrored);
   selectedSi = state.sections.length - mirrored.length;
   selectedBi = 0;
+  return mirrored;
+}
+
+/** Spiegelt die ganze Wand (Kette direkt verbundener, gleich ausgerichteter
+ *  Felder), zu der `si` gehört – z. B. aus dem Bearbeiten-Sheet eines Feldes. */
+function mirrorWallAt(si, axis) {
+  const chainIdx = findWallChain(si);
+  const mirrored = mirrorSections(chainIdx, axis);
+  if (!mirrored) return;
   renderAll();
-  showToast(mirrored.length === 1 ? 'Feld gespiegelt' : `Wand gespiegelt (${mirrored.length} Felder)`);
+  const axisTxt = axis === 'v' ? 'horizontal' : 'vertikal';
+  showToast(mirrored.length === 1 ? `Feld ${axisTxt} gespiegelt` : `Wand ${axisTxt} gespiegelt (${mirrored.length} Felder)`);
+}
+
+/** Spiegelt eine frei zusammengestellte Auswahl von Feldern (bay-IDs, z. B.
+ *  aus der Mehrfachauswahl-Leiste) – unabhängig davon, ob sie zusammenhängen. */
+function mirrorBaySelection(bayIds, axis) {
+  const sectionIndices = [];
+  state.sections.forEach((sec, si) => {
+    if (sec.bays.some(b => bayIds.has(b.id))) sectionIndices.push(si);
+  });
+  const mirrored = mirrorSections(sectionIndices, axis);
+  if (!mirrored) return;
+  renderAll();
+  const axisTxt = axis === 'v' ? 'horizontal' : 'vertikal';
+  showToast(`Auswahl ${axisTxt} gespiegelt (${mirrored.length} Feld${mirrored.length === 1 ? '' : 'er'})`);
 }
 
 // ── Layout computation ─────────────────────────────────────────────────────
@@ -835,7 +1065,7 @@ function computeLayout() {
 
   state.sections.forEach((sec, si) => {
     const dir    = secVec(sec);
-    const out    = outVec(dir);
+    const out    = outVec(dir, sec.flip);
     const ang    = secAngle(sec);
     let x = sec.x0, y = sec.y0;
     const startX = x, startY = y;
@@ -892,11 +1122,11 @@ function computeLayout() {
   // ── Corner pieces between connected sections ────────────────────────────
   state.sections.forEach((sec, si) => {
     const end = sectionEnd(sec);
-    const out = outVec(secVec(sec));
+    const out = outVec(secVec(sec), sec.flip);
     state.sections.forEach((next, ni) => {
       if (ni === si) return;
       if (Math.abs(next.x0 - end.x) < 2 && Math.abs(next.y0 - end.y) < 2) {
-        const nOut  = outVec(secVec(next));
+        const nOut  = outVec(secVec(next), next.flip);
         const cross = out.dx * nOut.dy - out.dy * nOut.dx;
         if (cross > 0) {
           const c0 = { x: end.x, y: end.y };
@@ -934,6 +1164,7 @@ function renderSvg() {
   const hint = document.getElementById('emptyHint');
   g.innerHTML = '';
   updateAreaReadout();
+  updateWarningsReadout();
   scheduleAutosave2d();
   scheduleUndoSnapshot();
 
@@ -1090,6 +1321,26 @@ function renderSvg() {
       });
       nameTxt.textContent = fieldLabel;
       g.appendChild(nameTxt);
+
+      // Notiz-/Hinweis-Icons neben dem Namenskästchen – auf einen Blick
+      // erkennbar, ohne das Sheet öffnen zu müssen.
+      let markerX = boxX + boxW + boxH * 0.15;
+      const markerFont = boxH * 0.85;
+      const addMarker = (glyph, title) => {
+        const mx = markerX + markerFont * 0.55, my = boxCy;
+        const rot = labelRot ? `rotate(${labelRot.toFixed(1)},${mx},${my})` : '';
+        const t = svgEl('text', {
+          x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+          'font-size': markerFont, transform: rot, 'pointer-events': 'none'
+        });
+        t.textContent = glyph;
+        if (title) { const titleEl = svgEl('title', {}); titleEl.textContent = title; t.appendChild(titleEl); }
+        g.appendChild(t);
+        markerX += markerFont * 1.1;
+      };
+      if ((bayData.note || '').trim()) addMarker('📝', bayData.note.trim());
+      const warns = bayWarnings(bayData);
+      if (warns.length) addMarker('⚠️', warns.join(' · '));
     }
 
     // Feldlänge mittig.
@@ -1254,7 +1505,7 @@ function renderSvg() {
   const selSec  = selectedSi !== null ? state.sections[selectedSi] : null;
   if (selSec && selSec.bays.length && !busyAdd) {
     const dir = secVec(selSec);
-    const out = outVec(dir);
+    const out = outVec(dir, selSec.flip);
     const end = sectionEnd(selSec);
     const EXT_R = Math.round(HANDLE_R * 1.05);
     const axOff = HANDLE_R * 1.7;
@@ -1810,6 +2061,22 @@ function openEditSheet(si, bi) {
   hdr.className = 'sheet-header';
   hdr.textContent = `Feld ${bayLabel(sec, bi)}`;
 
+  // Plausibilitätshinweise: rein informativ, blockiert die Bearbeitung nicht.
+  const warnBanner = document.createElement('div');
+  warnBanner.className = 'sheet-warn-banner';
+  function syncWarnBanner() {
+    const warns = bayWarnings(bay);
+    warnBanner.innerHTML = '';
+    warnBanner.classList.toggle('hidden', !warns.length);
+    warns.forEach(w => {
+      const chip = document.createElement('span');
+      chip.className = 'sheet-warn-chip';
+      chip.textContent = '⚠ ' + w;
+      warnBanner.appendChild(chip);
+    });
+  }
+  syncWarnBanner();
+
   // Direction row (always shown – essential on iPhone where side panel is hidden)
   const dirRow = document.createElement('div');
   dirRow.className = 'sheet-dir-row';
@@ -2067,6 +2334,7 @@ function openEditSheet(si, bi) {
     bay.positions
       .filter(pos => { const p = POS_BY_KEY[pos.cat]; return p && !p.konsole; })
       .forEach(pos => posDetailWrap.appendChild(makePosDetailRow(pos)));
+    syncWarnBanner();
   }
   buildPosDetails();
 
@@ -2206,6 +2474,7 @@ function openEditSheet(si, bi) {
   function buildKonsole() {
     konsWrap.innerHTML = '';
     bay.positions.filter(p => p.cat === 'konsole').forEach(pos => konsWrap.appendChild(makeKonsoleRow(pos)));
+    syncWarnBanner();
   }
   buildKonsole();
 
@@ -2216,6 +2485,69 @@ function openEditSheet(si, bi) {
     bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1', billing: 'lagen' });
     buildKonsole(); renderSvg();
   });
+
+  // ── Notiz ────────────────────────────────────────────────────────────────
+  const noteLabel = document.createElement('div');
+  noteLabel.className = 'sheet-section-label';
+  noteLabel.textContent = 'Notiz';
+
+  const noteInp = document.createElement('textarea');
+  noteInp.className = 'sheet-note-inp';
+  noteInp.placeholder = 'z. B. Fenster freihalten, nur teilweise eingerüstet …';
+  noteInp.rows = 2;
+  noteInp.value = bay.note || '';
+  noteInp.addEventListener('input', () => { bay.note = noteInp.value; renderSvg(); });
+
+  // ── Favoriten / Vorlagen ─────────────────────────────────────────────────
+  const favLabel = document.createElement('div');
+  favLabel.className = 'sheet-section-label';
+  favLabel.textContent = 'Vorlagen';
+
+  const favWrap = document.createElement('div');
+  favWrap.className = 'fav-chip-row';
+
+  function buildFavList() {
+    favWrap.innerHTML = '';
+    const favs = loadFavorites();
+    if (!favs.length) {
+      const hint = document.createElement('span');
+      hint.className = 'bay-pos-empty';
+      hint.textContent = 'Noch keine Vorlagen gespeichert';
+      favWrap.appendChild(hint);
+      return;
+    }
+    favs.forEach(fav => {
+      const chip = document.createElement('div');
+      chip.className = 'fav-chip';
+      const nameBtn = document.createElement('button');
+      nameBtn.type = 'button'; nameBtn.className = 'fav-chip-name';
+      nameBtn.textContent = fav.name;
+      nameBtn.title = 'Vorlage auf dieses Feld anwenden';
+      nameBtn.addEventListener('click', () => {
+        applyFavoriteToBay(fav, bay);
+        hLeft.input.value = bay.hL == null ? '' : bay.hL.toFixed(2);
+        hRight.input.value = bay.hR == null ? '' : bay.hR.toFixed(2);
+        buildPosDetails(); buildKonsole(); renderSvg();
+        showToast('Vorlage „' + fav.name + '" angewendet');
+      });
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'fav-chip-rm'; rm.innerHTML = '&times;';
+      rm.title = 'Vorlage löschen';
+      rm.addEventListener('click', () => {
+        if (!confirm('Vorlage „' + fav.name + '" löschen?')) return;
+        deleteFavorite(fav.id);
+        buildFavList();
+      });
+      chip.appendChild(nameBtn); chip.appendChild(rm);
+      favWrap.appendChild(chip);
+    });
+  }
+  buildFavList();
+
+  const favSaveBtn = document.createElement('button');
+  favSaveBtn.type = 'button'; favSaveBtn.className = 'sheet-copy fav-save-btn';
+  favSaveBtn.textContent = '★ Aktuelle Einstellungen als Vorlage speichern';
+  favSaveBtn.addEventListener('click', () => { saveFavoriteFromBay(bay); buildFavList(); });
 
   // Actions
   const actRow = document.createElement('div');
@@ -2272,24 +2604,32 @@ function openEditSheet(si, bi) {
   copyPasteRow.appendChild(pasteBtn);
 
   // ── Wand spiegeln ────────────────────────────────────────────────────────
-  // Dupliziert die gesamte Wand (alle direkt verbundenen Felder mit
-  // gleichem Winkel), gespiegelt zur gegenüberliegenden Seite – praktisch bei
+  // Dupliziert die gesamte Wand (alle direkt verbundenen Felder mit gleichem
+  // Winkel), gespiegelt zur gegenüberliegenden Seite – praktisch bei
   // symmetrischen Gebäuden, bei denen die andere Seite identisch ist.
+  const mirrorLabel = document.createElement('div');
+  mirrorLabel.className = 'sheet-subsection-label';
+  mirrorLabel.textContent = 'Wand spiegeln';
+
   const mirrorRow = document.createElement('div');
   mirrorRow.className = 'sheet-actions sheet-copy-paste-row';
-  const mirrorBtn = document.createElement('button');
-  mirrorBtn.type = 'button'; mirrorBtn.className = 'sheet-copy';
-  mirrorBtn.textContent = '⧉ Wand spiegeln';
-  mirrorBtn.title = 'Diese Wand gespiegelt auf die gegenüberliegende Seite kopieren';
-  mirrorBtn.addEventListener('click', () => {
-    mirrorWallAt(si);
-    closeSheet();
-  });
-  mirrorRow.appendChild(mirrorBtn);
+  const mirrorHBtn = document.createElement('button');
+  mirrorHBtn.type = 'button'; mirrorHBtn.className = 'sheet-copy';
+  mirrorHBtn.textContent = '⇋ Horizontal';
+  mirrorHBtn.title = 'Diese Wand horizontal gespiegelt auf die gegenüberliegende Seite kopieren';
+  mirrorHBtn.addEventListener('click', () => { mirrorWallAt(si, 'v'); closeSheet(); });
+  const mirrorVBtn = document.createElement('button');
+  mirrorVBtn.type = 'button'; mirrorVBtn.className = 'sheet-copy';
+  mirrorVBtn.textContent = '⇵ Vertikal';
+  mirrorVBtn.title = 'Diese Wand vertikal gespiegelt auf die gegenüberliegende Seite kopieren';
+  mirrorVBtn.addEventListener('click', () => { mirrorWallAt(si, 'h'); closeSheet(); });
+  mirrorRow.appendChild(mirrorHBtn);
+  mirrorRow.appendChild(mirrorVBtn);
 
   actRow.appendChild(delBtn); actRow.appendChild(addAfterBtn); actRow.appendChild(okBtn);
 
   sheet.appendChild(hdr);
+  sheet.appendChild(warnBanner);
   sheet.appendChild(dirRow);
   sheet.appendChild(stdDiv);
   sheet.appendChild(adjRow);
@@ -2304,7 +2644,13 @@ function openEditSheet(si, bi) {
   sheet.appendChild(konsLabel);
   sheet.appendChild(konsWrap);
   sheet.appendChild(addKonsBtn);
+  sheet.appendChild(noteLabel);
+  sheet.appendChild(noteInp);
+  sheet.appendChild(favLabel);
+  sheet.appendChild(favWrap);
+  sheet.appendChild(favSaveBtn);
   sheet.appendChild(copyPasteRow);
+  sheet.appendChild(mirrorLabel);
   sheet.appendChild(mirrorRow);
   sheet.appendChild(actRow);
 
@@ -2334,6 +2680,147 @@ function closeSheet() {
   if (!s) return;
   s.classList.remove('open');
   setTimeout(() => s.remove(), 230);
+}
+
+// ── Fotos-Galerie ────────────────────────────────────────────────────────────
+// Projekt-Fotos (Baustelle, Aufbau, Details, Schäden) – gespeichert per
+// IndexedDB (siehe addProjectPhoto/listProjectPhotos weiter oben), unabhängig
+// von state.sections. Setzt ein verknüpftes Projekt voraus, da Fotos
+// projektbezogen sind (nicht an eine einzelne Zeichnung gebunden).
+
+function closePhotosSheet() {
+  document.getElementById('photosSheetOverlay')?.remove();
+  const s = document.getElementById('photosSheet');
+  if (!s) return;
+  s.classList.remove('open');
+  setTimeout(() => s.remove(), 230);
+}
+
+async function openPhotosSheet() {
+  if (!linkedProjectId) {
+    showToast('Fotos benötigen ein gespeichertes Projekt – bitte über den Projekt-Hub öffnen');
+    return;
+  }
+  closePhotosSheet();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'photosSheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closePhotosSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'photosSheet';
+  sheet.className = 'bottom-sheet photos-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = '📷 Projekt-Fotos';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'photos-add-btn';
+  addBtn.textContent = '+ Foto hinzufügen (Kamera / Galerie)';
+  addBtn.addEventListener('click', () => document.getElementById('photoFileInput').click());
+
+  const grid = document.createElement('div');
+  grid.className = 'photos-grid';
+
+  async function renderGrid() {
+    grid.innerHTML = '';
+    const photos = await listProjectPhotos(linkedProjectId);
+    if (!photos.length) {
+      const hint = document.createElement('p');
+      hint.className = 'hint photos-hint';
+      hint.textContent = 'Noch keine Fotos vorhanden.';
+      grid.appendChild(hint);
+      return;
+    }
+    photos.forEach(photo => {
+      const tile = document.createElement('div');
+      tile.className = 'photo-tile';
+      const img = document.createElement('img');
+      img.src = photo.dataUrl; img.loading = 'lazy';
+      img.addEventListener('click', () => openPhotoLightbox(photo, renderGrid));
+      tile.appendChild(img);
+
+      const incLabel = document.createElement('label');
+      incLabel.className = 'photo-include-toggle';
+      incLabel.title = 'In PDF-Export einschließen';
+      const incChk = document.createElement('input');
+      incChk.type = 'checkbox'; incChk.checked = photo.include !== false;
+      incChk.addEventListener('click', e => e.stopPropagation());
+      incChk.addEventListener('change', () => setPhotoIncluded(photo.id, incChk.checked));
+      const incTxt = document.createElement('span');
+      incTxt.textContent = 'PDF';
+      incLabel.appendChild(incChk); incLabel.appendChild(incTxt);
+      tile.appendChild(incLabel);
+
+      grid.appendChild(tile);
+    });
+  }
+  renderGrid();
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button'; closeBtn.className = 'sheet-ok';
+  closeBtn.textContent = 'Fertig';
+  closeBtn.addEventListener('click', closePhotosSheet);
+
+  sheet.appendChild(hdr);
+  sheet.appendChild(addBtn);
+  sheet.appendChild(grid);
+  sheet.appendChild(closeBtn);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/** Vollbild-Ansicht eines einzelnen Fotos mit Lösch-Möglichkeit. */
+function openPhotoLightbox(photo, onChange) {
+  const overlay = document.createElement('div');
+  overlay.className = 'photo-lightbox-overlay';
+
+  const img = document.createElement('img');
+  img.src = photo.dataUrl;
+  img.className = 'photo-lightbox-img';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button'; closeBtn.className = 'photo-lightbox-close';
+  closeBtn.textContent = '✕';
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button'; delBtn.className = 'photo-lightbox-delete';
+  delBtn.textContent = '🗑 Löschen';
+  delBtn.addEventListener('click', async () => {
+    if (!confirm('Dieses Foto wirklich löschen?')) return;
+    await deleteProjectPhoto(photo.id);
+    overlay.remove();
+    onChange && onChange();
+  });
+
+  const close = () => overlay.remove();
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  overlay.appendChild(img);
+  overlay.appendChild(closeBtn);
+  overlay.appendChild(delBtn);
+  document.body.appendChild(overlay);
+}
+
+/** Verarbeitet über die Kamera/Galerie ausgewählte Foto-Dateien: komprimieren,
+ *  speichern, Galerie ggf. aktualisieren. */
+async function onPhotoFilesSelected(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';   // erlaubt erneutes Auswählen derselben Datei
+  if (!files.length || !linkedProjectId) return;
+  showToast(files.length === 1 ? 'Foto wird gespeichert …' : files.length + ' Fotos werden gespeichert …');
+  for (const file of files) {
+    try { await addProjectPhoto(linkedProjectId, file); }
+    catch (err) { console.error('Foto konnte nicht gespeichert werden', err); }
+  }
+  if (document.getElementById('photosSheet')) openPhotosSheet();
+  showToast('Fotos gespeichert');
 }
 
 // ── Side panel ─────────────────────────────────────────────────────────────
@@ -2400,6 +2887,37 @@ function renderBulkBar() {
     el.appendChild(hint);
     return;
   }
+
+  // Vorlage auf die gesamte Auswahl anwenden: überschreibt Höhen + Positionen
+  // aller markierten Felder mit einem Klick.
+  const favBulkLabel = document.createElement('div');
+  favBulkLabel.className = 'bulk-section-label';
+  favBulkLabel.textContent = 'Vorlage auf Auswahl anwenden';
+  el.appendChild(favBulkLabel);
+
+  const favBulkWrap = document.createElement('div');
+  favBulkWrap.className = 'fav-chip-row';
+  const favs = loadFavorites();
+  if (!favs.length) {
+    const hint = document.createElement('span');
+    hint.className = 'bay-pos-empty';
+    hint.textContent = 'Noch keine Vorlagen gespeichert (im Bearbeiten-Sheet eines Feldes anlegen)';
+    favBulkWrap.appendChild(hint);
+  } else {
+    favs.forEach(fav => {
+      const chip = document.createElement('button');
+      chip.type = 'button'; chip.className = 'fav-chip-name';
+      chip.textContent = fav.name;
+      chip.title = 'Auf ' + selectedBays.length + ' Feld' + (selectedBays.length === 1 ? '' : 'er') + ' anwenden';
+      chip.addEventListener('click', () => {
+        selectedBays.forEach(bay => applyFavoriteToBay(fav, bay));
+        renderAll();
+        showToast('Vorlage „' + fav.name + '" auf ' + selectedBays.length + ' Feldern angewendet');
+      });
+      favBulkWrap.appendChild(chip);
+    });
+  }
+  el.appendChild(favBulkWrap);
 
   // Höhe für die gesamte Auswahl: einmal eingeben, per Klick auf alle
   // markierten Felder übertragen – ohne deren sonstige Positionen anzutasten.
@@ -2577,6 +3095,32 @@ function renderBulkBar() {
   konsForm.appendChild(addKonsBtn);
 
   el.appendChild(konsForm);
+
+  // Auswahl spiegeln: dupliziert genau die angehakten Felder (auch nicht
+  // benachbarte) gespiegelt zur gegenüberliegenden Seite – Ergänzung zur
+  // Einzelfeld-Spiegelung im Bearbeiten-Sheet (die nur die zusammenhängende
+  // Wand erfasst).
+  const mirrorLabel = document.createElement('div');
+  mirrorLabel.className = 'bulk-section-label';
+  mirrorLabel.textContent = 'Auswahl spiegeln';
+  el.appendChild(mirrorLabel);
+
+  const mirrorSelRow = document.createElement('div');
+  mirrorSelRow.className = 'bulk-sel-row';
+  const selBayIds = new Set(selectedBays.map(b => b.id));
+  const mirrorHSelBtn = document.createElement('button');
+  mirrorHSelBtn.type = 'button'; mirrorHSelBtn.className = 'bulk-sel-btn';
+  mirrorHSelBtn.textContent = '⇋ Horizontal';
+  mirrorHSelBtn.title = 'Ausgewählte Felder horizontal gespiegelt kopieren';
+  mirrorHSelBtn.addEventListener('click', () => mirrorBaySelection(selBayIds, 'v'));
+  const mirrorVSelBtn = document.createElement('button');
+  mirrorVSelBtn.type = 'button'; mirrorVSelBtn.className = 'bulk-sel-btn';
+  mirrorVSelBtn.textContent = '⇵ Vertikal';
+  mirrorVSelBtn.title = 'Ausgewählte Felder vertikal gespiegelt kopieren';
+  mirrorVSelBtn.addEventListener('click', () => mirrorBaySelection(selBayIds, 'h'));
+  mirrorSelRow.appendChild(mirrorHSelBtn);
+  mirrorSelRow.appendChild(mirrorVSelBtn);
+  el.appendChild(mirrorSelRow);
 }
 
 function renderSections() {
@@ -2652,6 +3196,24 @@ function renderSections() {
 
       const num = document.createElement('span');
       num.className = 'bay-num'; num.textContent = bayLabel(sec, bi);
+      top.appendChild(num);
+
+      if ((bay.note || '').trim()) {
+        const noteIcon = document.createElement('span');
+        noteIcon.className = 'bay-note-icon';
+        noteIcon.textContent = '📝';
+        noteIcon.title = bay.note.trim();
+        top.appendChild(noteIcon);
+      }
+
+      const warns = bayWarnings(bay);
+      if (warns.length) {
+        const warnIcon = document.createElement('span');
+        warnIcon.className = 'bay-warn-icon';
+        warnIcon.textContent = '⚠ ' + warns.length;
+        warnIcon.title = warns.join(' · ');
+        top.appendChild(warnIcon);
+      }
 
       const inp = document.createElement('input');
       inp.type = 'number'; inp.className = 'bay-inp';
@@ -2662,7 +3224,7 @@ function renderSections() {
       rmBay.className = 'remove-btn small'; rmBay.textContent = '×';
       rmBay.addEventListener('click', () => { sec.bays.splice(bi, 1); renderAll(); });
 
-      top.appendChild(num); top.appendChild(inp); top.appendChild(rmBay);
+      top.appendChild(inp); top.appendChild(rmBay);
 
       // Zeile 1b: Höhen links/rechts direkt im Seitenpanel – so muss man für die
       // (häufigste) Änderung nicht extra das Bearbeiten-Sheet öffnen.
@@ -2899,7 +3461,7 @@ function collectFields() {
   const depth = state.depth * PX_PER_M;
   const list  = [];
   state.sections.forEach(sec => {
-    const dir = secVec(sec), o = outVec(dir);
+    const dir = secVec(sec), o = outVec(dir, sec.flip);
     let x = sec.x0, y = sec.y0;
     sec.bays.forEach(bay => {
       const pxLen = bay.len * PX_PER_M;
@@ -3126,6 +3688,51 @@ async function exportPdf() {
       drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`, aggregatePositions(allBays));
     }
 
+    // ── Notizen ────────────────────────────────────────────────────────────
+    // Individuelle Feld-Hinweise (z. B. "Fenster freihalten") als einfache
+    // Liste am Ende – optional, erscheint nur wenn Notizen vorhanden sind.
+    const notedFields = [];
+    state.sections.forEach(sec => {
+      sec.bays.forEach((bay, bi) => {
+        if ((bay.note || '').trim()) notedFields.push({ label: bayLabel(sec, bi), note: bay.note.trim() });
+      });
+    });
+    if (notedFields.length) {
+      doc.addPage();
+      let ny = margin + 4;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
+      doc.text('Notizen', margin, ny);
+      ny += 9;
+      notedFields.forEach(({ label, note }) => {
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25, 25, 25);
+        const lines = doc.splitTextToSize(note, availW - 22);
+        const blockH = 6 + lines.length * 5 + 3;
+        if (ny + blockH > pdfH - margin) { doc.addPage(); ny = margin + 6; }
+        doc.text(label + ':', margin, ny);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
+        doc.text(lines, margin + 22, ny);
+        ny += Math.max(6, lines.length * 5) + 3;
+      });
+    }
+
+    // ── Fotos ────────────────────────────────────────────────────────────
+    // Für den PDF-Export markierte Projekt-Fotos (siehe Fotos-Galerie), je
+    // eines auf einer eigenen Seite, seitenfüllend unter Beibehaltung des
+    // Seitenverhältnisses.
+    if (linkedProjectId) {
+      const photos = (await listProjectPhotos(linkedProjectId)).filter(p => p.include !== false);
+      photos.forEach((photo, i) => {
+        doc.addPage();
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
+        doc.text(`Foto ${i + 1} von ${photos.length}`, margin, margin + 5);
+        const photoAvailH = pdfH - margin - (margin + 10) - margin;
+        const ratio = Math.min(availW / photo.w, photoAvailH / photo.h);
+        const pw = photo.w * ratio, ph = photo.h * ratio;
+        const px = margin + (availW - pw) / 2;
+        doc.addImage(photo.dataUrl, 'JPEG', px, margin + 10, pw, ph);
+      });
+    }
+
     doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
   } finally {
     pdfMode    = false;
@@ -3220,6 +3827,9 @@ function init() {
   document.getElementById('loadPlanBtn').addEventListener('click', triggerLoad);
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
   document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
+
+  document.getElementById('photosBtn').addEventListener('click', openPhotosSheet);
+  document.getElementById('photoFileInput').addEventListener('change', onPhotoFilesSelected);
 
   document.getElementById('deviceToggleBtn').addEventListener('click', () => {
     showDevicePicker(() => renderAll());
