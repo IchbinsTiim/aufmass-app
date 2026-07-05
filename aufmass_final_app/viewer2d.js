@@ -2607,16 +2607,20 @@ function openEditSheet(si, bi) {
   // Dupliziert die gesamte Wand (alle direkt verbundenen Felder mit gleichem
   // Winkel), gespiegelt zur gegenüberliegenden Seite – praktisch bei
   // symmetrischen Gebäuden, bei denen die andere Seite identisch ist.
+  const mirrorLabel = document.createElement('div');
+  mirrorLabel.className = 'sheet-subsection-label';
+  mirrorLabel.textContent = 'Wand spiegeln';
+
   const mirrorRow = document.createElement('div');
   mirrorRow.className = 'sheet-actions sheet-copy-paste-row';
   const mirrorHBtn = document.createElement('button');
   mirrorHBtn.type = 'button'; mirrorHBtn.className = 'sheet-copy';
-  mirrorHBtn.textContent = '⇋ Horizontal spiegeln';
+  mirrorHBtn.textContent = '⇋ Horizontal';
   mirrorHBtn.title = 'Diese Wand horizontal gespiegelt auf die gegenüberliegende Seite kopieren';
   mirrorHBtn.addEventListener('click', () => { mirrorWallAt(si, 'v'); closeSheet(); });
   const mirrorVBtn = document.createElement('button');
   mirrorVBtn.type = 'button'; mirrorVBtn.className = 'sheet-copy';
-  mirrorVBtn.textContent = '⇵ Vertikal spiegeln';
+  mirrorVBtn.textContent = '⇵ Vertikal';
   mirrorVBtn.title = 'Diese Wand vertikal gespiegelt auf die gegenüberliegende Seite kopieren';
   mirrorVBtn.addEventListener('click', () => { mirrorWallAt(si, 'h'); closeSheet(); });
   mirrorRow.appendChild(mirrorHBtn);
@@ -2646,6 +2650,7 @@ function openEditSheet(si, bi) {
   sheet.appendChild(favWrap);
   sheet.appendChild(favSaveBtn);
   sheet.appendChild(copyPasteRow);
+  sheet.appendChild(mirrorLabel);
   sheet.appendChild(mirrorRow);
   sheet.appendChild(actRow);
 
@@ -3105,11 +3110,13 @@ function renderBulkBar() {
   const selBayIds = new Set(selectedBays.map(b => b.id));
   const mirrorHSelBtn = document.createElement('button');
   mirrorHSelBtn.type = 'button'; mirrorHSelBtn.className = 'bulk-sel-btn';
-  mirrorHSelBtn.textContent = '⇋ Horizontal spiegeln';
+  mirrorHSelBtn.textContent = '⇋ Horizontal';
+  mirrorHSelBtn.title = 'Ausgewählte Felder horizontal gespiegelt kopieren';
   mirrorHSelBtn.addEventListener('click', () => mirrorBaySelection(selBayIds, 'v'));
   const mirrorVSelBtn = document.createElement('button');
   mirrorVSelBtn.type = 'button'; mirrorVSelBtn.className = 'bulk-sel-btn';
-  mirrorVSelBtn.textContent = '⇵ Vertikal spiegeln';
+  mirrorVSelBtn.textContent = '⇵ Vertikal';
+  mirrorVSelBtn.title = 'Ausgewählte Felder vertikal gespiegelt kopieren';
   mirrorVSelBtn.addEventListener('click', () => mirrorBaySelection(selBayIds, 'h'));
   mirrorSelRow.appendChild(mirrorHSelBtn);
   mirrorSelRow.appendChild(mirrorVSelBtn);
