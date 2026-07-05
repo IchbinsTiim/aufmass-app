@@ -35,6 +35,7 @@
     </div>
     <div class="tool-group stats">
       <span class="area-readout" id="areaReadout" title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">Gesamtfläche: 0,00 m²</span>
+      <span class="warnings-readout hidden" id="warningsReadout" title="Felder mit fehlenden oder unvollständigen Angaben"></span>
     </div>
     <div class="tool-group actions">
       <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
@@ -45,10 +46,12 @@
       <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
       <button id="savePlanBtn" class="secondary">Speichern</button>
       <button id="loadPlanBtn" class="secondary">Laden</button>
+      <button id="photosBtn" class="secondary" title="Projekt-Fotos ansehen/hinzufügen">📷 Fotos</button>
       <button id="exportPdfBtn" class="primary">PDF</button>
       <button id="deviceToggleBtn" class="secondary" title="Gerät wechseln">📱</button>
     </div>
     <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
+    <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none" />
   </div>
 
   <div id="appLayout">
