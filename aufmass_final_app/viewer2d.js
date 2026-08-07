@@ -277,7 +277,6 @@ let addCtxDirFixed = false;  // true when direction already chosen via direction
 let selectedSi     = null;   // index of currently selected section (shows + buttons)
 let selectedBi     = null;   // index of currently selected bay within selectedSi (highlight + label)
 let snapEnabled    = true;   // magnetic grid snapping on/off
-let pdfMode        = false;  // when true: render clean plan (no handles)
 
 // ── Rückgängig / Wiederholen ──────────────────────────────────────────────
 // Snapshot-basiert statt pro-Aktion instrumentiert: bei jedem renderSvg()
@@ -677,16 +676,128 @@ function deleteFavorite(id) {
   saveFavoritesList(loadFavorites().filter(f => f.id !== id));
 }
 
-/* ── Zeichenfläche: Pinch-Zoom & Pan ──────────────────────────────────────────
-   `view` legt die Kamera relativ zur automatisch berechneten "Fit"-Box (die
-   gesamten Inhalt zeigende, in renderSvg() ermittelte Bounding-Box) fest:
-   scale=1/offX=0/offY=0 → Standardansicht (alles sichtbar), wie bisher.
-   `lastFitBox` wird bei jedem renderSvg()-Aufruf aktualisiert und von den
-   Touch-Handlern für Bildschirm↔Welt-Umrechnungen wiederverwendet. */
-let view = { scale: 1, offX: 0, offY: 0 };
-let lastFitBox = { cx: 200, cy: 150, w: 400, h: 300 };
-const VIEW_MIN_SCALE = 0.5;
-const VIEW_MAX_SCALE = 8;
+/* ── Zeichenfläche: Kamera / Viewport ────────────────────────────────────────
+   Die Ansicht wird durch eine ABSOLUTE Kamera in Weltkoordinaten beschrieben:
+     cx/cy  = Weltpunkt, der in der Mitte des Panels liegt
+     scale  = Bildschirm-Pixel je Welt-Pixel (Welt: 100 px = 1 m)
+   Der sichtbare Ausschnitt (viewBox) folgt allein aus Kamera + Panelgröße und
+   NICHT mehr aus der Bounding-Box des Inhalts. Dadurch ist das Zoom-/Pan-
+   Verhalten exakt gleich, ob 5 oder 50 Felder gezeichnet sind: ein Pinch um
+   den Faktor 2 zoomt immer um Faktor 2, ein Wisch um 100 px verschiebt immer
+   um 100 px. Neue Felder verändern die Kamera nicht mehr.
+   `autoFit` hält die Standardansicht (alles sichtbar) nach, solange der Nutzer
+   nicht selbst gezoomt/verschoben hat. */
+let camera  = { cx: 200, cy: 150, scale: 1 };
+let autoFit = true;
+const CAM_MIN_SCALE = 0.010;   // ganz herausgezoomt: 1 m ≈ 1 Bildschirm-px
+const CAM_MAX_SCALE = 4;       // ganz hereingezoomt: 1 m ≈ 400 Bildschirm-px
+const CAM_FIT_MARGIN = 0.88;   // Luft rund um den Inhalt bei „alles anzeigen“
+
+/* Kamera-Rechnungen laufen bei jedem Zoom-/Pan-Frame. Panelgröße und
+   Inhalts-Bounding-Box ändern sich dabei NICHT – beide werden deshalb
+   zwischengespeichert und nur bei Größen- bzw. Geometrieänderung verworfen.
+   Ohne den Cache würde jeder Zoomschritt ein Layout des Browsers erzwingen und
+   alle Felder durchlaufen; das war der Grund, weshalb sich Zoomen bei vielen
+   Feldern zäh anfühlte. */
+let _vpCache     = null;
+let _boundsCache = null;
+function invalidateViewCaches() { _vpCache = null; _boundsCache = null; }
+
+/** Größe/Position des Zeichenpanels in Bildschirmpixeln. */
+function viewportRect() {
+  if (_vpCache) return _vpCache;
+  const svg = document.getElementById('planSvg');
+  const r   = svg.getBoundingClientRect();
+  return (_vpCache = { left: r.left, top: r.top, w: r.width || 800, h: r.height || 600 });
+}
+
+/** Bounding-Box aller gezeichneten Felder in Weltkoordinaten (null = leer). */
+function contentBounds() {
+  if (_boundsCache !== null) return _boundsCache.box;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  state.sections.forEach(sec => {
+    if (!sec.bays.length) return;
+    sectionBayPolys(sec, sec.x0, sec.y0).forEach(poly => poly.forEach(p => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }));
+  });
+  const box = isFinite(minX) ? { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY } : null;
+  _boundsCache = { box };
+  return box;
+}
+
+function clampScale(s) {
+  return Math.min(CAM_MAX_SCALE, Math.max(CAM_MIN_SCALE, s));
+}
+
+/** Setzt die Kamera so, dass der gesamte Inhalt zentriert sichtbar ist. */
+function fitCameraToContent() {
+  const vp = viewportRect();
+  const b  = contentBounds();
+  if (!b) {
+    camera.cx = 0; camera.cy = 0;
+    camera.scale = clampScale(Math.min(vp.w / 800, vp.h / 600));
+    return;
+  }
+  camera.cx = b.minX + b.w / 2;
+  camera.cy = b.minY + b.h / 2;
+  const sx = vp.w / Math.max(b.w, 1);
+  const sy = vp.h / Math.max(b.h, 1);
+  camera.scale = clampScale(Math.min(sx, sy) * CAM_FIT_MARGIN);
+}
+
+/** Hält den Kameramittelpunkt in Reichweite des Inhalts (kein „Verlaufen“). */
+function clampCamera() {
+  camera.scale = clampScale(camera.scale);
+  const b = contentBounds();
+  if (!b) return;
+  const vp     = viewportRect();
+  const halfW  = vp.w / camera.scale / 2;
+  const halfH  = vp.h / camera.scale / 2;
+  camera.cx = Math.max(b.minX - halfW, Math.min(b.maxX + halfW, camera.cx));
+  camera.cy = Math.max(b.minY - halfH, Math.min(b.maxY + halfH, camera.cy));
+}
+
+/** Schreibt die Kamera in die viewBox des SVG (+ Rasterhintergrund). */
+function applyCamera() {
+  const svg = document.getElementById('planSvg');
+  const vp  = viewportRect();
+  const vw  = vp.w / camera.scale;
+  const vh  = vp.h / camera.scale;
+  const x   = camera.cx - vw / 2;
+  const y   = camera.cy - vh / 2;
+  svg.setAttribute('viewBox', `${x.toFixed(2)} ${y.toFixed(2)} ${vw.toFixed(2)} ${vh.toFixed(2)}`);
+  const gbg = document.getElementById('gridBg');
+  if (gbg) {
+    gbg.setAttribute('x', x);      gbg.setAttribute('y', y);
+    gbg.setAttribute('width', vw); gbg.setAttribute('height', vh);
+  }
+}
+
+/** Bildschirm- → Weltkoordinaten (direkt aus der Kamera, ohne DOM-Umweg). */
+function clientToWorld(clientX, clientY) {
+  const vp = viewportRect();
+  return {
+    x: camera.cx + (clientX - vp.left - vp.w / 2) / camera.scale,
+    y: camera.cy + (clientY - vp.top  - vp.h / 2) / camera.scale
+  };
+}
+
+/** Zoomt um `factor` und hält dabei den Weltpunkt unter (clientX,clientY) fest. */
+function zoomAt(clientX, clientY, factor) {
+  const before = clientToWorld(clientX, clientY);
+  const next   = clampScale(camera.scale * factor);
+  if (next === camera.scale) return;
+  camera.scale = next;
+  const after  = clientToWorld(clientX, clientY);
+  camera.cx += before.x - after.x;
+  camera.cy += before.y - after.y;
+  autoFit = false;
+  clampCamera();
+}
 
 // Aktive Zeigerpunkte (Finger) auf der Zeichenfläche, für Pan/Pinch.
 const canvasPointers = new Map();   // pointerId → { x, y } (Client-Koordinaten)
@@ -827,11 +938,7 @@ let movePreview = null;
 
 /** Bildschirm→Welt-Skala (Welt-px je Bildschirm-px) für zoom-stabile Magnetstärke. */
 function worldPerScreenPx() {
-  const svg  = document.getElementById('planSvg');
-  const rect = svg.getBoundingClientRect();
-  const vb   = svg.viewBox.baseVal;
-  if (!rect.width || !vb.width) return 1;
-  return vb.width / rect.width;
+  return 1 / camera.scale;
 }
 
 /** Die vier Eck-Polygone aller Felder einer Sektion an Position (x0,y0). */
@@ -912,13 +1019,7 @@ function gridSnapPos(x, y) {
 }
 
 function screenToSvg(clientX, clientY) {
-  const svg  = document.getElementById('planSvg');
-  const rect = svg.getBoundingClientRect();
-  const vb   = svg.viewBox.baseVal;
-  return {
-    x: vb.x + (clientX - rect.left) * (vb.width  / rect.width),
-    y: vb.y + (clientY - rect.top)  * (vb.height / rect.height)
-  };
+  return clientToWorld(clientX, clientY);
 }
 
 /** Returns the SVG endpoint (x, y) of a section. */
@@ -1163,6 +1264,7 @@ function renderSvg() {
   const svg  = document.getElementById('planSvg');
   const hint = document.getElementById('emptyHint');
   g.innerHTML = '';
+  invalidateViewCaches();
   updateAreaReadout();
   updateWarningsReadout();
   scheduleAutosave2d();
@@ -1170,8 +1272,9 @@ function renderSvg() {
 
   const hasBays = state.sections.some(s => s.bays.length > 0);
   if (!hasBays) {
-    svg.setAttribute('viewBox', '0 0 400 300');
-    lastFitBox = { cx: 200, cy: 150, w: 400, h: 300 };
+    autoFit = true;
+    fitCameraToContent();
+    applyCamera();
     hint.classList.remove('hidden');
     return;
   }
@@ -1180,40 +1283,18 @@ function renderSvg() {
   const depth = state.depth * PX_PER_M;
   const els   = computeLayout();
 
-  // Bounding box
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const track = (x, y) => {
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-  };
-  els.forEach(el => {
-    if (el.pts) el.pts.forEach(p => track(p.x, p.y));
-    if (el.type === 'wallLine')     { track(el.x1, el.y1); track(el.x2, el.y2); }
-    if (el.x !== undefined)         track(el.x, el.y !== undefined ? el.y : 0);
-  });
-
-  const PAD = pdfMode ? depth * 1.8 + 20 : depth * 3.5 + HANDLE_R * 5;
-  minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
-  const vw = maxX - minX, vh = maxY - minY;
-  lastFitBox = { cx: minX + vw / 2, cy: minY + vh / 2, w: vw, h: vh };
-
-  // Nutzer-Zoom/Pan wird über der automatisch berechneten "Fit"-Box angewendet
-  // (scale=1/offX=0/offY=0 → unverändert wie zuvor). Im PDF-Export immer die
-  // volle Ansicht, unabhängig vom aktuellen Zoom auf dem Bildschirm.
-  const zScale = pdfMode ? 1 : view.scale;
-  const zOffX  = pdfMode ? 0 : view.offX;
-  const zOffY  = pdfMode ? 0 : view.offY;
-  const finalW = vw / zScale, finalH = vh / zScale;
-  const finalX = lastFitBox.cx - finalW / 2 + zOffX;
-  const finalY = lastFitBox.cy - finalH / 2 + zOffY;
-  svg.setAttribute('viewBox', `${finalX.toFixed(1)} ${finalY.toFixed(1)} ${finalW.toFixed(1)} ${finalH.toFixed(1)}`);
-
-  const gbg = document.getElementById('gridBg');
-  gbg.setAttribute('x', finalX); gbg.setAttribute('y', finalY);
-  gbg.setAttribute('width', finalW); gbg.setAttribute('height', finalH);
+  // Kamera: solange der Nutzer nicht selbst gezoomt/verschoben hat, folgt die
+  // Ansicht automatisch dem Inhalt. Sobald er zoomt, bleibt die Kamera stehen –
+  // neue Felder verschieben oder skalieren die Ansicht dann nicht mehr.
+  if (autoFit) fitCameraToContent();
+  else clampCamera();
+  applyCamera();
 
   const bayFontSize  = Math.max(depth * 0.38, 9);
-  const infoFontSize = Math.max(depth * 0.28, 7);
+  // Bedienelemente (Griffe, +-Punkte, Maßstabsbalken) werden in BILDSCHIRM-
+  // Pixeln bemessen: `hs(px)` rechnet Bildschirm-px in Welt-px um. So bleiben
+  // sie bei 50 Feldern (weit herausgezoomt) genauso gut treffbar wie bei 5.
+  const hs = px => px / camera.scale;
 
   // 1. Corner pieces
   els.filter(e => e.type === 'corner').forEach(el =>
@@ -1287,11 +1368,10 @@ function renderSvg() {
       g.appendChild(t);
     };
 
-    // Feldbezeichnung (z. B. "A1") – als kleines Kästchen in der Feld-Ecke,
-    // nicht im PDF-Export (dort zählen nur Maße/Positionen). Färbt sich je
-    // nach Auswahlzustand ein, damit klar ist, WELCHES Feld gerade ausgewählt
-    // bzw. in der Mehrfachauswahl markiert ist.
-    if (!pdfMode) {
+    // Feldbezeichnung (z. B. "A1") – als kleines Kästchen in der Feld-Ecke.
+    // Färbt sich je nach Auswahlzustand ein, damit klar ist, WELCHES Feld
+    // gerade ausgewählt bzw. in der Mehrfachauswahl markiert ist.
+    {
       const fieldLabel = bayLabel(state.sections[el.si], el.bi);
       const cornerFont = Math.max(depth * 0.24, 9);
       const padX       = cornerFont * 0.45;
@@ -1416,9 +1496,9 @@ function renderSvg() {
     }))
   );
 
-  // 5b. Move handles (orange ✥) — always visible, even in PDF mode use pdfMode to skip
-  if (!pdfMode) {
-    const MOVE_R = Math.round(HANDLE_R * 1.25);
+  // 5b. Move handles (orange ✥)
+  {
+    const MOVE_R = hs(HANDLE_R * 1.25);
     els.filter(e => e.type === 'moveHandle').forEach(el => {
       const isActive = drag && drag.type === 'move' && drag.si === el.si;
 
@@ -1432,13 +1512,13 @@ function renderSvg() {
       g.appendChild(svgEl('circle', {
         cx: el.x, cy: el.y, r: MOVE_R,
         fill: isActive ? '#c85000' : '#ff8800',
-        stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+        stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
       }));
 
       const sym = svgEl('text', {
         x: el.x, y: el.y,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': Math.round(MOVE_R * 1.1),
+        'font-size': MOVE_R * 1.1,
         'font-family': 'system-ui, sans-serif',
         fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
       });
@@ -1447,7 +1527,7 @@ function renderSvg() {
     });
 
     // Rotation handles (purple ↻) — nur für die ausgewählte Sektion
-    const ROT_R     = Math.round(HANDLE_R * 0.85);
+    const ROT_R     = hs(HANDLE_R * 0.85);
     const movingNow0 = drag && (drag.type === 'move' || drag.type === 'resize');
     els.filter(e => e.type === 'rotateHandle' && e.si === selectedSi && !movingNow0).forEach(el => {
       const isActive = drag && drag.type === 'rotate' && drag.si === el.si;
@@ -1457,7 +1537,7 @@ function renderSvg() {
       const end = sectionEnd(sec);
       g.appendChild(svgEl('line', {
         x1: end.x, y1: end.y, x2: el.x, y2: el.y,
-        stroke: '#8e44ec', 'stroke-width': 2, 'stroke-dasharray': '4 4',
+        stroke: '#8e44ec', 'stroke-width': hs(2), 'stroke-dasharray': `${hs(4)} ${hs(4)}`,
         'pointer-events': 'none'
       }));
 
@@ -1471,13 +1551,13 @@ function renderSvg() {
       g.appendChild(svgEl('circle', {
         cx: el.x, cy: el.y, r: ROT_R,
         fill: isActive ? '#6c2bd9' : '#8e44ec',
-        stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+        stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
       }));
 
       const sym = svgEl('text', {
         x: el.x, y: el.y,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': Math.round(ROT_R * 1.15),
+        'font-size': ROT_R * 1.15,
         'font-family': 'system-ui, sans-serif',
         fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
       });
@@ -1488,15 +1568,13 @@ function renderSvg() {
       if (isActive) {
         const deg = Math.round(secAngle(sec));
         const bx = el.x, by = el.y - ROT_R * 2.6;
-        g.appendChild(svgEl('rect', { x: bx - 30, y: by - 14, width: 60, height: 28, rx: 7, fill: '#6c2bd9', 'pointer-events': 'none' }));
-        const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 14, 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
+        g.appendChild(svgEl('rect', { x: bx - hs(30), y: by - hs(14), width: hs(60), height: hs(28), rx: hs(7), fill: '#6c2bd9', 'pointer-events': 'none' }));
+        const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': hs(14), 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
         bt.textContent = deg + '°';
         g.appendChild(bt);
       }
     });
   }
-
-  if (pdfMode) { return; }   // PDF: kein Maßstabsbalken (auf Wunsch entfernt)
 
   // 5. Blaue Schnell-Hinzufügen-Buttons (links / rechts) am ausgewählten Feld.
   //    Ein Klick fügt sofort ein weiteres Feld (Standard 2,57 m) in dieselbe
@@ -1507,8 +1585,8 @@ function renderSvg() {
     const dir = secVec(selSec);
     const out = outVec(dir, selSec.flip);
     const end = sectionEnd(selSec);
-    const EXT_R = Math.round(HANDLE_R * 1.05);
-    const axOff = HANDLE_R * 1.7;
+    const EXT_R = hs(HANDLE_R * 1.05);
+    const axOff = EXT_R * 1.7;
     const addPts = [
       { x: selSec.x0 + out.dx * depth / 2 - dir.dx * axOff,
         y: selSec.y0 + out.dy * depth / 2 - dir.dy * axOff, side: 'back' },
@@ -1532,13 +1610,13 @@ function renderSvg() {
 
       g.appendChild(svgEl('circle', {
         cx: pt.x, cy: pt.y, r: EXT_R,
-        fill: '#007aff', stroke: '#fff', 'stroke-width': 2.5, 'pointer-events': 'none'
+        fill: '#007aff', stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
       }));
 
       const plus = svgEl('text', {
         x: pt.x, y: pt.y,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': Math.round(EXT_R * 1.25),
+        'font-size': EXT_R * 1.25,
         'font-family': 'system-ui, sans-serif',
         fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
       });
@@ -1553,8 +1631,13 @@ function renderSvg() {
   // 7. Andock-Vorschau (während des Verschiebens)
   drawMovePreview(g);
 
-  // 8. Scale bar
-  drawScaleBar(g, finalX, finalY, finalW, finalH, infoFontSize);
+  // 8. Maßstabsbalken (aus der aktuellen Kamera abgeleitet)
+  const camVp = viewportRect();
+  drawScaleBar(g,
+    camera.cx - camVp.w / camera.scale / 2,
+    camera.cy - camVp.h / camera.scale / 2,
+    camVp.w / camera.scale, camVp.h / camera.scale,
+    hs(12));
 }
 
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
@@ -1584,16 +1667,22 @@ function drawMovePreview(g) {
 }
 
 function drawScaleBar(g, minX, minY, vw, vh, fontSize) {
-  const barLen = 5 * PX_PER_M;
+  // Balkenlänge in ganzen Metern, passend zum aktuellen Zoom (5 m bei normaler
+  // Ansicht, bei stark herausgezoomten Großgerüsten 10/20/50 m …).
+  const targetPx = 140 / camera.scale;                     // ~140 Bildschirm-px
+  const steps    = [1, 2, 5, 10, 20, 50, 100, 200];
+  const meters   = steps.find(m => m * PX_PER_M >= targetPx) || steps[steps.length - 1];
+  const barLen = meters * PX_PER_M;
   const bx = minX + vw * 0.04;
   const by = minY + vh - (vh * 0.05);
-  const tickH = 8;
-  g.appendChild(svgEl('rect', { x: bx - 8, y: by - fontSize - 6, width: barLen + 16, height: fontSize + tickH + 12, fill: 'rgba(255,255,255,0.82)', rx: 4 }));
-  g.appendChild(svgEl('line', { x1: bx, y1: by, x2: bx + barLen, y2: by, stroke: '#333', 'stroke-width': 2 }));
-  g.appendChild(svgEl('line', { x1: bx, y1: by - tickH, x2: bx, y2: by + tickH, stroke: '#333', 'stroke-width': 2 }));
-  g.appendChild(svgEl('line', { x1: bx + barLen, y1: by - tickH, x2: bx + barLen, y2: by + tickH, stroke: '#333', 'stroke-width': 2 }));
-  const lbl = svgEl('text', { x: bx + barLen / 2, y: by - tickH - 2, 'text-anchor': 'middle', 'font-size': fontSize, 'font-family': 'system-ui, sans-serif', fill: '#333', 'font-weight': '600' });
-  lbl.textContent = '5,00 m';
+  const tickH = fontSize * 0.7;
+  const sw = fontSize * 0.17;
+  g.appendChild(svgEl('rect', { x: bx - fontSize * 0.7, y: by - fontSize * 1.6, width: barLen + fontSize * 1.4, height: fontSize * 1.6 + tickH + fontSize * 0.7, fill: 'rgba(255,255,255,0.82)', rx: fontSize * 0.35 }));
+  g.appendChild(svgEl('line', { x1: bx, y1: by, x2: bx + barLen, y2: by, stroke: '#333', 'stroke-width': sw }));
+  g.appendChild(svgEl('line', { x1: bx, y1: by - tickH, x2: bx, y2: by + tickH, stroke: '#333', 'stroke-width': sw }));
+  g.appendChild(svgEl('line', { x1: bx + barLen, y1: by - tickH, x2: bx + barLen, y2: by + tickH, stroke: '#333', 'stroke-width': sw }));
+  const lbl = svgEl('text', { x: bx + barLen / 2, y: by - tickH - fontSize * 0.2, 'text-anchor': 'middle', 'font-size': fontSize, 'font-family': 'system-ui, sans-serif', fill: '#333', 'font-weight': '600' });
+  lbl.textContent = meters.toString().replace('.', ',') + ' m';
   g.appendChild(lbl);
 }
 
@@ -1745,45 +1834,46 @@ function onSvgPointerUp(e) {
   else renderAll();
 }
 
-// ── Zeichenfläche: Pinch-Zoom & Pan ──────────────────────────────────────────
+// ── Zeichenfläche: Pinch-Zoom, Pan & Mausrad ────────────────────────────────
 // Ein Finger auf leerem Grund oder einem Feld verschiebt die Ansicht (Pan),
-// zwei Finger zoomen (Pinch) mit dem Fingermittelpunkt als Ankerpunkt – der
-// Punkt unter den Fingern bleibt dabei fixiert, damit sich das Zoomen auf dem
-// iPad ruhig und ohne Ruckeln anfühlt. Handles (Verschieben/Drehen) haben
-// eigene pointerdown-Listener mit stopPropagation() und sind hiervon nicht
-// betroffen.
+// zwei Finger zoomen (Pinch) mit dem Fingermittelpunkt als Ankerpunkt, Maus-
+// rad/Trackpad zoomt auf den Cursor. Der Punkt unter Fingern bzw. Cursor bleibt
+// dabei exakt fixiert. Handles (Verschieben/Drehen) haben eigene pointerdown-
+// Listener mit stopPropagation() und sind hiervon nicht betroffen.
 
-function clampScale(s) {
-  return Math.min(VIEW_MAX_SCALE, Math.max(VIEW_MIN_SCALE, s));
-}
-
-/** Verhindert, dass die Zeichnung durch Pan/Pinch komplett aus dem sichtbaren
- *  Bereich verschwindet: der Kamera-Mittelpunkt darf sich höchstens um eine
- *  Bildschirmbreite/-höhe (bei aktuellem Zoom) über den Rand der gesamten
- *  Zeichnung (lastFitBox) hinaus bewegen – ein Rest der Zeichnung bleibt so
- *  immer in Reichweite eines einzigen weiteren Wischens. */
-function clampViewOffset() {
-  const finalW = lastFitBox.w / view.scale;
-  const finalH = lastFitBox.h / view.scale;
-  const maxOffX = lastFitBox.w / 2 + finalW;
-  const maxOffY = lastFitBox.h / 2 + finalH;
-  view.offX = Math.max(-maxOffX, Math.min(maxOffX, view.offX));
-  view.offY = Math.max(-maxOffY, Math.min(maxOffY, view.offY));
-}
+/* Kamera-Änderungen (Pan/Zoom) verändern NUR den sichtbaren Ausschnitt, nicht
+   die Zeichnung selbst. Während einer Geste wird deshalb ausschließlich die
+   viewBox aktualisiert (konstanter Aufwand) statt das gesamte SVG neu
+   aufzubauen – dadurch bleibt das Zoomen bei 50 Feldern exakt so flüssig wie
+   bei 5. Erst wenn die Geste endet, wird einmal vollständig neu gezeichnet,
+   damit die bildschirmgroßen Bedienelemente wieder passend skaliert sind. */
+let camRafPending  = false;
+let camSettleTimer = null;
 
 function scheduleCanvasRender() {
-  if (!rafPending) {
-    rafPending = true;
-    requestAnimationFrame(() => { renderSvg(); updateZoomResetBtn(); rafPending = false; });
-  }
+  if (camRafPending) return;
+  camRafPending = true;
+  requestAnimationFrame(() => {
+    camRafPending = false;
+    applyCamera();
+    updateZoomResetBtn();
+  });
+}
+
+/** Vollständiger Neuaufbau kurz nach Ende einer Zoom-/Pan-Interaktion. */
+function scheduleCameraSettle(delay = 140) {
+  clearTimeout(camSettleTimer);
+  camSettleTimer = setTimeout(() => { renderSvg(); updateZoomResetBtn(); }, delay);
 }
 
 /** Setzt canvasGesture anhand der aktuell aktiven Finger neu auf – wird bei
  *  jedem Wechsel der Fingeranzahl (Auflegen/Abheben) aufgerufen, damit z.B.
- *  ein Pinch nahtlos in ein Ein-Finger-Pan übergeht. */
+ *  ein Pinch nahtlos in ein Ein-Finger-Pan übergeht. Alle Bezugswerte werden
+ *  beim Gestenstart eingefroren; während der Geste wird ausschließlich mit
+ *  Bildschirm-Deltas gerechnet (kein Zurücklesen aus dem DOM) – dadurch bleibt
+ *  die Geste unabhängig von Renderzeit und Feldanzahl absolut stabil. */
 function beginCanvasGesture() {
   const pts = [...canvasPointers.values()];
-  const svg = document.getElementById('planSvg');
 
   if (pts.length === 1) {
     canvasGesture = {
@@ -1791,8 +1881,9 @@ function beginCanvasGesture() {
       moved: false,
       startClientX: pts[0].x,
       startClientY: pts[0].y,
-      startOffX: view.offX,
-      startOffY: view.offY
+      startCx: camera.cx,
+      startCy: camera.cy,
+      startScale: camera.scale
     };
   } else if (pts.length === 2) {
     const midClient = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
@@ -1801,9 +1892,10 @@ function beginCanvasGesture() {
       moved: false,
       startDist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
       startMidClient: midClient,
-      startScale: view.scale,
-      startWorld: screenToSvg(midClient.x, midClient.y),
-      startFit: { ...lastFitBox }
+      startScale: camera.scale,
+      // Weltpunkt unter dem Fingermittelpunkt beim Gestenstart – bleibt während
+      // der gesamten Geste unter den Fingern fixiert (kein Driften).
+      startWorld: clientToWorld(midClient.x, midClient.y)
     };
   } else {
     canvasGesture = null;
@@ -1827,10 +1919,7 @@ function onCanvasPointerMove(e) {
   canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (!canvasGesture) return;
 
-  const svg  = document.getElementById('planSvg');
-  const rect = svg.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
+  const svg = document.getElementById('planSvg');
   const captureActivePointers = () => {
     canvasPointers.forEach((_, id) => { try { svg.setPointerCapture(id); } catch (err) { /* ignorieren */ } });
   };
@@ -1840,10 +1929,13 @@ function onCanvasPointerMove(e) {
     const dxClient = p.x - canvasGesture.startClientX;
     const dyClient = p.y - canvasGesture.startClientY;
     if (!canvasGesture.moved && Math.hypot(dxClient, dyClient) > 4) { canvasGesture.moved = true; captureActivePointers(); }
-    const vb = svg.viewBox.baseVal;
-    view.offX = canvasGesture.startOffX - dxClient * (vb.width  / rect.width);
-    view.offY = canvasGesture.startOffY - dyClient * (vb.height / rect.height);
-    clampViewOffset();
+    if (!canvasGesture.moved) return;
+    // 1 Bildschirm-px Wisch = 1 Bildschirm-px Verschiebung, unabhängig von Zoom
+    // und Feldanzahl.
+    camera.cx = canvasGesture.startCx - dxClient / canvasGesture.startScale;
+    camera.cy = canvasGesture.startCy - dyClient / canvasGesture.startScale;
+    autoFit = false;
+    clampCamera();
     scheduleCanvasRender();
   } else if (canvasGesture.mode === 'pinch' && canvasPointers.size === 2) {
     const pts = [...canvasPointers.values()];
@@ -1851,18 +1943,15 @@ function onCanvasPointerMove(e) {
     const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     if (!canvasGesture.moved && Math.abs(dist - canvasGesture.startDist) > 6) { canvasGesture.moved = true; captureActivePointers(); }
 
-    view.scale = clampScale(canvasGesture.startScale * (dist / canvasGesture.startDist));
+    camera.scale = clampScale(canvasGesture.startScale * (dist / canvasGesture.startDist));
 
-    // Ankerpunkt: der Weltpunkt unter dem Finger-Mittelpunkt bei Gestenstart
-    // bleibt exakt unter dem aktuellen Finger-Mittelpunkt – kein Driften.
-    const fit    = canvasGesture.startFit;
-    const finalW = fit.w / view.scale;
-    const finalH = fit.h / view.scale;
-    const finalX = canvasGesture.startWorld.x - (midClient.x - rect.left) * (finalW / rect.width);
-    const finalY = canvasGesture.startWorld.y - (midClient.y - rect.top)  * (finalH / rect.height);
-    view.offX = finalX - (fit.cx - finalW / 2);
-    view.offY = finalY - (fit.cy - finalH / 2);
-    clampViewOffset();
+    // Kamera so setzen, dass startWorld exakt unter dem aktuellen Finger-
+    // Mittelpunkt liegt (Zoom + gleichzeitiges Verschieben mit zwei Fingern).
+    const vp = viewportRect();
+    camera.cx = canvasGesture.startWorld.x - (midClient.x - vp.left - vp.w / 2) / camera.scale;
+    camera.cy = canvasGesture.startWorld.y - (midClient.y - vp.top  - vp.h / 2) / camera.scale;
+    autoFit = false;
+    clampCamera();
     scheduleCanvasRender();
   }
 }
@@ -1872,11 +1961,35 @@ function onCanvasPointerUp(e) {
   try { document.getElementById('planSvg').releasePointerCapture(e.pointerId); } catch (err) { /* ignorieren */ }
   if (canvasGesture && canvasGesture.moved) canvasJustMoved = true;
   beginCanvasGesture();
+  if (!canvasPointers.size) scheduleCameraSettle(60);
+}
+
+/** Maus-/Trackpad-Zoom. Pinch auf dem Trackpad kommt als wheel+ctrlKey an und
+ *  wird deutlich feiner übersetzt als ein Mausrad-Klick. Ankerpunkt ist immer
+ *  der Cursor. */
+function onCanvasWheel(e) {
+  e.preventDefault();
+  let dy = e.deltaY;
+  if (e.deltaMode === 1) dy *= 16;        // Zeilen → Pixel
+  else if (e.deltaMode === 2) dy *= 400;  // Seiten → Pixel
+  const k = e.ctrlKey ? 0.010 : 0.0022;   // Trackpad-Pinch feiner als Mausrad
+  const factor = Math.exp(-dy * k);
+  zoomAt(e.clientX, e.clientY, factor);
+  scheduleCanvasRender();
+  scheduleCameraSettle();
+}
+
+/** Doppelklick/Doppeltipp: eine Stufe hineinzoomen auf den Zeigepunkt. */
+function onCanvasDblClick(e) {
+  zoomAt(e.clientX, e.clientY, 1.8);
+  scheduleCanvasRender();
+  scheduleCameraSettle(60);
 }
 
 /** Setzt Zoom/Pan der Zeichenfläche auf die automatische Vollansicht zurück. */
 function resetCanvasView() {
-  view = { scale: 1, offX: 0, offY: 0 };
+  autoFit = true;
+  fitCameraToContent();
   renderSvg();
   updateZoomResetBtn();
 }
@@ -1884,8 +1997,7 @@ function resetCanvasView() {
 function updateZoomResetBtn() {
   const btn = document.getElementById('zoomResetBtn');
   if (!btn) return;
-  const isDefault = view.scale === 1 && view.offX === 0 && view.offY === 0;
-  btn.classList.toggle('hidden', isDefault);
+  btn.classList.toggle('hidden', autoFit);
 }
 
 // ── Add field sheet (direction + size) ────────────────────────────────────
@@ -3361,7 +3473,7 @@ function buildFieldChain(defs) {
     const e = sectionEnd(s); x = e.x; y = e.y;
     return s;
   });
-  view = { scale: 1, offX: 0, offY: 0 };
+  autoFit = true;
   renderAll();
   updateZoomResetBtn();
 }
@@ -3433,7 +3545,7 @@ function onLoadFile(e) {
       _bId = d._bId || state.sections.flatMap(x => x.bays).length;
       document.getElementById('projectName').value = state.project;
       document.getElementById('scaffDepth').value  = state.depth;
-      view = { scale: 1, offX: 0, offY: 0 };
+      autoFit = true;
       renderAll();
       updateZoomResetBtn();
     } catch { alert('Fehler beim Laden: Ungültige Datei.'); }
@@ -3536,210 +3648,588 @@ function aggQtyText(a) {
   return parts.join(' · ') || '–';
 }
 
-// ── PDF Export ─────────────────────────────────────────────────────────────
+/* ── PDF-Export (Vektor) ─────────────────────────────────────────────────────
+   Der Plan wird NICHT mehr als Screenshot der Zeichenfläche eingebettet,
+   sondern direkt als Vektorgrafik (Linien, Flächen, Text) in die PDF
+   gezeichnet. Zwei Gründe:
+     • Dateigröße: ein hochauflösendes PNG der gesamten Zeichenfläche wurde bei
+       großen Gerüsten dreistellig MB groß. Vektorseiten liegen im KB-Bereich.
+     • Lesbarkeit: Schriftgrößen sind in Punkt festgelegt und werden NICHT mit
+       der Zeichnung mitskaliert. Passt das Gerüst bei lesbarem Maßstab nicht
+       auf eine Seite, wird es automatisch auf mehrere Seiten aufgeteilt statt
+       unlesbar klein gequetscht.                                             */
 
-async function exportPdf() {
-  const prevSelected   = selectedSi;
-  const prevSelectedBi = selectedBi;
-  selectedSi = null;
-  selectedBi = null;
-  pdfMode    = true;
-  renderSvg();
-  try {
+// Papier & Maßstab
+const PDF_MARGIN       = 10;     // mm Seitenrand
+const PDF_MM_PER_M_MIN = 11;     // mind. 11 mm je Meter (≈ 1:91) – Baustellen-lesbar
+const PDF_MM_PER_M_MAX = 45;     // höchstens 45 mm je Meter (≈ 1:22)
 
-  const { jsPDF } = window.jspdf;
-  const svg = document.getElementById('planSvg');
-  const vb  = svg.viewBox.baseVal;
-  const svgW = vb.width || 800, svgH = vb.height || 600;
-  const scale = 3;
-  const cW = Math.round(svgW * scale), cH = Math.round(svgH * scale);
+// Schriftgrößen in pt – bewusst fix, damit auf Papier nichts unter die
+// Lesbarkeitsgrenze rutscht.
+const PDF_FS_LEN   = 8.5;   // Feldlänge
+const PDF_FS_H     = 7.5;   // Höhenangaben
+const PDF_FS_LABEL = 7;     // Feldbezeichnung (A1 …)
+const PDF_FS_BADGE = 6.5;   // Positions-Badges
 
-  const serializer = new XMLSerializer();
-  let svgStr = serializer.serializeToString(svg);
-  svgStr = svgStr.replace(/(<svg[^>]*?)(\s*\bwidth\s*=\s*["'][^"']*["'])?(\s*\bheight\s*=\s*["'][^"']*["'])?/,
-    `$1 width="${cW}" height="${cH}"`);
+/** #rrggbb → [r,g,b] */
+function pdfHex(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
-  const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const img  = new Image(cW, cH);
-  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+/** Polygon aus Punkten (in mm) zeichnen. style: 'F' | 'S' | 'FD' */
+function pdfPoly(doc, pts, style) {
+  const d = [];
+  for (let i = 1; i < pts.length; i++) d.push([pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y]);
+  doc.lines(d, pts[0].x, pts[0].y, [1, 1], style, true);
+}
 
-  const canvas = document.createElement('canvas');
-  canvas.width = cW; canvas.height = cH;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cW, cH);
-  ctx.drawImage(img, 0, 0);
-  URL.revokeObjectURL(url);
+/** Auf (cx,cy) ZENTRIERTER Text mit optionaler Drehung.
+ *  `deg` folgt dem SVG-Drehsinn (im Uhrzeigersinn positiv).
+ *  jsPDF ignoriert align/baseline bei gedrehtem Text, deshalb wird der
+ *  Startpunkt hier selbst aus Textbreite und Schrifthöhe berechnet. */
+function pdfText(doc, str, cx, cy, deg) {
+  const th = -(deg || 0) * Math.PI / 180;
+  const w  = doc.getTextWidth(str);
+  const fs = doc.getFontSize() * 0.352778;          // pt → mm
+  const ax = Math.cos(th), ay = -Math.sin(th);      // Laufrichtung des Textes
+  const dx = Math.sin(th), dy = Math.cos(th);       // quer dazu, "nach unten"
+  doc.text(str,
+    cx - ax * w / 2 + dx * fs * 0.35,
+    cy - ay * w / 2 + dy * fs * 0.35,
+    deg ? { angle: -deg } : {});
+}
 
-  const imgData = canvas.toDataURL('image/png');
-  const orient  = cW > cH ? 'landscape' : 'portrait';
-  const doc     = new jsPDF({ orientation: orient, unit: 'mm', format: 'a4' });
-  const pdfW    = orient === 'landscape' ? 297 : 210;
-  const pdfH    = orient === 'landscape' ? 210 : 297;
-  const margin  = 10, titleH = 20;
-  const availW  = pdfW - 2 * margin, availH = pdfH - margin - titleH - margin;
-  const ratio   = Math.min(availW / (cW / (96 / 25.4)), availH / (cH / (96 / 25.4)));
-  const imgW    = (cW / (96 / 25.4)) * ratio;
-  const imgH    = (cH / (96 / 25.4)) * ratio;
+/** Größte Schriftgröße ≤ `pref`, mit der `str` in `maxMM` passt (nie unter `min`). */
+function pdfFitFont(doc, str, maxMM, pref, min) {
+  doc.setFontSize(pref);
+  const w = doc.getTextWidth(str);
+  const fs = w <= maxMM ? pref : Math.max(min, pref * maxMM / w);
+  doc.setFontSize(fs);
+  return fs;
+}
 
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
-  doc.text(state.project || 'Gerüst 2D-Ansicht', margin, margin + 6);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  const totalLen = state.sections
-    .reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
-  const totalFlaeche = computeTotalFlaeche();
-  doc.text(`Gerüsttiefe: ${state.depth.toFixed(2)} m   |   Gesamtlänge: ${totalLen.toFixed(2)} m   |   Gesamtfläche: ${totalFlaeche.toFixed(2)} m²`, margin, margin + 12);
-  doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, margin, margin + 17);
-    doc.addImage(imgData, 'PNG', margin, margin + titleH, imgW, imgH);
+/** Gedrehte Pille (gefüllte, umrandete Fläche) mit zentriertem Text. */
+function pdfPill(doc, str, cx, cy, deg, fill, stroke, textCol) {
+  const th = -(deg || 0) * Math.PI / 180;
+  const cos = Math.cos(th), sin = Math.sin(th);
+  const fs = doc.getFontSize() * 0.352778;
+  const w  = doc.getTextWidth(str) + fs * 0.8;
+  const h  = fs * 1.5;
+  const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
+    .map(([x, y]) => ({ x: cx + x * cos + y * sin, y: cy - x * sin + y * cos }));
+  doc.setFillColor(fill[0], fill[1], fill[2]);
+  doc.setDrawColor(stroke[0], stroke[1], stroke[2]);
+  doc.setLineWidth(0.25);
+  pdfPoly(doc, pts, 'FD');
+  doc.setTextColor(textCol[0], textCol[1], textCol[2]);
+  pdfText(doc, str, cx, cy, deg);
+}
 
-    // ── Aufmaß nach Gerüstseite ───────────────────────────────────────────
-    // Statt einer langen Liste wird je Gebäudeseite (Oben/Rechts/Unten/Links)
-    // eine saubere Tabelle ausgegeben; am Ende eine Gesamt-Tabelle über alle
-    // Seiten – übersichtlich als Material-/Bestellgrundlage.
-    const hx = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
-    const allBays = state.sections.flatMap(s => s.bays);
-    const anyPos  = allBays.some(b => (b.positions || []).length);
+/** Bounding-Box eines Feld-Elements (Welt-px). */
+function elBBox(el) {
+  const xs = el.pts.map(p => p.x), ys = el.pts.map(p => p.y);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
 
-    if (anyPos) {
-      const groups = fieldsBySide();
-      const sideBlocks = SIDE_ORDER
-        .map(side => ({ side, bays: groups[side] }))
-        .filter(b => b.bays.some(bay => (bay.positions || []).length));
+/**
+ * Zeichnet einen Ausschnitt des Plans als Vektor auf die aktuelle Seite.
+ * @param win  sichtbarer Weltausschnitt { minX, minY, w, h }
+ * @param area Papierbereich in mm { x, y, w, h }
+ * @param s    Maßstab in mm je Welt-px
+ * @param bayEls  zu zeichnende Feld-Elemente (bereits gefiltert)
+ * @param layout  vollständiges computeLayout() (für Ecken/Wandlinien)
+ * @param shapesOnly  true = nur Flächen zeichnen (Übersichtskarte)
+ */
+function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
+  // Ausschnitt mittig im verfügbaren Bereich platzieren
+  const originX = area.x + (area.w - win.w * s) / 2 - win.minX * s;
+  const originY = area.y + (area.h - win.h * s) / 2 - win.minY * s;
+  const P  = p => ({ x: originX + p.x * s, y: originY + p.y * s });
+  const XY = (x, y) => ({ x: originX + x * s, y: originY + y * s });
 
-      const tableW = availW;
-      const cols = [
-        { title: 'Position',   w: 0.42, align: 'left'   },
-        { title: 'Anzahl',     w: 0.13, align: 'center' },
-        { title: 'Menge',      w: 0.27, align: 'left'   },
-        { title: 'lfd. Meter', w: 0.18, align: 'right'  }
-      ];
-      const colX = []; let acc = margin;
-      cols.forEach(c => { colX.push(acc); acc += c.w * tableW; });
-      const colMid  = i => colX[i] + cols[i].w * tableW / 2;
-      const colRight = i => colX[i] + cols[i].w * tableW - 2.5;
-      const rowH = 7, headH = 7, sideHdrH = 8.5;
+  const depth   = state.depth * PX_PER_M;
+  const drawSet = new Set(bayEls.map(e => e.si + ':' + e.bi));
 
-      doc.addPage();
-      let py = margin + 4;
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-      doc.text('Aufmaß nach Gerüstseite', margin, py);
-      py += 9;
+  // 1. Eckstücke (nur die, deren Nachbarfelder auf dieser Seite liegen)
+  doc.setDrawColor(44, 111, 168); doc.setLineWidth(0.4);
+  doc.setFillColor(181, 212, 240);
+  layout.filter(e => e.type === 'corner').forEach(el => {
+    const b = elBBox(el);
+    if (b.maxX < win.minX || b.minX > win.minX + win.w) return;
+    if (b.maxY < win.minY || b.minY > win.minY + win.h) return;
+    pdfPoly(doc, el.pts.map(P), 'FD');
+  });
 
-      const drawColHeader = () => {
-        doc.setFillColor(236, 239, 243);
-        doc.rect(margin, py, tableW, headH, 'F');
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(70, 70, 70);
-        cols.forEach((c, i) => {
-          const tx = c.align === 'right' ? colRight(i) : c.align === 'center' ? colMid(i) : colX[i] + (i === 0 ? 8 : 2);
-          doc.text(c.title, tx, py + headH - 2.2, { align: c.align });
-        });
-        py += headH;
-      };
-
-      const drawRow = (a, shade) => {
-        if (shade) { doc.setFillColor(247, 249, 251); doc.rect(margin, py, tableW, rowH, 'F'); }
-        const [r, g2, b2] = hx(a.color);
-        doc.setFillColor(r, g2, b2); doc.setDrawColor(130, 130, 130); doc.setLineWidth(0.2);
-        doc.rect(colX[0] + 1.5, py + rowH / 2 - 2, 4, 4, 'FD');
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(25, 25, 25);
-        doc.text(a.label, colX[0] + 8, py + rowH - 2.7);
-        doc.text(a.n + '×', colMid(1), py + rowH - 2.7, { align: 'center' });
-        doc.setFontSize(9); doc.setTextColor(60, 60, 60);
-        doc.text(aggQtyText(a), colX[2] + 2, py + rowH - 2.7);
-        doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 25, 25);
-        doc.text(a.meters ? fmtQty(a.meters) + ' m' : '–', colRight(3), py + rowH - 2.7, { align: 'right' });
-        py += rowH;
-        doc.setDrawColor(224, 227, 231); doc.setLineWidth(0.1);
-        doc.line(margin, py, margin + tableW, py);
-      };
-
-      const drawTable = (title, subtitle, aggList) => {
-        // Passt die ganze Tabelle nicht mehr auf die Seite, aber auf eine leere
-        // Seite → komplett umbrechen, damit Tabellen nicht zerrissen werden.
-        const tableH = sideHdrH + headH + aggList.length * rowH;
-        if (py + tableH > pdfH - margin && tableH <= pdfH - 2 * margin - 6) { doc.addPage(); py = margin + 6; }
-        else if (py + sideHdrH + headH + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; }
-        doc.setFillColor(31, 78, 121);
-        doc.rect(margin, py, tableW, sideHdrH, 'F');
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
-        doc.text(title, margin + 3, py + sideHdrH - 2.7);
-        if (subtitle) {
-          doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-          doc.text(subtitle, margin + tableW - 3, py + sideHdrH - 2.7, { align: 'right' });
-        }
-        py += sideHdrH;
-        drawColHeader();
-        aggList.forEach((a, i) => {
-          if (py + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; drawColHeader(); }
-          drawRow(a, i % 2 === 1);
-        });
-        py += 6;
-      };
-
-      sideBlocks.forEach(({ side, bays }) => {
-        const len   = bays.reduce((s, b) => s + b.len, 0);
-        const flae  = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
-        const cnt   = bays.filter(bay => (bay.positions || []).length).length;
-        drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`, aggregatePositions(bays));
-      });
-
-      // Gesamt über alle Seiten
-      const totalLenAll = allBays.reduce((s, b) => s + b.len, 0);
-      drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`, aggregatePositions(allBays));
+  // 2. Wandlinien – am Rand des Ausschnitts abgeschnitten (Liang-Barsky),
+  //    damit auf einer Seite keine Linie ins Nichts weiterläuft.
+  doc.setDrawColor(90, 107, 122); doc.setLineWidth(0.3);
+  const clipSeg = (x1, y1, x2, y2) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    let t0 = 0, t1 = 1;
+    const edges = [[-dx, x1 - win.minX], [dx, win.minX + win.w - x1],
+                   [-dy, y1 - win.minY], [dy, win.minY + win.h - y1]];
+    for (const [pE, qE] of edges) {
+      if (pE === 0) { if (qE < 0) return null; continue; }
+      const r = qE / pE;
+      if (pE < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+      else        { if (r < t0) return null; if (r < t1) t1 = r; }
     }
+    return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
+  };
+  layout.filter(e => e.type === 'wallLine').forEach(el => {
+    const seg = clipSeg(el.x1, el.y1, el.x2, el.y2);
+    if (!seg) return;
+    const a = XY(seg[0], seg[1]), b = XY(seg[2], seg[3]);
+    doc.line(a.x, a.y, b.x, b.y);
+  });
 
-    // ── Notizen ────────────────────────────────────────────────────────────
-    // Individuelle Feld-Hinweise (z. B. "Fenster freihalten") als einfache
-    // Liste am Ende – optional, erscheint nur wenn Notizen vorhanden sind.
-    const notedFields = [];
-    state.sections.forEach(sec => {
-      sec.bays.forEach((bay, bi) => {
-        if ((bay.note || '').trim()) notedFields.push({ label: bayLabel(sec, bi), note: bay.note.trim() });
+  // 3. Felder
+  bayEls.forEach(el => {
+    const bay = state.sections[el.si].bays[el.bi];
+    normalizeBay(bay);
+    doc.setFillColor(222, 238, 255);
+    doc.setDrawColor(44, 111, 168); doc.setLineWidth(0.45);
+    pdfPoly(doc, el.pts.map(P), 'FD');
+  });
+
+  // 4. Beschriftungen – nach den Flächen, damit nichts überdeckt wird.
+  //    Auf der Übersichtsseite entfallen sie: dort ist der Maßstab bewusst
+  //    klein, Text würde sich nur überlagern.
+  if (shapesOnly) { doc.setTextColor(0, 0, 0); return; }
+
+  // Die Gerüsttiefe ist im Grundriss nur ~0,7 m breit. Damit auf Papier nichts
+  // ineinanderläuft, sitzt im Feld selbst NUR die Feldlänge; Feldbezeichnung
+  // liegt an der Wandseite, Höhen und Positionen gestapelt an der offenen
+  // Seite – jeweils längs zum Feld gedreht und auf die Feldlänge eingepasst.
+  const depthMM = depth * s;
+  bayEls.forEach(el => {
+    const bay = state.sections[el.si].bays[el.bi];
+    const rot = uprightDeg(el.ang);
+    const [p0, p1, p2, p3] = el.pts;
+    const c   = XY((p0.x + p1.x + p2.x + p3.x) / 4, (p0.y + p1.y + p2.y + p3.y) / 4);
+
+    // Auswärtsrichtung (Wand → offene Seite) im Papierkoordinatensystem
+    const wallMid  = P({ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 });
+    let ox = c.x - wallMid.x, oy = c.y - wallMid.y;
+    const olen = Math.hypot(ox, oy) || 1; ox /= olen; oy /= olen;
+
+    const lenMM  = el.len * PX_PER_M * s;
+    const maxTxt = lenMM * 0.92;
+
+    // Feldlänge mittig im Feld
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(10, 47, 88);
+    pdfFitFont(doc, el.len.toFixed(2).replace('.', ','), maxTxt, PDF_FS_LEN, 5.5);
+    pdfText(doc, el.len.toFixed(2).replace('.', ','), c.x, c.y, rot);
+
+    // Feldbezeichnung an der Wandseite
+    const label = bayLabel(state.sections[el.si], el.bi);
+    doc.setFont('helvetica', 'bold');
+    const lblFs = pdfFitFont(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
+    const lblD  = depthMM / 2 + lblFs * 0.352778 * 1.0;
+    pdfPill(doc, label, c.x - ox * lblD, c.y - oy * lblD, rot,
+            [10, 47, 88], [10, 47, 88], [255, 255, 255]);
+
+    // Offene Seite: Höhen, darunter je Position eine Zeile
+    const lines = [];
+    const hL = bay.hL != null ? bay.hL.toFixed(2).replace('.', ',') : null;
+    const hR = bay.hR != null ? bay.hR.toFixed(2).replace('.', ',') : null;
+    if (hL || hR) {
+      lines.push({
+        text: hL && hR ? (hL === hR ? 'h ' + hL : hL + ' | ' + hR) : 'h ' + (hL || hR),
+        fill: [240, 249, 243], stroke: [31, 122, 61], col: [22, 92, 45], fs: PDF_FS_H
       });
+    }
+    (bay.positions || []).forEach(pos => {
+      const meta = POS_BY_KEY[pos.cat];
+      const col  = pdfHex((meta && meta.color) || '#333333');
+      lines.push({ text: posBadge(pos, bay), fill: [255, 255, 255], stroke: col, col, fs: PDF_FS_BADGE });
     });
-    if (notedFields.length) {
-      doc.addPage();
-      let ny = margin + 4;
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-      doc.text('Notizen', margin, ny);
-      ny += 9;
-      notedFields.forEach(({ label, note }) => {
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25, 25, 25);
-        const lines = doc.splitTextToSize(note, availW - 22);
-        const blockH = 6 + lines.length * 5 + 3;
-        if (ny + blockH > pdfH - margin) { doc.addPage(); ny = margin + 6; }
-        doc.text(label + ':', margin, ny);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
-        doc.text(lines, margin + 22, ny);
-        ny += Math.max(6, lines.length * 5) + 3;
-      });
-    }
 
-    // ── Fotos ────────────────────────────────────────────────────────────
-    // Für den PDF-Export markierte Projekt-Fotos (siehe Fotos-Galerie), je
-    // eines auf einer eigenen Seite, seitenfüllend unter Beibehaltung des
-    // Seitenverhältnisses.
-    if (linkedProjectId) {
-      const photos = (await listProjectPhotos(linkedProjectId)).filter(p => p.include !== false);
-      photos.forEach((photo, i) => {
-        doc.addPage();
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
-        doc.text(`Foto ${i + 1} von ${photos.length}`, margin, margin + 5);
-        const photoAvailH = pdfH - margin - (margin + 10) - margin;
-        const ratio = Math.min(availW / photo.w, photoAvailH / photo.h);
-        const pw = photo.w * ratio, ph = photo.h * ratio;
-        const px = margin + (availW - pw) / 2;
-        doc.addImage(photo.dataUrl, 'JPEG', px, margin + 10, pw, ph);
-      });
-    }
+    let dist = depthMM / 2;
+    lines.forEach(ln => {
+      doc.setFont('helvetica', 'bold');
+      const fs = pdfFitFont(doc, ln.text, maxTxt, ln.fs, 5.5);
+      const h  = fs * 0.352778 * 1.5;
+      dist += h * 0.62;
+      pdfPill(doc, ln.text, c.x + ox * dist, c.y + oy * dist, rot, ln.fill, ln.stroke, ln.col);
+      dist += h * 0.48;
+    });
+  });
 
-    doc.save(`${(state.project || 'gerüstplan').replace(/\s+/g, '_')}_2d.pdf`);
-  } finally {
-    pdfMode    = false;
-    selectedSi = prevSelected;
-    selectedBi = prevSelectedBi;
-    renderSvg();
+  doc.setTextColor(0, 0, 0);
+}
+
+/** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt blau. */
+function pdfDrawLocator(doc, bounds, win, box) {
+  const s = Math.min(box.w / Math.max(bounds.w, 1), box.h / Math.max(bounds.h, 1)) * 0.9;
+  const ox = box.x + (box.w - bounds.w * s) / 2 - bounds.minX * s;
+  const oy = box.y + (box.h - bounds.h * s) / 2 - bounds.minY * s;
+
+  doc.setDrawColor(200, 205, 212); doc.setLineWidth(0.2);
+  doc.setFillColor(252, 253, 255);
+  doc.rect(box.x, box.y, box.w, box.h, 'FD');
+
+  doc.setFillColor(196, 205, 214); doc.setDrawColor(196, 205, 214);
+  state.sections.forEach(sec => {
+    sectionBayPolys(sec, sec.x0, sec.y0).forEach(poly => {
+      pdfPoly(doc, poly.map(p => ({ x: ox + p.x * s, y: oy + p.y * s })), 'F');
+    });
+  });
+
+  doc.setDrawColor(0, 122, 255); doc.setLineWidth(0.5);
+  doc.rect(ox + win.minX * s, oy + win.minY * s, win.w * s, win.h * s, 'S');
+}
+
+/** Ermittelt die Papierseiten-Aufteilung des Plans. */
+function pdfPlanPages(layout, availW, availH) {
+  const bayEls = layout.filter(e => e.type === 'bay');
+  const bounds = contentBounds();
+  if (!bayEls.length || !bounds) return { pages: [], bounds: null, scale: 0 };
+
+  const pad = state.depth * PX_PER_M * 0.9;
+  const full = {
+    minX: bounds.minX - pad, minY: bounds.minY - pad,
+    w: bounds.w + pad * 2,   h: bounds.h + pad * 2
+  };
+
+  const sMin = PDF_MM_PER_M_MIN / PX_PER_M;
+  const sMax = PDF_MM_PER_M_MAX / PX_PER_M;
+  const sFit = Math.min(availW / full.w, availH / full.h);
+
+  // Passt alles bei lesbarem Maßstab auf eine Seite → genau eine Planseite.
+  if (sFit >= sMin) {
+    return { pages: [{ win: full, els: bayEls }], bounds: full, scale: Math.min(sFit, sMax), tiled: false };
   }
+
+  // Sonst kacheln. Die Kachel wird um die größte Feldausdehnung verkleinert,
+  // damit ein Feld, das gerade noch zur Kachel gehört, garantiert vollständig
+  // auf die Seite passt – es wird also nie mitten durch ein Feld geschnitten.
+  let bayExtent = 0;
+  bayEls.forEach(el => {
+    const b = elBBox(el);
+    bayExtent = Math.max(bayExtent, b.maxX - b.minX, b.maxY - b.minY);
+  });
+  const tileW = Math.max(availW / sMin - bayExtent, availW / sMin * 0.4);
+  const tileH = Math.max(availH / sMin - bayExtent, availH / sMin * 0.4);
+
+  const cols = Math.max(1, Math.ceil(full.w / tileW));
+  const rows = Math.max(1, Math.ceil(full.h / tileH));
+  const stepX = cols > 1 ? full.w / cols : full.w;
+  const stepY = rows > 1 ? full.h / rows : full.h;
+
+  const pages = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const rect = {
+        minX: full.minX + c * stepX, maxX: full.minX + (c + 1) * stepX,
+        minY: full.minY + r * stepY, maxY: full.minY + (r + 1) * stepY
+      };
+      // Zuordnung über den Feld-MITTELPUNKT → jedes Feld landet auf genau
+      // einer Seite, wird dort aber vollständig gezeichnet.
+      const els = bayEls.filter(el => {
+        const b = elBBox(el);
+        const mx = (b.minX + b.maxX) / 2, my = (b.minY + b.maxY) / 2;
+        return mx >= rect.minX && (mx < rect.maxX || c === cols - 1)
+            && my >= rect.minY && (my < rect.maxY || r === rows - 1);
+      });
+      if (!els.length) continue;
+
+      // Fensterausschnitt = Hüllbox der zugeordneten Felder (+ Rand)
+      let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+      els.forEach(el => {
+        const b = elBBox(el);
+        mnX = Math.min(mnX, b.minX); mxX = Math.max(mxX, b.maxX);
+        mnY = Math.min(mnY, b.minY); mxY = Math.max(mxY, b.maxY);
+      });
+      pages.push({
+        win: { minX: mnX - pad, minY: mnY - pad, w: (mxX - mnX) + pad * 2, h: (mxY - mnY) + pad * 2 },
+        els
+      });
+    }
+  }
+
+  // Die Kacheln wurden für den Mindestmaßstab gebildet. Bleibt danach auf allen
+  // Seiten Platz übrig (typisch bei schmalen, langen Gerüsten), wird EIN
+  // gemeinsamer, größerer Maßstab gewählt – alle Planseiten behalten so
+  // denselben Maßstab, nutzen aber das Blatt voll aus.
+  let maxW = 0, maxH = 0;
+  pages.forEach(pg => { maxW = Math.max(maxW, pg.win.w); maxH = Math.max(maxH, pg.win.h); });
+  const sUsed = Math.max(sMin, Math.min(sMax, availW / maxW, availH / maxH));
+  return { pages, bounds: full, scale: sUsed, tiled: true };
+}
+
+let pdfBusy    = false;
+let pdfLastDone = 0;
+const PDF_COOLDOWN_MS = 800;   // Schutz gegen ungeduldiges Doppeltippen
+
+/** Klick-Handler des PDF-Buttons: genau ein Export je Klick. */
+async function exportPdf() {
+  // Läuft bereits ein Export – oder ist gerade eben einer fertig geworden –,
+  // laufen weitere Klicks bewusst ins Leere.
+  if (pdfBusy || Date.now() - pdfLastDone < PDF_COOLDOWN_MS) return;
+  pdfBusy = true;
+  const btn      = document.getElementById('exportPdfBtn');
+  const prevText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'PDF wird erstellt …'; }
+  // Ein Frame Pause, damit der Button-Zustand sichtbar wird, bevor der
+  // (synchrone) Aufbau der PDF startet.
+  await new Promise(r => requestAnimationFrame(() => r()));
+  try {
+    await buildPdf();
+  } catch (err) {
+    console.error('PDF-Export fehlgeschlagen:', err);
+    showToast('PDF konnte nicht erstellt werden.');
+  } finally {
+    pdfBusy     = false;
+    pdfLastDone = Date.now();
+    if (btn) { btn.disabled = false; btn.textContent = prevText; }
+  }
+}
+
+async function buildPdf() {
+  const { jsPDF } = window.jspdf;
+  const layout = computeLayout();
+  const margin = PDF_MARGIN;
+  const headerH = 19;
+
+  // Hoch- oder Querformat? Es gewinnt die Ausrichtung, die bei lesbarem
+  // Mindestmaßstab mit WENIGER Planseiten auskommt (bei Gleichstand die mit
+  // dem größeren Maßstab) – lange Fassaden landen so im Querformat.
+  const cand = ['landscape', 'portrait'].map(o => {
+    const w = o === 'landscape' ? 297 : 210;
+    const h = o === 'landscape' ? 210 : 297;
+    return { orient: o, pdfW: w, pdfH: h,
+             plan: pdfPlanPages(layout, w - 2 * margin, h - 2 * margin - headerH) };
+  }).sort((a, b) => (a.plan.pages.length - b.plan.pages.length) || (b.plan.scale - a.plan.scale));
+
+  const { orient, pdfW, pdfH, plan } = cand[0];
+  const doc    = new jsPDF({ orientation: orient, unit: 'mm', format: 'a4', compress: true });
+  const availW = pdfW - 2 * margin;
+
+  const totalLen     = state.sections.reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
+  const totalFlaeche = computeTotalFlaeche();
+  const dateStr      = new Date().toLocaleDateString('de-DE');
+  const title        = state.project || 'Gerüst 2D-Ansicht';
+
+  /** Kopfzeile einer Planseite; liefert die Oberkante des Zeichenbereichs. */
+  const drawHeader = (sub, scaleTxt) => {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
+    doc.text(title, margin, margin + 5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(70, 70, 70);
+    doc.text(`Gerüsttiefe: ${state.depth.toFixed(2).replace('.', ',')} m   |   Gesamtlänge: ${fmtQty(totalLen)} m   |   Gesamtfläche: ${fmtQty(totalFlaeche)} m²`,
+             margin, margin + 10.5);
+    doc.text(`Datum: ${dateStr}`, margin, margin + 15);
+    if (sub) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(31, 78, 121);
+      doc.text(sub, pdfW - margin, margin + 5, { align: 'right' });
+    }
+    if (scaleTxt) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(110, 110, 110);
+      doc.text(scaleTxt, pdfW - margin, margin + 10.5, { align: 'right' });
+    }
+    doc.setTextColor(0, 0, 0);
+    return margin + 19;
+  };
+
+  const planTop    = margin + headerH;
+  const planAvailH = pdfH - planTop - margin;
+
+  if (!plan.pages.length) {
+    drawHeader('', '');
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(90, 90, 90);
+    doc.text('Keine Gerüstfelder erfasst.', margin, planTop + 10);
+  } else {
+    const scaleTxt = 'Maßstab ca. 1:' + Math.round(10 / plan.scale);
+
+    // Bei mehrseitigem Plan zuerst eine Übersichtsseite mit Seiteneinteilung –
+    // sie zeigt, welcher Ausschnitt auf welcher Seite steht.
+    if (plan.tiled) {
+      const oTop = drawHeader(`Übersicht · Plan auf ${plan.pages.length} Seiten`, '');
+      const oArea = { x: margin, y: oTop, w: availW, h: planAvailH };
+      const oScale = Math.min(oArea.w / plan.bounds.w, oArea.h / plan.bounds.h);
+      const oWin  = { minX: plan.bounds.minX, minY: plan.bounds.minY, w: plan.bounds.w, h: plan.bounds.h };
+      pdfDrawPlan(doc, oWin, oArea, oScale, layout.filter(e => e.type === 'bay'), layout, true);
+
+      const ox = oArea.x + (oArea.w - oWin.w * oScale) / 2 - oWin.minX * oScale;
+      const oy = oArea.y + (oArea.h - oWin.h * oScale) / 2 - oWin.minY * oScale;
+      doc.setDrawColor(0, 122, 255); doc.setLineWidth(0.45);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+      plan.pages.forEach((pg, i) => {
+        doc.rect(ox + pg.win.minX * oScale, oy + pg.win.minY * oScale,
+                 pg.win.w * oScale, pg.win.h * oScale, 'S');
+        doc.setFillColor(0, 122, 255);
+        doc.circle(ox + (pg.win.minX + 3) * oScale, oy + (pg.win.minY + 3) * oScale, 2.6, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.text(String(i + 1), ox + (pg.win.minX + 3) * oScale, oy + (pg.win.minY + 3) * oScale,
+                 { align: 'center', baseline: 'middle' });
+      });
+      doc.setTextColor(0, 0, 0);
+    }
+
+    plan.pages.forEach((pg, i) => {
+      if (plan.tiled || i > 0) doc.addPage();
+      const labels = pg.els.map(el => bayLabel(state.sections[el.si], el.bi));
+      const sub = plan.tiled
+        ? `Ausschnitt ${i + 1} von ${plan.pages.length} · ${labels[0]} – ${labels[labels.length - 1]}`
+        : '';
+      const top  = drawHeader(sub, scaleTxt);
+      const area = { x: margin, y: top, w: availW, h: pdfH - top - margin };
+      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout);
+
+      // Mini-Orientierungskarte rechts unten
+      if (plan.tiled) {
+        const lw = Math.min(52, availW * 0.28), lh = lw * 0.62;
+        pdfDrawLocator(doc, plan.bounds, pg.win,
+                       { x: pdfW - margin - lw, y: pdfH - margin - lh, w: lw, h: lh });
+      }
+    });
+  }
+
+  // ── Aufmaß nach Gerüstseite ───────────────────────────────────────────
+  // Je Gebäudeseite (Oben/Rechts/Unten/Links) eine Tabelle, am Ende eine
+  // Gesamt-Tabelle über alle Seiten – Material-/Bestellgrundlage.
+  const allBays = state.sections.flatMap(s => s.bays);
+  const anyPos  = allBays.some(b => (b.positions || []).length);
+
+  if (anyPos) {
+    const groups = fieldsBySide();
+    const sideBlocks = SIDE_ORDER
+      .map(side => ({ side, bays: groups[side] }))
+      .filter(b => b.bays.some(bay => (bay.positions || []).length));
+
+    const tableW = availW;
+    const cols = [
+      { title: 'Position',   w: 0.42, align: 'left'   },
+      { title: 'Anzahl',     w: 0.13, align: 'center' },
+      { title: 'Menge',      w: 0.27, align: 'left'   },
+      { title: 'lfd. Meter', w: 0.18, align: 'right'  }
+    ];
+    const colX = []; let acc = margin;
+    cols.forEach(c => { colX.push(acc); acc += c.w * tableW; });
+    const colMid   = i => colX[i] + cols[i].w * tableW / 2;
+    const colRight = i => colX[i] + cols[i].w * tableW - 2.5;
+    const rowH = 7, headH = 7, sideHdrH = 8.5;
+
+    doc.addPage();
+    let py = margin + 4;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
+    doc.text('Aufmaß nach Gerüstseite', margin, py);
+    py += 9;
+
+    const drawColHeader = () => {
+      doc.setFillColor(236, 239, 243);
+      doc.rect(margin, py, tableW, headH, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(70, 70, 70);
+      cols.forEach((c, i) => {
+        const tx = c.align === 'right' ? colRight(i) : c.align === 'center' ? colMid(i) : colX[i] + (i === 0 ? 8 : 2);
+        doc.text(c.title, tx, py + headH - 2.2, { align: c.align });
+      });
+      py += headH;
+    };
+
+    const drawRow = (a, shade) => {
+      if (shade) { doc.setFillColor(247, 249, 251); doc.rect(margin, py, tableW, rowH, 'F'); }
+      const [r, g2, b2] = pdfHex(a.color);
+      doc.setFillColor(r, g2, b2); doc.setDrawColor(130, 130, 130); doc.setLineWidth(0.2);
+      doc.rect(colX[0] + 1.5, py + rowH / 2 - 2, 4, 4, 'FD');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(25, 25, 25);
+      doc.text(a.label, colX[0] + 8, py + rowH - 2.7);
+      doc.text(a.n + '×', colMid(1), py + rowH - 2.7, { align: 'center' });
+      doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+      doc.text(aggQtyText(a), colX[2] + 2, py + rowH - 2.7);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 25, 25);
+      doc.text(a.meters ? fmtQty(a.meters) + ' m' : '–', colRight(3), py + rowH - 2.7, { align: 'right' });
+      py += rowH;
+      doc.setDrawColor(224, 227, 231); doc.setLineWidth(0.1);
+      doc.line(margin, py, margin + tableW, py);
+    };
+
+    const drawTable = (ttl, subtitle, aggList) => {
+      // Passt die ganze Tabelle nicht mehr auf die Seite, aber auf eine leere
+      // Seite → komplett umbrechen, damit Tabellen nicht zerrissen werden.
+      const tableH = sideHdrH + headH + aggList.length * rowH;
+      if (py + tableH > pdfH - margin && tableH <= pdfH - 2 * margin - 6) { doc.addPage(); py = margin + 6; }
+      else if (py + sideHdrH + headH + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; }
+      doc.setFillColor(31, 78, 121);
+      doc.rect(margin, py, tableW, sideHdrH, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
+      doc.text(ttl, margin + 3, py + sideHdrH - 2.7);
+      if (subtitle) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+        doc.text(subtitle, margin + tableW - 3, py + sideHdrH - 2.7, { align: 'right' });
+      }
+      py += sideHdrH;
+      drawColHeader();
+      aggList.forEach((a, i) => {
+        if (py + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; drawColHeader(); }
+        drawRow(a, i % 2 === 1);
+      });
+      py += 6;
+    };
+
+    sideBlocks.forEach(({ side, bays }) => {
+      const len  = bays.reduce((s, b) => s + b.len, 0);
+      const flae = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
+      const cnt  = bays.filter(bay => (bay.positions || []).length).length;
+      drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`, aggregatePositions(bays));
+    });
+
+    const totalLenAll = allBays.reduce((s, b) => s + b.len, 0);
+    drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`, aggregatePositions(allBays));
+  }
+
+  // ── Notizen ────────────────────────────────────────────────────────────
+  const notedFields = [];
+  state.sections.forEach(sec => {
+    sec.bays.forEach((bay, bi) => {
+      if ((bay.note || '').trim()) notedFields.push({ label: bayLabel(sec, bi), note: bay.note.trim() });
+    });
+  });
+  if (notedFields.length) {
+    doc.addPage();
+    let ny = margin + 4;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
+    doc.text('Notizen', margin, ny);
+    ny += 9;
+    notedFields.forEach(({ label, note }) => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25, 25, 25);
+      const lines = doc.splitTextToSize(note, availW - 22);
+      const blockH = 6 + lines.length * 5 + 3;
+      if (ny + blockH > pdfH - margin) { doc.addPage(); ny = margin + 6; }
+      doc.text(label + ':', margin, ny);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
+      doc.text(lines, margin + 22, ny);
+      ny += Math.max(6, lines.length * 5) + 3;
+    });
+  }
+
+  // ── Fotos ──────────────────────────────────────────────────────────────
+  // Bereits beim Import auf max. 1600 px / JPEG q0.72 komprimiert; sie werden
+  // unverändert eingebettet (kein erneutes Rastern) und bleiben so klein.
+  if (linkedProjectId) {
+    const photos = (await listProjectPhotos(linkedProjectId)).filter(p => p.include !== false);
+    photos.forEach((photo, i) => {
+      doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
+      doc.text(`Foto ${i + 1} von ${photos.length}`, margin, margin + 5);
+      const photoAvailH = pdfH - margin - (margin + 10) - margin;
+      const ratio = Math.min(availW / photo.w, photoAvailH / photo.h);
+      const pw = photo.w * ratio, ph = photo.h * ratio;
+      const px = margin + (availW - pw) / 2;
+      doc.addImage(photo.dataUrl, 'JPEG', px, margin + 10, pw, ph, undefined, 'FAST');
+    });
+  }
+
+  // Seitenzahlen
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
+    doc.text(`Seite ${i} von ${pageCount}`, pdfW - margin, pdfH - 4, { align: 'right' });
+  }
+
+  doc.save(`${title.replace(/[\\/:*?"<>|\s]+/g, '_')}_2d.pdf`);
 }
 
 // ── Device mode ────────────────────────────────────────────────────────────
@@ -3879,6 +4369,19 @@ function init() {
   svg.addEventListener('pointermove',   onCanvasPointerMove);
   svg.addEventListener('pointerup',     onCanvasPointerUp);
   svg.addEventListener('pointercancel', onCanvasPointerUp);
+  svg.addEventListener('wheel',         onCanvasWheel, { passive: false });
+  svg.addEventListener('dblclick',      onCanvasDblClick);
+
+  // Panelgröße ändert sich (Drehen des iPads, Seitenleiste, Tastatur) → nur die
+  // viewBox nachziehen, damit die Kamera exakt dieselbe Stelle zeigt.
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { _vpCache = null; if (autoFit) fitCameraToContent(); applyCamera(); })
+      .observe(document.getElementById('viewerPanel'));
+  } else {
+    window.addEventListener('resize', () => { _vpCache = null; if (autoFit) fitCameraToContent(); applyCamera(); });
+  }
+  window.addEventListener('scroll', () => { _vpCache = null; }, { passive: true });
+
   document.getElementById('zoomResetBtn')?.addEventListener('click', resetCanvasView);
   document.getElementById('fitViewBtn')?.addEventListener('click', resetCanvasView);
 
