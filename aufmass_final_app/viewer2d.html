@@ -7,8 +7,8 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Gerüst 2D-Ansicht</title>
-  <link rel="stylesheet" href="style.css?v=20260807" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260807" />
+  <link rel="stylesheet" href="style.css?v=20260808" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260808" />
 </head>
 <body>
 
@@ -57,6 +57,7 @@
   <div id="appLayout">
     <!-- Left: section editor -->
     <aside id="sidePanel">
+      <div id="abschnittBar"></div>
       <div id="bulkBar"></div>
       <div id="sectionsContainer"></div>
       <p id="noSectionsHint" class="hint">Tippen Sie auf „Feld hinzufügen“ oder wählen Sie eine Vorlage.</p>
@@ -64,6 +65,9 @@
 
     <!-- Right: SVG canvas -->
     <div id="viewerPanel">
+      <!-- Auswahl-Info oben links: zeigt bei Mehrfachauswahl, welchen
+           Abschnitten die markierten Felder zugeordnet sind. -->
+      <div id="selectionInfo" class="selection-info hidden"></div>
       <svg id="planSvg" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <pattern id="svgGrid" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
@@ -93,6 +97,6 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js?v=20260807"></script>
+  <script src="viewer2d.js?v=20260808"></script>
 </body>
 </html>

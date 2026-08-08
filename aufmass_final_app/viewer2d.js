@@ -244,6 +244,117 @@ function updateWarningsReadout() {
   el.classList.toggle('hidden', !n);
 }
 
+/* ── Abschnitte (Unterkategorien) ────────────────────────────────────────────
+   Ein Abschnitt bündelt beliebig viele Felder unter einem frei wählbaren Namen
+   ("Nordseite", "Abschnitt A", "Bauteil 2" …). Die Zuordnung ist optional:
+   jedes Feld trägt höchstens eine `abschnittId`; Felder ohne Zuordnung
+   funktionieren unverändert weiter und laufen in Auswertungen unter
+   „Ohne Abschnitt". Abschnitte leben in `state.abschnitte` und werden mit der
+   Zeichnung gespeichert (Datei, Projekt-Autosave, Undo).                     */
+
+// Farbpalette der Abschnitte – bewusst kräftig und gut unterscheidbar, auch
+// im Graustufendruck (unterschiedliche Helligkeiten).
+const ABSCHNITT_COLORS = [
+  '#1f6fb2', '#c0392b', '#1f8a4c', '#b8860b', '#6a4bd1',
+  '#0f8f8e', '#d1560b', '#a5237e', '#4a5f7a', '#7a6a2c'
+];
+
+let _aId = 0;
+
+/** Liste aller Abschnitte (legt sie bei Altdaten transparent an). */
+function abschnitteList() {
+  if (!Array.isArray(state.abschnitte)) state.abschnitte = [];
+  return state.abschnitte;
+}
+
+function mkAbschnitt(name) {
+  const id = 'ab' + (++_aId);
+  const used = abschnitteList().length;
+  return { id, name: name || `Abschnitt ${used + 1}`, color: ABSCHNITT_COLORS[used % ABSCHNITT_COLORS.length] };
+}
+
+function abschnittById(id) {
+  if (!id) return null;
+  return abschnitteList().find(a => a.id === id) || null;
+}
+
+/** Anzeigename eines Abschnitts (auch für nicht/unbekannt zugeordnete Felder). */
+function abschnittName(id) {
+  const a = abschnittById(id);
+  return a ? a.name : 'Ohne Abschnitt';
+}
+
+/** Farbe eines Abschnitts; ohne Zuordnung neutrales Grau. */
+function abschnittColor(id) {
+  const a = abschnittById(id);
+  return a ? a.color : '#8a97a5';
+}
+
+function addAbschnitt(name) {
+  const a = mkAbschnitt(name);
+  abschnitteList().push(a);
+  return a;
+}
+
+function renameAbschnitt(id, name) {
+  const a = abschnittById(id);
+  if (a) a.name = name;
+}
+
+/** Löscht einen Abschnitt. Die Felder bleiben erhalten und gelten danach als
+ *  „Ohne Abschnitt" – es gehen also nie Aufmaßdaten verloren. */
+function deleteAbschnitt(id) {
+  state.abschnitte = abschnitteList().filter(a => a.id !== id);
+  allBaysFlat().forEach(b => { if (b.abschnittId === id) b.abschnittId = null; });
+}
+
+/** Setzt (oder entfernt mit id === null) den Abschnitt für eine Feldmenge. */
+function assignAbschnitt(bays, id) {
+  bays.forEach(b => { b.abschnittId = id || null; });
+}
+
+/** Anzahl Felder je Abschnitt (inkl. Schlüssel '' für „ohne"). */
+function abschnittCounts() {
+  const counts = {};
+  allBaysFlat().forEach(b => {
+    const key = abschnittById(b.abschnittId) ? b.abschnittId : '';
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return counts;
+}
+
+/**
+ * Fasst die Abschnitts-Zuordnung einer Feldmenge zusammen – Grundlage der
+ * Anzeige oben links bei Mehrfachauswahl.
+ * @returns {{ ids: (string|null)[], names: string[], mixed: boolean, hasUnassigned: boolean }}
+ */
+function abschnittSummary(bays) {
+  const ids = [];
+  let hasUnassigned = false;
+  bays.forEach(b => {
+    const a = abschnittById(b.abschnittId);
+    if (!a) { hasUnassigned = true; return; }
+    if (!ids.includes(a.id)) ids.push(a.id);
+  });
+  const names = ids.map(id => abschnittName(id));
+  return { ids, names, mixed: ids.length + (hasUnassigned ? 1 : 0) > 1, hasUnassigned };
+}
+
+/** Alle Felder gruppiert nach Abschnitt, in Abschnitts-Reihenfolge;
+ *  nicht zugeordnete Felder hängen als letzte Gruppe an. */
+function baysByAbschnitt() {
+  const groups = abschnitteList().map(a => ({ abschnitt: a, bays: [] }));
+  const byId = Object.fromEntries(groups.map(g => [g.abschnitt.id, g]));
+  const rest = { abschnitt: null, bays: [] };
+  allBaysFlat().forEach(b => {
+    const g = byId[b.abschnittId];
+    (g || rest).bays.push(b);
+  });
+  const out = groups.filter(g => g.bays.length);
+  if (rest.bays.length) out.push(rest);
+  return out;
+}
+
 const DIR_META = {
   N: { dx:  0, dy: -1, label: 'N ↑' },
   E: { dx:  1, dy:  0, label: 'O →' },
@@ -262,11 +373,39 @@ const ROT_SNAP_ANGLES = [0, 90, 180, 270];
 
 let _sId = 0, _bId = 0;
 let state = {
-  project:  '',
-  depth:    0.73,
-  sections: []
-  // section: { id, name, dir, bays:[{id,len}], x0, y0 }
+  project:   '',
+  depth:     0.73,
+  abschnitte: [],   // [{ id, name, color }] – frei benennbare Feld-Gruppen
+  sections:  []
+  // section: { id, name, dir, bays:[{id,len,…,abschnittId}], x0, y0 }
 };
+
+/** Nach dem Laden (Datei/Projekt/Undo) aufrufen: stellt sicher, dass Felder
+ *  und Abschnitte vollständig sind und dass die ID-Zähler über den bereits
+ *  vergebenen IDs stehen. Ältere Zeichnungen ohne Abschnitte bleiben dabei
+ *  unverändert gültig – sie haben schlicht keine Abschnitte. */
+function normalizeState() {
+  if (!Array.isArray(state.abschnitte)) state.abschnitte = [];
+  state.abschnitte = state.abschnitte
+    .filter(a => a && a.id)
+    .map((a, i) => ({
+      id: String(a.id),
+      name: (a.name != null && String(a.name).trim()) || `Abschnitt ${i + 1}`,
+      color: a.color || ABSCHNITT_COLORS[i % ABSCHNITT_COLORS.length]
+    }));
+  // ID-Zähler hinter die höchste vergebene „abN"-Nummer setzen, damit neue
+  // Abschnitte niemals eine bereits benutzte ID bekommen.
+  state.abschnitte.forEach(a => {
+    const n = parseInt(String(a.id).replace(/^ab/, ''), 10);
+    if (!isNaN(n) && n > _aId) _aId = n;
+  });
+  const known = new Set(state.abschnitte.map(a => a.id));
+  (state.sections || []).forEach(sec => (sec.bays || []).forEach(bay => {
+    normalizeBay(bay);
+    // Verweise auf gelöschte/unbekannte Abschnitte sauber auflösen.
+    if (bay.abschnittId && !known.has(bay.abschnittId)) bay.abschnittId = null;
+  }));
+}
 
 let drag           = null;
 let rafPending     = false;
@@ -346,11 +485,15 @@ function loadFromLinkedProject() {
 
   if (proj.zeichnung2d && Array.isArray(proj.zeichnung2d.sections)) {
     const z = proj.zeichnung2d;
-    state.project  = projName || z.project || '';
-    state.depth    = z.depth || 0.73;
-    state.sections = z.sections;
+    state.project   = projName || z.project || '';
+    state.depth     = z.depth || 0.73;
+    state.sections  = z.sections;
+    // Zeichnungen, die vor der Abschnitts-Funktion gespeichert wurden, haben
+    // schlicht keine Abschnitte – sie werden unverändert weiterverwendet.
+    state.abschnitte = Array.isArray(z.abschnitte) ? z.abschnitte : [];
     _sId = z._sId || state.sections.length;
     _bId = z._bId || state.sections.flatMap(s => s.bays).length;
+    normalizeState();
   } else {
     state.project = projName || '';
   }
@@ -366,7 +509,10 @@ function scheduleAutosave2d() {
     const idx = list.findIndex(p => p.id === linkedProjectId);
     if (idx < 0) return;
     list[idx].name = state.project || list[idx].name || '';
-    list[idx].zeichnung2d = { depth: state.depth, sections: state.sections, _sId, _bId };
+    list[idx].zeichnung2d = {
+      depth: state.depth, sections: state.sections,
+      abschnitte: abschnitteList(), _sId, _bId
+    };
     list[idx].geaendert = new Date().toISOString().slice(0, 10);
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
   }, 700);
@@ -487,7 +633,10 @@ function showToast(msg) {
 // ── Rückgängig / Wiederholen ────────────────────────────────────────────────
 
 function serializeUndoState() {
-  return JSON.stringify({ project: state.project, depth: state.depth, sections: state.sections });
+  return JSON.stringify({
+    project: state.project, depth: state.depth,
+    abschnitte: abschnitteList(), sections: state.sections
+  });
 }
 
 function updateUndoRedoButtons() {
@@ -522,9 +671,11 @@ function scheduleUndoSnapshot() {
 
 function applyUndoState(json) {
   const data = JSON.parse(json);
-  state.project  = data.project;
-  state.depth    = data.depth;
-  state.sections = data.sections;
+  state.project    = data.project;
+  state.depth      = data.depth;
+  state.abschnitte = Array.isArray(data.abschnitte) ? data.abschnitte : [];
+  state.sections   = data.sections;
+  normalizeState();
   selectedSi = null; selectedBi = null;
   bulkSelected.clear();
   const nameInp  = document.getElementById('projectName');
@@ -812,7 +963,7 @@ function mkBay(len = 2.57) {
   return {
     id: ++_bId, len: +parseFloat(len).toFixed(2),
     hL: null, hR: null,
-    positions: [], note: ''
+    positions: [], note: '', abschnittId: null
   };
 }
 
@@ -821,6 +972,8 @@ function mkBay(len = 2.57) {
 function normalizeBay(bay) {
   if (!Array.isArray(bay.positions)) bay.positions = [];
   if (typeof bay.note !== 'string') bay.note = '';
+  // Felder aus älteren Zeichnungen kennen noch keine Abschnitte.
+  if (bay.abschnittId === undefined) bay.abschnittId = null;
   // Migration: früheres Einzel-Kategorie-Modell → Position
   if (bay.category && bay.category !== 'geruest' && POS_BY_KEY[bay.category]) {
     const pos = { id: ++_bId, cat: bay.category };
@@ -1257,6 +1410,15 @@ function ptsStr(pts) {
   return pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
 }
 
+/** Mischt eine Hex-Farbe mit Weiß (t = 0 … 1, 1 = reines Weiß) – für die
+ *  zurückhaltende Flächenfärbung der Abschnitte. */
+function tintHex(hex, t) {
+  const n = parseInt(hex.slice(1), 16);
+  const mix = c => Math.round(c + (255 - c) * t);
+  return '#' + [mix((n >> 16) & 255), mix((n >> 8) & 255), mix(n & 255)]
+    .map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
 // ── Main SVG render ────────────────────────────────────────────────────────
 
 function renderSvg() {
@@ -1311,11 +1473,17 @@ function renderSvg() {
     const positions  = bayData.positions || [];
     const isSelected     = el.si === selectedSi && el.bi === selectedBi;
     const isBulkSelected = bulkMode && bulkSelected.has(bayData.id);
+    // Abschnitts-Zuordnung wird als zurückhaltende Einfärbung sichtbar –
+    // Auswahl-Zustände haben aber immer Vorrang, damit klar bleibt, was gerade
+    // angefasst wird.
+    const absch     = abschnittById(bayData.abschnittId);
+    const baseFill  = absch ? tintHex(absch.color, 0.86) : '#deeeff';
+    const baseStrk  = absch ? absch.color : '#2c6fa8';
     const poly = svgEl('polygon', {
       points: ptsStr(el.pts),
-      fill: isBulkSelected ? '#6a4bd1' : (isSelected ? '#8ec4f5' : '#deeeff'),
+      fill: isBulkSelected ? '#6a4bd1' : (isSelected ? '#8ec4f5' : baseFill),
       'fill-opacity': isBulkSelected ? 0.30 : 1,
-      stroke: isBulkSelected ? '#6a4bd1' : (isSelected ? '#0a2f58' : '#2c6fa8'),
+      stroke: isBulkSelected ? '#6a4bd1' : (isSelected ? '#0a2f58' : baseStrk),
       'stroke-width': (isSelected || isBulkSelected) ? 4 : 2,
       style: isSelected ? 'filter:drop-shadow(0 0 6px rgba(0,122,255,0.75))' : '',
       cursor: 'pointer'
@@ -1385,7 +1553,7 @@ function renderSvg() {
       const bbMinY     = Math.min(p0.y, p1.y, p2.y, p3.y);
       const boxX = bbMinX + cornerPad, boxY = bbMinY + cornerPad;
       const boxCx = boxX + boxW / 2, boxCy = boxY + boxH / 2;
-      const boxBg  = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : '#0a2f58');
+      const boxBg  = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : (absch ? absch.color : '#0a2f58'));
       const boxRot = labelRot ? `rotate(${labelRot.toFixed(1)},${boxCx},${boxCy})` : '';
       g.appendChild(svgEl('rect', {
         x: boxX, y: boxY, width: boxW, height: boxH,
@@ -2300,6 +2468,51 @@ function openEditSheet(si, bi) {
     rotPresets.appendChild(b);
   });
 
+  // ── Abschnitt ────────────────────────────────────────────────────────────
+  // Jedes Feld kann genau einem Abschnitt angehören ("Nordseite", "Abschnitt
+  // A" …) – oder keinem, dann verhält es sich wie bisher.
+  const abschLabel = document.createElement('div');
+  abschLabel.className = 'sheet-section-label';
+  abschLabel.textContent = 'Abschnitt';
+
+  const abschRow = document.createElement('div');
+  abschRow.className = 'pos-toggle-row sheet-absch-row';
+
+  function buildAbschRow() {
+    abschRow.innerHTML = '';
+    const mk = (id, name, color) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'pos-chip absch-chip' + ((bay.abschnittId || null) === id ? ' active' : '');
+      chip.textContent = name;
+      chip.style.setProperty('--pos-color', color);
+      chip.addEventListener('click', () => {
+        bay.abschnittId = id;
+        buildAbschRow();
+        requestRender({ sidebar: true, bulk: true });
+      });
+      abschRow.appendChild(chip);
+    };
+    mk(null, 'Ohne Abschnitt', '#8a97a5');
+    abschnitteList().forEach(a => mk(a.id, a.name, a.color));
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'pos-chip absch-new-chip';
+    add.textContent = '+ neuer Abschnitt';
+    add.addEventListener('click', () => {
+      const name = prompt('Name des Abschnitts (z. B. „Nordseite"):',
+                          `Abschnitt ${abschnitteList().length + 1}`);
+      if (name === null) return;
+      const a = addAbschnitt(name.trim());
+      bay.abschnittId = a.id;
+      buildAbschRow();
+      requestRender({ sidebar: true, bulk: true });
+    });
+    abschRow.appendChild(add);
+  }
+  buildAbschRow();
+
   // ── Höhen (Gerüst-Grundfeld) ────────────────────────────────────────────
   const hLabel = document.createElement('div');
   hLabel.className = 'sheet-section-label';
@@ -2748,6 +2961,8 @@ function openEditSheet(si, bi) {
   sheet.appendChild(rotLabel);
   sheet.appendChild(rotRow);
   sheet.appendChild(rotPresets);
+  sheet.appendChild(abschLabel);
+  sheet.appendChild(abschRow);
   sheet.appendChild(hLabel);
   sheet.appendChild(hRow);
   sheet.appendChild(posLabel);
@@ -2942,6 +3157,193 @@ function allBaysFlat() {
   return state.sections.flatMap(s => s.bays);
 }
 
+/** Alle aktuell "gemeinten" Felder: in der Mehrfachauswahl die angehakten,
+ *  sonst das einzeln ausgewählte Feld. */
+function currentSelectionBays() {
+  if (bulkMode) return allBaysFlat().filter(b => bulkSelected.has(b.id));
+  if (selectedSi == null) return [];
+  const sec = state.sections[selectedSi];
+  const bay = sec && sec.bays[selectedBi];
+  return bay ? [bay] : [];
+}
+
+/* ── Abschnitts-Verwaltung (Seitenleiste) ────────────────────────────────────
+   Abschnitte anlegen, umbenennen, löschen – und mit einem Klick alle Felder
+   eines Abschnitts in die Mehrfachauswahl übernehmen. */
+
+function renderAbschnittBar() {
+  const el = document.getElementById('abschnittBar');
+  if (!el) return;
+  el.innerHTML = '';
+
+  const head = document.createElement('div');
+  head.className = 'absch-head';
+
+  const title = document.createElement('span');
+  title.className = 'absch-title';
+  title.textContent = 'Abschnitte';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'absch-add-btn';
+  addBtn.textContent = '+ Abschnitt';
+  addBtn.title = 'Neuen Abschnitt anlegen (z. B. „Nordseite")';
+  addBtn.addEventListener('click', () => {
+    const name = prompt('Name des Abschnitts (z. B. „Nordseite", „Abschnitt A"):',
+                        `Abschnitt ${abschnitteList().length + 1}`);
+    if (name === null) return;
+    const a = addAbschnitt(name.trim());
+    // Direkt nutzbar: liegt eine Auswahl vor, wandert sie gleich in den neuen
+    // Abschnitt – das ist der mit Abstand häufigste nächste Schritt.
+    const sel = currentSelectionBays();
+    if (sel.length) {
+      assignAbschnitt(sel, a.id);
+      showToast(`Abschnitt „${a.name}" angelegt · ${sel.length} Feld${sel.length === 1 ? '' : 'er'} zugeordnet`);
+    } else {
+      showToast(`Abschnitt „${a.name}" angelegt`);
+    }
+    renderAll();
+  });
+
+  head.appendChild(title); head.appendChild(addBtn);
+  el.appendChild(head);
+
+  const list = abschnitteList();
+  if (!list.length) {
+    const hint = document.createElement('p');
+    hint.className = 'absch-hint';
+    hint.textContent = 'Noch keine Abschnitte. Felder ohne Abschnitt funktionieren normal weiter.';
+    el.appendChild(hint);
+    return;
+  }
+
+  const counts = abschnittCounts();
+  const wrap = document.createElement('div');
+  wrap.className = 'absch-list';
+
+  const makeRow = (a, count) => {
+    const row = document.createElement('div');
+    row.className = 'absch-row';
+    row.style.setProperty('--absch-color', a ? a.color : '#8a97a5');
+
+    const dot = document.createElement('span');
+    dot.className = 'absch-dot';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'absch-name';
+    nameEl.textContent = a ? a.name : 'Ohne Abschnitt';
+
+    const cnt = document.createElement('span');
+    cnt.className = 'absch-count';
+    cnt.textContent = count + ' Feld' + (count === 1 ? '' : 'er');
+
+    // Klick auf die Zeile: alle Felder dieses Abschnitts markieren
+    // (schaltet die Mehrfachauswahl bei Bedarf ein).
+    const pick = document.createElement('button');
+    pick.type = 'button'; pick.className = 'absch-pick';
+    pick.title = 'Alle Felder dieses Abschnitts auswählen';
+    pick.appendChild(dot); pick.appendChild(nameEl); pick.appendChild(cnt);
+    pick.addEventListener('click', () => {
+      bulkMode = true;
+      bulkSelected.clear();
+      allBaysFlat().forEach(b => {
+        const match = a ? b.abschnittId === a.id : !abschnittById(b.abschnittId);
+        if (match) bulkSelected.add(b.id);
+      });
+      renderAll();
+    });
+    row.appendChild(pick);
+
+    if (a) {
+      const ren = document.createElement('button');
+      ren.type = 'button'; ren.className = 'absch-mini-btn';
+      ren.textContent = '✎'; ren.title = 'Abschnitt umbenennen';
+      ren.addEventListener('click', () => {
+        const next = prompt('Neuer Name für den Abschnitt:', a.name);
+        if (next === null) return;
+        const trimmed = next.trim();
+        if (!trimmed) return;
+        renameAbschnitt(a.id, trimmed);
+        renderAll();
+      });
+
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'absch-mini-btn danger';
+      del.textContent = '×';
+      del.title = 'Abschnitt löschen (Felder bleiben erhalten)';
+      del.addEventListener('click', () => {
+        if (count && !confirm(`Abschnitt „${a.name}" löschen?\n\nDie ${count} zugeordneten Felder bleiben erhalten und gelten danach als „Ohne Abschnitt".`)) return;
+        deleteAbschnitt(a.id);
+        showToast(`Abschnitt „${a.name}" gelöscht`);
+        renderAll();
+      });
+
+      row.appendChild(ren); row.appendChild(del);
+    }
+    return row;
+  };
+
+  list.forEach(a => wrap.appendChild(makeRow(a, counts[a.id] || 0)));
+  if (counts['']) wrap.appendChild(makeRow(null, counts['']));
+  el.appendChild(wrap);
+}
+
+/** Zeigt oben links auf der Zeichenfläche, welche Felder gerade ausgewählt
+ *  sind und welchem Abschnitt / welchen Abschnitten sie angehören. Bei
+ *  Mehrfachauswahl ist das die geforderte Sammelanzeige, bei Einzelauswahl
+ *  eine kompakte Zeile zum selben Zweck. */
+function renderSelectionInfo() {
+  const el = document.getElementById('selectionInfo');
+  if (!el) return;
+  const bays = currentSelectionBays();
+
+  if (!bays.length) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  const sum = abschnittSummary(bays);
+  el.innerHTML = '';
+  el.classList.remove('hidden');
+  el.classList.toggle('multi', bulkMode);
+
+  const head = document.createElement('div');
+  head.className = 'sel-info-head';
+  head.textContent = bulkMode
+    ? `${bays.length} Feld${bays.length === 1 ? '' : 'er'} ausgewählt`
+    : 'Feld ' + bayLabel(state.sections[selectedSi], selectedBi);
+  el.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'sel-info-body';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'sel-info-label';
+  lbl.textContent = sum.names.length > 1 ? 'Abschnitte:' : 'Abschnitt:';
+  body.appendChild(lbl);
+
+  const chips = document.createElement('span');
+  chips.className = 'sel-info-chips';
+  const addChip = (name, color) => {
+    const c = document.createElement('span');
+    c.className = 'sel-info-chip';
+    c.style.setProperty('--absch-color', color);
+    c.textContent = name;
+    chips.appendChild(c);
+  };
+  sum.ids.forEach(id => addChip(abschnittName(id), abschnittColor(id)));
+  if (sum.hasUnassigned) addChip('Ohne Abschnitt', '#8a97a5');
+  body.appendChild(chips);
+  el.appendChild(body);
+
+  if (sum.mixed) {
+    const note = document.createElement('div');
+    note.className = 'sel-info-note';
+    note.textContent = 'gemischte Zuordnung';
+    el.appendChild(note);
+  }
+}
+
 /** Leiste über der Feldliste: Mehrfachauswahl an/aus + Sammel-Aktionen.
  *  Erlaubt, EINE Position (Konsole, Netz, Tunnelrahmen …) auf beliebig viele,
  *  auch nicht benachbarte Felder anzuwenden, ohne deren Höhen oder sonstige
@@ -2978,6 +3380,31 @@ function renderBulkBar() {
   info.textContent = `${bulkSelected.size} von ${bays.length} Feldern ausgewählt`;
   el.appendChild(info);
 
+  // Abschnitts-Zuordnung der Auswahl – dieselbe Information wie in der Anzeige
+  // oben links auf der Zeichenfläche, hier direkt über den Sammel-Aktionen.
+  {
+    const selNow = bays.filter(b => bulkSelected.has(b.id));
+    if (selNow.length) {
+      const sum = abschnittSummary(selNow);
+      const line = document.createElement('div');
+      line.className = 'bulk-absch-info';
+      const lab = document.createElement('span');
+      lab.className = 'bulk-absch-info-label';
+      lab.textContent = sum.names.length > 1 ? 'Abschnitte:' : 'Abschnitt:';
+      line.appendChild(lab);
+      const add = (name, color) => {
+        const c = document.createElement('span');
+        c.className = 'sel-info-chip';
+        c.style.setProperty('--absch-color', color);
+        c.textContent = name;
+        line.appendChild(c);
+      };
+      sum.ids.forEach(id => add(abschnittName(id), abschnittColor(id)));
+      if (sum.hasUnassigned) add('Ohne Abschnitt', '#8a97a5');
+      el.appendChild(line);
+    }
+  }
+
   const selRow = document.createElement('div');
   selRow.className = 'bulk-sel-row';
   const allBtn = document.createElement('button');
@@ -2999,6 +3426,54 @@ function renderBulkBar() {
     el.appendChild(hint);
     return;
   }
+
+  // Abschnitt der gesamten Auswahl zuweisen bzw. entfernen.
+  const abschLabel = document.createElement('div');
+  abschLabel.className = 'bulk-section-label';
+  abschLabel.textContent = 'Abschnitt für Auswahl';
+  el.appendChild(abschLabel);
+
+  const abschRow = document.createElement('div');
+  abschRow.className = 'bulk-chip-row';
+  const curIds = abschnittSummary(selectedBays).ids;
+  const mkAbschChip = (id, name, color) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    const isAll = id
+      ? selectedBays.every(b => b.abschnittId === id)
+      : selectedBays.every(b => !abschnittById(b.abschnittId));
+    const isSome = !isAll && (id ? curIds.includes(id)
+                                 : selectedBays.some(b => !abschnittById(b.abschnittId)));
+    chip.className = 'bulk-pos-chip' + (isAll ? ' active' : '') + (isSome ? ' partial' : '');
+    chip.textContent = name;
+    chip.style.setProperty('--pos-color', color);
+    chip.addEventListener('click', () => {
+      assignAbschnitt(selectedBays, id);
+      renderAll();
+      showToast(id
+        ? `${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'er'} → „${name}"`
+        : `Abschnitt bei ${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'ern'} entfernt`);
+    });
+    abschRow.appendChild(chip);
+  };
+  abschnitteList().forEach(a => mkAbschChip(a.id, a.name, a.color));
+  mkAbschChip(null, 'Ohne Abschnitt', '#8a97a5');
+
+  const newAbschBtn = document.createElement('button');
+  newAbschBtn.type = 'button';
+  newAbschBtn.className = 'bulk-pos-chip absch-new-chip';
+  newAbschBtn.textContent = '+ neuer Abschnitt';
+  newAbschBtn.addEventListener('click', () => {
+    const name = prompt('Name des Abschnitts (z. B. „Nordseite"):',
+                        `Abschnitt ${abschnitteList().length + 1}`);
+    if (name === null) return;
+    const a = addAbschnitt(name.trim());
+    assignAbschnitt(selectedBays, a.id);
+    renderAll();
+    showToast(`${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'er'} → „${a.name}"`);
+  });
+  abschRow.appendChild(newAbschBtn);
+  el.appendChild(abschRow);
 
   // Vorlage auf die gesamte Auswahl anwenden: überschreibt Höhen + Positionen
   // aller markierten Felder mit einem Klick.
@@ -3310,6 +3785,18 @@ function renderSections() {
       num.className = 'bay-num'; num.textContent = bayLabel(sec, bi);
       top.appendChild(num);
 
+      // Abschnitts-Marker: zeigt auf einen Blick, wohin das Feld gehört.
+      // Ohne Zuordnung bleibt die Zeile wie bisher – kein zusätzlicher Marker.
+      const bayAbsch = abschnittById(bay.abschnittId);
+      if (bayAbsch) {
+        const tag = document.createElement('span');
+        tag.className = 'bay-absch-tag';
+        tag.style.setProperty('--absch-color', bayAbsch.color);
+        tag.textContent = bayAbsch.name;
+        tag.title = 'Abschnitt: ' + bayAbsch.name;
+        top.appendChild(tag);
+      }
+
       if ((bay.note || '').trim()) {
         const noteIcon = document.createElement('span');
         noteIcon.className = 'bay-note-icon';
@@ -3453,7 +3940,65 @@ function renderSections() {
   });
 }
 
-function renderAll() { renderBulkBar(); renderSections(); renderSvg(); }
+/* ── Render-Planer ───────────────────────────────────────────────────────────
+   Früher rief jeder Eingabe-Handler (Schieberegler, Zahlenfeld, Chip …)
+   `renderSvg()` bzw. `renderAll()` SYNCHRON auf. Ein Regler feuert beim Ziehen
+   aber 60–120 `input`-Events je Sekunde – und `renderAll()` baut die komplette
+   Seitenleiste neu auf (bei 40 Feldern ~140 ms, bei 100 Feldern ~0,4 s). Die
+   Events stauten sich schneller, als sie abgearbeitet werden konnten; die App
+   „hing" danach sekunden- bis minutenlang nach.
+
+   Jetzt melden alle Handler ihren Bedarf nur noch an; pro Bildschirm-Frame
+   wird höchstens EINMAL gezeichnet, und nur die Teile, die sich wirklich
+   geändert haben. Während einer Zieh-Geste bleibt die (teure) Seitenleiste
+   ganz außen vor und wird erst danach nachgezogen.                           */
+
+let _renderRaf   = 0;
+const _renderNeed = { svg: false, sidebar: false, bulk: false };
+
+function _runRender() {
+  _renderRaf = 0;
+  const need = { ..._renderNeed };
+  _renderNeed.svg = _renderNeed.sidebar = _renderNeed.bulk = false;
+  // Seitenleiste während einer laufenden Geste nicht anfassen – sie ist der
+  // teuerste Teil und währenddessen ohnehin nicht sichtbar in Benutzung.
+  if (drag && (need.sidebar || need.bulk)) {
+    _renderNeed.sidebar = _renderNeed.sidebar || need.sidebar;
+    _renderNeed.bulk    = _renderNeed.bulk    || need.bulk;
+    need.sidebar = need.bulk = false;
+  }
+  if (need.bulk)    renderBulkBar();
+  if (need.sidebar) { renderAbschnittBar(); renderSections(); }
+  if (need.svg)     renderSvg();
+  renderSelectionInfo();
+}
+
+/** Zeichnen anfordern. Mehrere Aufrufe innerhalb eines Frames werden zu einem
+ *  einzigen Neuaufbau zusammengefasst. */
+function requestRender(need = {}) {
+  if (need.svg !== false)  _renderNeed.svg = true;
+  if (need.sidebar)        _renderNeed.sidebar = true;
+  if (need.bulk)           _renderNeed.bulk = true;
+  if (_renderRaf) return;
+  _renderRaf = requestAnimationFrame(_runRender);
+}
+
+/** Wartende Zeichenarbeit sofort erledigen (z. B. vor dem PDF-Export). */
+function flushRender() {
+  if (!_renderRaf) return;
+  cancelAnimationFrame(_renderRaf);
+  _runRender();
+}
+
+/** Vollständiger Neuaufbau (Seitenleiste + Zeichnung) – gebündelt. */
+function renderAll() { requestRender({ svg: true, sidebar: true, bulk: true }); }
+
+/** Vollständiger Neuaufbau, sofort und synchron. Nur dort verwenden, wo direkt
+ *  danach mit dem fertigen DOM weitergearbeitet wird. */
+function renderAllNow() {
+  renderAll();
+  flushRender();
+}
 
 // ── Preset layouts ─────────────────────────────────────────────────────────
 
@@ -3510,7 +4055,7 @@ function applyRect() {
 // ── Save / Load ────────────────────────────────────────────────────────────
 
 function savePlan() {
-  const payload = JSON.stringify({ version: 2, state, _sId, _bId });
+  const payload = JSON.stringify({ version: 3, state, _sId, _bId });
   const blob = new Blob([payload], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -3530,6 +4075,9 @@ function onLoadFile(e) {
       const s = d.state || d;
       state.project  = s.project  || '';
       state.depth    = s.depth    || 0.73;
+      // v1/v2-Dateien kennen noch keine Abschnitte → leere Liste, alle Felder
+      // gelten als „ohne Abschnitt" und bleiben vollständig erhalten.
+      state.abschnitte = Array.isArray(s.abschnitte) ? s.abschnitte : [];
       // Migrate v1 saves (no x0/y0): reconstruct chain positions
       let cx = 0, cy = 0;
       state.sections = (s.sections || []).map(sec => {
@@ -3543,6 +4091,7 @@ function onLoadFile(e) {
       });
       _sId = d._sId || state.sections.length;
       _bId = d._bId || state.sections.flatMap(x => x.bays).length;
+      normalizeState();
       document.getElementById('projectName').value = state.project;
       document.getElementById('scaffDepth').value  = state.depth;
       autoFit = true;
@@ -4279,6 +4828,7 @@ function showDevicePicker(onPicked) {
 
 function init() {
   loadFromLinkedProject();
+  normalizeState();
   // Ausgangs-Snapshot SOFORT (synchron) setzen, nicht erst über das Debounce –
   // sonst würde eine schnelle erste Aktion (z. B. direkt nach dem Laden eine
   // Vorlage wählen) den Ausgangszustand überschreiben, bevor er als
@@ -4395,7 +4945,7 @@ function init() {
     showDevicePicker(() => renderAll());
   }
 
-  renderAll();
+  renderAllNow();
 }
 
 document.addEventListener('DOMContentLoaded', init);
