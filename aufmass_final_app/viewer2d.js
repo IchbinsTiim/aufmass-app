@@ -244,6 +244,117 @@ function updateWarningsReadout() {
   el.classList.toggle('hidden', !n);
 }
 
+/* ── Abschnitte (Unterkategorien) ────────────────────────────────────────────
+   Ein Abschnitt bündelt beliebig viele Felder unter einem frei wählbaren Namen
+   ("Nordseite", "Abschnitt A", "Bauteil 2" …). Die Zuordnung ist optional:
+   jedes Feld trägt höchstens eine `abschnittId`; Felder ohne Zuordnung
+   funktionieren unverändert weiter und laufen in Auswertungen unter
+   „Ohne Abschnitt". Abschnitte leben in `state.abschnitte` und werden mit der
+   Zeichnung gespeichert (Datei, Projekt-Autosave, Undo).                     */
+
+// Farbpalette der Abschnitte – bewusst kräftig und gut unterscheidbar, auch
+// im Graustufendruck (unterschiedliche Helligkeiten).
+const ABSCHNITT_COLORS = [
+  '#1f6fb2', '#c0392b', '#1f8a4c', '#b8860b', '#6a4bd1',
+  '#0f8f8e', '#d1560b', '#a5237e', '#4a5f7a', '#7a6a2c'
+];
+
+let _aId = 0;
+
+/** Liste aller Abschnitte (legt sie bei Altdaten transparent an). */
+function abschnitteList() {
+  if (!Array.isArray(state.abschnitte)) state.abschnitte = [];
+  return state.abschnitte;
+}
+
+function mkAbschnitt(name) {
+  const id = 'ab' + (++_aId);
+  const used = abschnitteList().length;
+  return { id, name: name || `Abschnitt ${used + 1}`, color: ABSCHNITT_COLORS[used % ABSCHNITT_COLORS.length] };
+}
+
+function abschnittById(id) {
+  if (!id) return null;
+  return abschnitteList().find(a => a.id === id) || null;
+}
+
+/** Anzeigename eines Abschnitts (auch für nicht/unbekannt zugeordnete Felder). */
+function abschnittName(id) {
+  const a = abschnittById(id);
+  return a ? a.name : 'Ohne Abschnitt';
+}
+
+/** Farbe eines Abschnitts; ohne Zuordnung neutrales Grau. */
+function abschnittColor(id) {
+  const a = abschnittById(id);
+  return a ? a.color : '#8a97a5';
+}
+
+function addAbschnitt(name) {
+  const a = mkAbschnitt(name);
+  abschnitteList().push(a);
+  return a;
+}
+
+function renameAbschnitt(id, name) {
+  const a = abschnittById(id);
+  if (a) a.name = name;
+}
+
+/** Löscht einen Abschnitt. Die Felder bleiben erhalten und gelten danach als
+ *  „Ohne Abschnitt" – es gehen also nie Aufmaßdaten verloren. */
+function deleteAbschnitt(id) {
+  state.abschnitte = abschnitteList().filter(a => a.id !== id);
+  allBaysFlat().forEach(b => { if (b.abschnittId === id) b.abschnittId = null; });
+}
+
+/** Setzt (oder entfernt mit id === null) den Abschnitt für eine Feldmenge. */
+function assignAbschnitt(bays, id) {
+  bays.forEach(b => { b.abschnittId = id || null; });
+}
+
+/** Anzahl Felder je Abschnitt (inkl. Schlüssel '' für „ohne"). */
+function abschnittCounts() {
+  const counts = {};
+  allBaysFlat().forEach(b => {
+    const key = abschnittById(b.abschnittId) ? b.abschnittId : '';
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return counts;
+}
+
+/**
+ * Fasst die Abschnitts-Zuordnung einer Feldmenge zusammen – Grundlage der
+ * Anzeige oben links bei Mehrfachauswahl.
+ * @returns {{ ids: (string|null)[], names: string[], mixed: boolean, hasUnassigned: boolean }}
+ */
+function abschnittSummary(bays) {
+  const ids = [];
+  let hasUnassigned = false;
+  bays.forEach(b => {
+    const a = abschnittById(b.abschnittId);
+    if (!a) { hasUnassigned = true; return; }
+    if (!ids.includes(a.id)) ids.push(a.id);
+  });
+  const names = ids.map(id => abschnittName(id));
+  return { ids, names, mixed: ids.length + (hasUnassigned ? 1 : 0) > 1, hasUnassigned };
+}
+
+/** Alle Felder gruppiert nach Abschnitt, in Abschnitts-Reihenfolge;
+ *  nicht zugeordnete Felder hängen als letzte Gruppe an. */
+function baysByAbschnitt() {
+  const groups = abschnitteList().map(a => ({ abschnitt: a, bays: [] }));
+  const byId = Object.fromEntries(groups.map(g => [g.abschnitt.id, g]));
+  const rest = { abschnitt: null, bays: [] };
+  allBaysFlat().forEach(b => {
+    const g = byId[b.abschnittId];
+    (g || rest).bays.push(b);
+  });
+  const out = groups.filter(g => g.bays.length);
+  if (rest.bays.length) out.push(rest);
+  return out;
+}
+
 const DIR_META = {
   N: { dx:  0, dy: -1, label: 'N ↑' },
   E: { dx:  1, dy:  0, label: 'O →' },
@@ -262,14 +373,43 @@ const ROT_SNAP_ANGLES = [0, 90, 180, 270];
 
 let _sId = 0, _bId = 0;
 let state = {
-  project:  '',
-  depth:    0.73,
-  sections: []
-  // section: { id, name, dir, bays:[{id,len}], x0, y0 }
+  project:   '',
+  depth:     0.73,
+  abschnitte: [],   // [{ id, name, color }] – frei benennbare Feld-Gruppen
+  sections:  []
+  // section: { id, name, dir, bays:[{id,len,…,abschnittId}], x0, y0 }
 };
 
+/** Nach dem Laden (Datei/Projekt/Undo) aufrufen: stellt sicher, dass Felder
+ *  und Abschnitte vollständig sind und dass die ID-Zähler über den bereits
+ *  vergebenen IDs stehen. Ältere Zeichnungen ohne Abschnitte bleiben dabei
+ *  unverändert gültig – sie haben schlicht keine Abschnitte. */
+function normalizeState() {
+  if (!Array.isArray(state.abschnitte)) state.abschnitte = [];
+  state.abschnitte = state.abschnitte
+    .filter(a => a && a.id)
+    .map((a, i) => ({
+      id: String(a.id),
+      name: (a.name != null && String(a.name).trim()) || `Abschnitt ${i + 1}`,
+      color: a.color || ABSCHNITT_COLORS[i % ABSCHNITT_COLORS.length]
+    }));
+  // ID-Zähler hinter die höchste vergebene „abN"-Nummer setzen, damit neue
+  // Abschnitte niemals eine bereits benutzte ID bekommen.
+  state.abschnitte.forEach(a => {
+    const n = parseInt(String(a.id).replace(/^ab/, ''), 10);
+    if (!isNaN(n) && n > _aId) _aId = n;
+  });
+  const known = new Set(state.abschnitte.map(a => a.id));
+  (state.sections || []).forEach(sec => (sec.bays || []).forEach(bay => {
+    normalizeBay(bay);
+    // Verweise auf gelöschte/unbekannte Abschnitte sauber auflösen.
+    if (bay.abschnittId && !known.has(bay.abschnittId)) bay.abschnittId = null;
+  }));
+}
+
 let drag           = null;
-let rafPending     = false;
+// (Das frühere `rafPending` ist entfallen – das Bündeln übernimmt jetzt
+//  zentral requestRender(); siehe „Render-Planer".)
 let addCtx         = null;   // null = FAB,  { x, y } = from junction
 let pendingDir     = 'S';
 let pendingLen     = null;
@@ -346,11 +486,15 @@ function loadFromLinkedProject() {
 
   if (proj.zeichnung2d && Array.isArray(proj.zeichnung2d.sections)) {
     const z = proj.zeichnung2d;
-    state.project  = projName || z.project || '';
-    state.depth    = z.depth || 0.73;
-    state.sections = z.sections;
+    state.project   = projName || z.project || '';
+    state.depth     = z.depth || 0.73;
+    state.sections  = z.sections;
+    // Zeichnungen, die vor der Abschnitts-Funktion gespeichert wurden, haben
+    // schlicht keine Abschnitte – sie werden unverändert weiterverwendet.
+    state.abschnitte = Array.isArray(z.abschnitte) ? z.abschnitte : [];
     _sId = z._sId || state.sections.length;
     _bId = z._bId || state.sections.flatMap(s => s.bays).length;
+    normalizeState();
   } else {
     state.project = projName || '';
   }
@@ -366,7 +510,10 @@ function scheduleAutosave2d() {
     const idx = list.findIndex(p => p.id === linkedProjectId);
     if (idx < 0) return;
     list[idx].name = state.project || list[idx].name || '';
-    list[idx].zeichnung2d = { depth: state.depth, sections: state.sections, _sId, _bId };
+    list[idx].zeichnung2d = {
+      depth: state.depth, sections: state.sections,
+      abschnitte: abschnitteList(), _sId, _bId
+    };
     list[idx].geaendert = new Date().toISOString().slice(0, 10);
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
   }, 700);
@@ -487,7 +634,10 @@ function showToast(msg) {
 // ── Rückgängig / Wiederholen ────────────────────────────────────────────────
 
 function serializeUndoState() {
-  return JSON.stringify({ project: state.project, depth: state.depth, sections: state.sections });
+  return JSON.stringify({
+    project: state.project, depth: state.depth,
+    abschnitte: abschnitteList(), sections: state.sections
+  });
 }
 
 function updateUndoRedoButtons() {
@@ -522,9 +672,11 @@ function scheduleUndoSnapshot() {
 
 function applyUndoState(json) {
   const data = JSON.parse(json);
-  state.project  = data.project;
-  state.depth    = data.depth;
-  state.sections = data.sections;
+  state.project    = data.project;
+  state.depth      = data.depth;
+  state.abschnitte = Array.isArray(data.abschnitte) ? data.abschnitte : [];
+  state.sections   = data.sections;
+  normalizeState();
   selectedSi = null; selectedBi = null;
   bulkSelected.clear();
   const nameInp  = document.getElementById('projectName');
@@ -803,6 +955,8 @@ function zoomAt(clientX, clientY, factor) {
 const canvasPointers = new Map();   // pointerId → { x, y } (Client-Koordinaten)
 let canvasGesture     = null;       // { mode:'pan'|'pinch', ... } – siehe beginCanvasGesture()
 let canvasJustMoved   = false;      // unterdrückt den Tap/Klick direkt nach einem Pan/Pinch
+let handleReleasedAt  = 0;          // Zeitpunkt des letzten Griff-Loslassens (ms)
+const CLICK_AFTER_HANDLE_MS = 400;  // so lange gilt ein Klick als Nachwehe eines Griffs
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -812,7 +966,7 @@ function mkBay(len = 2.57) {
   return {
     id: ++_bId, len: +parseFloat(len).toFixed(2),
     hL: null, hR: null,
-    positions: [], note: ''
+    positions: [], note: '', abschnittId: null
   };
 }
 
@@ -821,6 +975,8 @@ function mkBay(len = 2.57) {
 function normalizeBay(bay) {
   if (!Array.isArray(bay.positions)) bay.positions = [];
   if (typeof bay.note !== 'string') bay.note = '';
+  // Felder aus älteren Zeichnungen kennen noch keine Abschnitte.
+  if (bay.abschnittId === undefined) bay.abschnittId = null;
   // Migration: früheres Einzel-Kategorie-Modell → Position
   if (bay.category && bay.category !== 'geruest' && POS_BY_KEY[bay.category]) {
     const pos = { id: ++_bId, cat: bay.category };
@@ -1201,35 +1357,62 @@ function computeLayout() {
     if (sec.bays.length > 0) {
       els.push({ type: 'wallLine', x1: startX, y1: startY, x2: x, y2: y });
 
-      // Move handle at wall-line midpoint
+      // Move handle at wall-line midpoint. `secLen` wird mitgeführt, damit der
+      // Griff nie größer gezeichnet wird als das Feld selbst (siehe renderSvg).
       els.push({
         type: 'moveHandle',
         x: (startX + x) / 2,
         y: (startY + y) / 2,
+        secLen: Math.hypot(x - startX, y - startY),
         si
       });
 
-      // Rotation handle – sitzt jenseits des Sektionsendes in Laufrichtung
-      const rotOff = HANDLE_R * 3.4;
+      // Rotation handle – sitzt MITTIG an der offenen (wandabgewandten) Seite.
+      // Früher lag er in Laufrichtung hinter dem Sektionsende und damit genau
+      // dort, wo auch der blaue „+"-Knopf sitzt: beim Herauszoomen überlappten
+      // beide Trefferflächen, und ein Tipp auf „Drehen" hängte stattdessen ein
+      // neues Feld an. Quer zur Laufrichtung kann das nicht mehr passieren.
+      // Der Abstand kommt erst beim Zeichnen dazu (bildschirmbezogen).
       els.push({
         type: 'rotateHandle',
-        x: x + dir.dx * rotOff,
-        y: y + dir.dy * rotOff,
+        ax: (startX + x) / 2 + out.dx * depth,
+        ay: (startY + y) / 2 + out.dy * depth,
+        odx: out.dx, ody: out.dy,
         si, ang
       });
     }
   });
 
   // ── Corner pieces between connected sections ────────────────────────────
+  // Früher wurde jede Sektion gegen JEDE andere geprüft (quadratischer
+  // Aufwand: bei 150 Feldern über 22 000 Vergleiche je Neuzeichnung – und
+  // neu gezeichnet wird bei jeder Mausbewegung). Jetzt liegen die
+  // Sektionsanfänge in einem groben 2-px-Raster; geprüft werden nur noch die
+  // Nachbarzellen des jeweiligen Sektionsendes. Ergebnis identisch, Aufwand
+  // linear zur Feldanzahl.
+  const cellKey  = (x, y) => Math.round(x / 2) + ',' + Math.round(y / 2);
+  const startBuckets = new Map();
+  state.sections.forEach((s, i) => {
+    const k = cellKey(s.x0, s.y0);
+    const arr = startBuckets.get(k);
+    if (arr) arr.push(i); else startBuckets.set(k, [i]);
+  });
+
   state.sections.forEach((sec, si) => {
     const end = sectionEnd(sec);
     const out = outVec(secVec(sec), sec.flip);
-    state.sections.forEach((next, ni) => {
-      if (ni === si) return;
-      if (Math.abs(next.x0 - end.x) < 2 && Math.abs(next.y0 - end.y) < 2) {
-        const nOut  = outVec(secVec(next), next.flip);
-        const cross = out.dx * nOut.dy - out.dy * nOut.dx;
-        if (cross > 0) {
+    const bx  = Math.round(end.x / 2), by = Math.round(end.y / 2);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const arr = startBuckets.get((bx + ox) + ',' + (by + oy));
+        if (!arr) continue;
+        for (const ni of arr) {
+          if (ni === si) continue;
+          const next = state.sections[ni];
+          if (Math.abs(next.x0 - end.x) >= 2 || Math.abs(next.y0 - end.y) >= 2) continue;
+          const nOut  = outVec(secVec(next), next.flip);
+          const cross = out.dx * nOut.dy - out.dy * nOut.dx;
+          if (cross <= 0) continue;
           const c0 = { x: end.x, y: end.y };
           const c1 = { x: end.x + out.dx * depth, y: end.y + out.dy * depth };
           const c2 = { x: c1.x + nOut.dx * depth, y: c1.y + nOut.dy * depth };
@@ -1237,7 +1420,7 @@ function computeLayout() {
           els.push({ type: 'corner', pts: [c0, c1, c2, c3] });
         }
       }
-    });
+    }
   });
 
   return els;
@@ -1257,13 +1440,26 @@ function ptsStr(pts) {
   return pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
 }
 
+/** Mischt eine Hex-Farbe mit Weiß (t = 0 … 1, 1 = reines Weiß) – für die
+ *  zurückhaltende Flächenfärbung der Abschnitte. */
+function tintHex(hex, t) {
+  const n = parseInt(hex.slice(1), 16);
+  const mix = c => Math.round(c + (255 - c) * t);
+  return '#' + [mix((n >> 16) & 255), mix((n >> 8) & 255), mix(n & 255)]
+    .map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
 // ── Main SVG render ────────────────────────────────────────────────────────
 
 function renderSvg() {
-  const g    = document.getElementById('planGroup');
-  const svg  = document.getElementById('planSvg');
-  const hint = document.getElementById('emptyHint');
-  g.innerHTML = '';
+  const gLive = document.getElementById('planGroup');
+  const svg   = document.getElementById('planSvg');
+  const hint  = document.getElementById('emptyHint');
+  // In ein Fragment zeichnen und erst am Ende EINMAL einhängen: der Browser
+  // muss dann nicht bei jedem der (bei großen Gerüsten mehreren tausend)
+  // Elemente Layout/Stil neu bewerten.
+  const g = document.createDocumentFragment();
+  gLive.textContent = '';
   invalidateViewCaches();
   updateAreaReadout();
   updateWarningsReadout();
@@ -1311,22 +1507,24 @@ function renderSvg() {
     const positions  = bayData.positions || [];
     const isSelected     = el.si === selectedSi && el.bi === selectedBi;
     const isBulkSelected = bulkMode && bulkSelected.has(bayData.id);
+    // Abschnitts-Zuordnung wird als zurückhaltende Einfärbung sichtbar –
+    // Auswahl-Zustände haben aber immer Vorrang, damit klar bleibt, was gerade
+    // angefasst wird.
+    const absch     = abschnittById(bayData.abschnittId);
+    const baseFill  = absch ? tintHex(absch.color, 0.86) : '#deeeff';
+    const baseStrk  = absch ? absch.color : '#2c6fa8';
     const poly = svgEl('polygon', {
       points: ptsStr(el.pts),
-      fill: isBulkSelected ? '#6a4bd1' : (isSelected ? '#8ec4f5' : '#deeeff'),
+      fill: isBulkSelected ? '#6a4bd1' : (isSelected ? '#8ec4f5' : baseFill),
       'fill-opacity': isBulkSelected ? 0.30 : 1,
-      stroke: isBulkSelected ? '#6a4bd1' : (isSelected ? '#0a2f58' : '#2c6fa8'),
+      stroke: isBulkSelected ? '#6a4bd1' : (isSelected ? '#0a2f58' : baseStrk),
       'stroke-width': (isSelected || isBulkSelected) ? 4 : 2,
       style: isSelected ? 'filter:drop-shadow(0 0 6px rgba(0,122,255,0.75))' : '',
       cursor: 'pointer'
     });
     poly.addEventListener('click', ev => {
       ev.stopPropagation();
-      if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → kein Öffnen
-      selectedSi = el.si;
-      selectedBi = el.bi;
-      renderSvg();
-      openEditSheet(el.si, el.bi);
+      handleBayTap(el.si, el.bi);
     });
     g.appendChild(poly);
 
@@ -1385,7 +1583,7 @@ function renderSvg() {
       const bbMinY     = Math.min(p0.y, p1.y, p2.y, p3.y);
       const boxX = bbMinX + cornerPad, boxY = bbMinY + cornerPad;
       const boxCx = boxX + boxW / 2, boxCy = boxY + boxH / 2;
-      const boxBg  = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : '#0a2f58');
+      const boxBg  = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : (absch ? absch.color : '#0a2f58'));
       const boxRot = labelRot ? `rotate(${labelRot.toFixed(1)},${boxCx},${boxCy})` : '';
       g.appendChild(svgEl('rect', {
         x: boxX, y: boxY, width: boxW, height: boxH,
@@ -1498,21 +1696,34 @@ function renderSvg() {
 
   // 5b. Move handles (orange ✥)
   {
-    const MOVE_R = hs(HANDLE_R * 1.25);
+    // Der Verschiebe-Griff darf nie größer sein als das Feld, zu dem er
+    // gehört: Früher war er rein bildschirmbezogen bemessen, sodass er beim
+    // Herauszoomen (und bei vielen Feldern) über die Nachbarfelder wuchs. Ein
+    // Tipp landete dann auf einem fremden Griff – „falsches Feld reagiert" –
+    // und die Zeichnung verschwand unter orangen Punkten. Deshalb wird die
+    // Größe zusätzlich an Feldlänge und Gerüsttiefe gedeckelt.
     els.filter(e => e.type === 'moveHandle').forEach(el => {
       const isActive = drag && drag.type === 'move' && drag.si === el.si;
+      // Bewusst ohne Mindestgröße in Bildschirm-Pixeln: weit herausgezoomt ist
+      // das Feld selbst nur wenige Pixel groß – ein „mindestens gut treffbarer"
+      // Griff wäre dort zwangsläufig größer als das Feld und würde erneut die
+      // Nachbarn überdecken. Zum Verschieben zoomt man ohnehin heran.
+      const MOVE_R = Math.min(hs(HANDLE_R * 1.1), el.secLen * 0.20, depth * 0.40);
 
       const hit = svgEl('circle', {
-        cx: el.x, cy: el.y, r: MOVE_R * 1.7,
+        cx: el.x, cy: el.y, r: MOVE_R * 1.15,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:move', 'data-si': el.si
       });
       hit.addEventListener('pointerdown', onMoveHandleDown);
+      const hitTitle = svgEl('title', {});
+      hitTitle.textContent = 'Ziehen: Feld verschieben · Tippen: Feld bearbeiten';
+      hit.appendChild(hitTitle);
       g.appendChild(hit);
 
       g.appendChild(svgEl('circle', {
         cx: el.x, cy: el.y, r: MOVE_R,
         fill: isActive ? '#c85000' : '#ff8800',
-        stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
+        stroke: '#fff', 'stroke-width': Math.min(hs(2.5), MOVE_R * 0.22), 'pointer-events': 'none'
       }));
 
       const sym = svgEl('text', {
@@ -1532,30 +1743,38 @@ function renderSvg() {
     els.filter(e => e.type === 'rotateHandle' && e.si === selectedSi && !movingNow0).forEach(el => {
       const isActive = drag && drag.type === 'rotate' && drag.si === el.si;
 
-      // Verbindungslinie vom Sektionsende zum Drehgriff
+      // Abstand zur Feldkante bildschirmbezogen – der Griff bleibt bei jedem
+      // Zoom gleich weit weg und wächst nicht in die Nachbarfelder hinein.
+      const rotOff = hs(HANDLE_R * 2.2);
+      const hx = el.ax + el.odx * rotOff;
+      const hy = el.ay + el.ody * rotOff;
+
+      // Verbindungslinie von der Feldkante zum Drehgriff
       const sec = state.sections[el.si];
-      const end = sectionEnd(sec);
       g.appendChild(svgEl('line', {
-        x1: end.x, y1: end.y, x2: el.x, y2: el.y,
+        x1: el.ax, y1: el.ay, x2: hx, y2: hy,
         stroke: '#8e44ec', 'stroke-width': hs(2), 'stroke-dasharray': `${hs(4)} ${hs(4)}`,
         'pointer-events': 'none'
       }));
 
       const hit = svgEl('circle', {
-        cx: el.x, cy: el.y, r: ROT_R * 2.8,
+        cx: hx, cy: hy, r: ROT_R * 1.9,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:grab', 'data-si': el.si
       });
       hit.addEventListener('pointerdown', onRotateHandleDown);
+      const hitTitle = svgEl('title', {});
+      hitTitle.textContent = 'Tippen: 90° drehen · Ziehen: frei drehen';
+      hit.appendChild(hitTitle);
       g.appendChild(hit);
 
       g.appendChild(svgEl('circle', {
-        cx: el.x, cy: el.y, r: ROT_R,
+        cx: hx, cy: hy, r: ROT_R,
         fill: isActive ? '#6c2bd9' : '#8e44ec',
         stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
       }));
 
       const sym = svgEl('text', {
-        x: el.x, y: el.y,
+        x: hx, y: hy,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
         'font-size': ROT_R * 1.15,
         'font-family': 'system-ui, sans-serif',
@@ -1567,7 +1786,7 @@ function renderSvg() {
       // Winkel-Tooltip während des Drehens
       if (isActive) {
         const deg = Math.round(secAngle(sec));
-        const bx = el.x, by = el.y - ROT_R * 2.6;
+        const bx = hx, by = hy - ROT_R * 2.6;
         g.appendChild(svgEl('rect', { x: bx - hs(30), y: by - hs(14), width: hs(60), height: hs(28), rx: hs(7), fill: '#6c2bd9', 'pointer-events': 'none' }));
         const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': hs(14), 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
         bt.textContent = deg + '°';
@@ -1585,7 +1804,10 @@ function renderSvg() {
     const dir = secVec(selSec);
     const out = outVec(dir, selSec.flip);
     const end = sectionEnd(selSec);
-    const EXT_R = hs(HANDLE_R * 1.05);
+    // Auch die „+"-Knöpfe bleiben an die Feldgröße gekoppelt, damit sie beim
+    // Herauszoomen nicht über die Nachbarfelder wachsen.
+    const selLenPx = Math.hypot(end.x - selSec.x0, end.y - selSec.y0) || depth;
+    const EXT_R = Math.min(hs(HANDLE_R * 1.05), selLenPx * 0.26);
     const axOff = EXT_R * 1.7;
     const addPts = [
       { x: selSec.x0 + out.dx * depth / 2 - dir.dx * axOff,
@@ -1596,8 +1818,10 @@ function renderSvg() {
     addPts.forEach(pt => {
       // Klickfläche: rgba mit minimaler Deckkraft fängt Pointer-Events zuverlässig
       // (transparent-fill ist auf manchen Touch-Geräten unzuverlässig).
+      // Trefferfläche eng am sichtbaren Knopf halten: eine deutlich größere
+      // hätte (wie früher) benachbarte Bedienelemente überlagert.
       const hit = svgEl('circle', {
-        cx: pt.x, cy: pt.y, r: EXT_R * 2.4,
+        cx: pt.x, cy: pt.y, r: EXT_R * 1.45,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:pointer', 'data-side': pt.side
       });
       const fireAdd = ev => {
@@ -1638,6 +1862,8 @@ function renderSvg() {
     camera.cy - camVp.h / camera.scale / 2,
     camVp.w / camera.scale, camVp.h / camera.scale,
     hs(12));
+
+  gLive.appendChild(g);   // fertiges Fragment in einem Rutsch einhängen
 }
 
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
@@ -1718,9 +1944,56 @@ function quickExtend(si, side) {
   renderAll();
 }
 
+/* ── Tippen auf ein Feld ─────────────────────────────────────────────────────
+   Zentrale Stelle für „Feld angetippt". Sie wird von der Feldfläche UND von
+   einem folgenlosen Tipp auf den Verschiebe-Griff aufgerufen.
+
+   Hintergrund: Der orange Verschiebe-Griff sitzt in der Mitte der Wandkante
+   und hatte eine unsichtbare Trefferfläche von 38 px Radius – bei der geringen
+   Gerüsttiefe (≈ 0,73 m) überdeckte sie praktisch das ganze Feld. Ein Tipp
+   aufs Feld landete deshalb meist auf dem Griff, startete ein Verschieben um
+   0 px und endete in `onSvgPointerUp` mit einem vollständigen Neuaufbau –
+   sichtbar passierte NICHTS. Genau das war das „Feld reagiert nicht / erst
+   nach vielen Versuchen"-Verhalten. Jetzt öffnet auch ein Tipp auf den Griff
+   direkt das Feld. */
+function handleBayTap(si, bi) {
+  // Tipp unmittelbar nach einem Verschieben/Zoomen der Ansicht ignorieren.
+  if (canvasJustMoved) { canvasJustMoved = false; return; }
+  const sec = state.sections[si];
+  const bay = sec && sec.bays[bi];
+  if (!bay) return;
+
+  // In der Mehrfachauswahl hakt ein Tipp das Feld an bzw. ab, statt das
+  // Bearbeiten-Sheet zu öffnen – so lässt sich direkt im Plan auswählen.
+  if (bulkMode) {
+    if (bulkSelected.has(bay.id)) bulkSelected.delete(bay.id);
+    else bulkSelected.add(bay.id);
+    selectedSi = si; selectedBi = bi;
+    requestRender({ svg: true, sidebar: true, bulk: true });
+    return;
+  }
+
+  selectedSi = si;
+  selectedBi = bi;
+  requestRender();            // Auswahl + Dreh-/Anfüge-Griffe sofort anzeigen
+  openEditSheet(si, bi);
+}
+
+/** Dreht die Sektion in 90°-Schritten und rastet sauber auf ein Vielfaches
+ *  von 90° ein – die Aktion hinter einem Tipp auf den Drehgriff. */
+function rotateSectionBy(si, step) {
+  const sec = state.sections[si];
+  if (!sec) return;
+  const a = (Math.round(normDeg(secAngle(sec) + step) / 90) * 90) % 360;
+  setSectionAngle(sec, a);
+  syncRotSheet(sec);
+  requestRender({ svg: true, sidebar: true });
+}
+
 function onRotateHandleDown(e) {
   e.preventDefault();
   e.stopPropagation();
+  canvasJustMoved = false;   // Griff-Bedienung ist nie die Nachwehe eines Wischens
   const si  = parseInt(e.currentTarget.dataset.si);
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
@@ -1729,6 +2002,7 @@ function onRotateHandleDown(e) {
   drag = {
     type: 'rotate', si,
     startAngle: secAngle(state.sections[si]),
+    startClientX: e.clientX, startClientY: e.clientY,
     moved: false
   };
 }
@@ -1736,6 +2010,7 @@ function onRotateHandleDown(e) {
 function onMoveHandleDown(e) {
   e.preventDefault();
   e.stopPropagation();
+  canvasJustMoved = false;   // Griff-Bedienung ist nie die Nachwehe eines Wischens
   const si  = parseInt(e.currentTarget.dataset.si);
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
@@ -1761,14 +2036,22 @@ function onSvgPointerMove(e) {
   const pt = screenToSvg(e.clientX, e.clientY);
 
   if (drag.type === 'rotate') {
+    // Erst ab einer echten Zieh-Bewegung frei drehen. Ohne diese Schwelle
+    // würde schon das minimale Wackeln beim Antippen als Drehung gelten – der
+    // Tipp-Kurzbefehl „90° drehen" (siehe onSvgPointerUp) käme nie zustande.
+    if (!drag.moved) {
+      const dxC = e.clientX - drag.startClientX;
+      const dyC = e.clientY - drag.startClientY;
+      if (Math.hypot(dxC, dyC) < 6) return;
+      drag.moved = true;
+    }
     const sec = state.sections[drag.si];
     // Winkel vom Sektionsanfang zum Finger – Sektion zeigt zum Finger
     let deg = Math.atan2(pt.y - sec.y0, pt.x - sec.x0) * 180 / Math.PI;
     if (snapEnabled) deg = snapAngle(deg);   // bei Magnet aus → frei drehbar
     setSectionAngle(sec, deg);
-    drag.moved = true;
     syncRotSheet(sec);
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    requestRender();
     return;
   }
 
@@ -1797,7 +2080,7 @@ function onSvgPointerMove(e) {
     // Feld folgt frei dem Finger; das endgültige Einrasten passiert erst beim Loslassen.
     sec.x0 = rawX; sec.y0 = rawY;
 
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    requestRender();
     return;
   }
 
@@ -1807,20 +2090,37 @@ function onSvgPointerMove(e) {
   const newLen = snapLen(drag.startLen + dPx / PX_PER_M);
   if (newLen !== state.sections[drag.si].bays[drag.bi].len) {
     state.sections[drag.si].bays[drag.bi].len = newLen;
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    requestRender();
   }
 }
 
 function onSvgPointerUp(e) {
   if (!drag) return;
   const d = drag; drag = null;
+  // Nach dem Loslassen eines Griffs schickt der Browser noch ein Klick-Event
+  // an das SVG. Ohne diese Sperre würde der „leere Fläche angetippt →
+  // Auswahl aufheben"-Handler die soeben getroffene Auswahl sofort wieder
+  // verwerfen. Zeitstempel statt Flag, damit nichts hängen bleiben kann,
+  // falls der Klick einmal ausbleibt.
+  handleReleasedAt = Date.now();
   if (d.type === 'rotate') {
-    renderAll();
+    // Kurzer Tipp auf den Drehgriff (ohne Ziehen) = eine Vierteldrehung.
+    // Damit ist „Feld drehen" eine einzige, sofort wirksame Berührung; das
+    // freie Drehen bleibt über das Ziehen desselben Griffs erhalten.
+    if (!d.moved) rotateSectionBy(d.si, 90);
+    else renderAll();
     return;
   }
   if (d.type === 'move') {
     const sec = state.sections[d.si];
-    if (d.moved && d.snap) {
+    if (!d.moved) {
+      // Nichts verschoben → als Tipp auf das Feld behandeln (siehe
+      // handleBayTap): Feld auswählen bzw. Bearbeiten öffnen.
+      movePreview = null;
+      handleBayTap(d.si, 0);
+      return;
+    }
+    if (d.snap) {
       // pixelgenau an der hervorgehobenen Andockstelle einrasten
       sec.x0 = d.snap.x0; sec.y0 = d.snap.y0;
     }
@@ -1863,7 +2163,7 @@ function scheduleCanvasRender() {
 /** Vollständiger Neuaufbau kurz nach Ende einer Zoom-/Pan-Interaktion. */
 function scheduleCameraSettle(delay = 140) {
   clearTimeout(camSettleTimer);
-  camSettleTimer = setTimeout(() => { renderSvg(); updateZoomResetBtn(); }, delay);
+  camSettleTimer = setTimeout(() => { requestRender(); updateZoomResetBtn(); }, delay);
 }
 
 /** Setzt canvasGesture anhand der aktuell aktiven Finger neu auf – wird bei
@@ -1904,6 +2204,11 @@ function beginCanvasGesture() {
 
 function onCanvasPointerDown(e) {
   if (drag) return;                                    // Handle-Drag hat Vorrang (stoppt Propagation ohnehin selbst)
+  // Neue Berührung → die Klick-Sperre der VORIGEN Geste verfällt. Ohne dieses
+  // Zurücksetzen blieb `canvasJustMoved` nach einem Wischen stehen (wenn der
+  // Browser danach keinen Klick nachreichte) und verschluckte dann den
+  // nächsten Tipp auf ein Feld – der erste Antippversuch blieb wirkungslos.
+  if (!canvasPointers.size) canvasJustMoved = false;
   if (canvasPointers.size >= 2 && !canvasPointers.has(e.pointerId)) return;  // max. 2 Finger verfolgen
   // Absichtlich KEIN setPointerCapture hier: das würde den Klick-Kompatibilitäts-
   // event bereits bei einem einfachen Tap auf das svg umleiten (statt auf das
@@ -1990,7 +2295,7 @@ function onCanvasDblClick(e) {
 function resetCanvasView() {
   autoFit = true;
   fitCameraToContent();
-  renderSvg();
+  requestRender();
   updateZoomResetBtn();
 }
 
@@ -2203,7 +2508,7 @@ function openEditSheet(si, bi) {
         b.classList.toggle('active', b.dataset.dir === dk)
       );
       syncRotSheet(sec);
-      renderSvg();
+      requestRender();
     });
     dirRow.appendChild(btn);
   });
@@ -2235,12 +2540,12 @@ function openEditSheet(si, bi) {
 
   // Feldlänge ist Standardwert der Meter-Positionen → bei Änderung deren
   // Platzhalter/Anzeige mitführen.
-  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); buildKonsole(); renderSvg(); };
+  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); buildKonsole(); requestRender(); };
   minusBtn.addEventListener('click', () => { bay.len = Math.max(0.25, +(bay.len - 0.25).toFixed(2)); syncInp(); });
   plusBtn.addEventListener('click',  () => { bay.len = +(bay.len + 0.25).toFixed(2); syncInp(); });
   inp.addEventListener('change', () => {
     const v = parseFloat(inp.value);
-    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); buildKonsole(); renderSvg(); }
+    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); buildKonsole(); requestRender(); }
   });
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
@@ -2270,7 +2575,7 @@ function openEditSheet(si, bi) {
     if (snapEnabled) deg = snapAngle(deg);
     setSectionAngle(sec, deg);
     syncRotSheet(sec);
-    renderSvg();
+    requestRender();
   };
   rotSlider.addEventListener('input', () => applyRot(parseFloat(rotSlider.value)));
   rotMinus.addEventListener('click', () => applyRot(secAngle(sec) - 15));
@@ -2288,7 +2593,7 @@ function openEditSheet(si, bi) {
     a = (Math.round(a / 90) * 90) % 360;   // sauber auf 90°-Schritt einrasten
     setSectionAngle(sec, a);
     syncRotSheet(sec);
-    renderSvg();
+    requestRender();
   };
   [90, 180, 270].forEach(step => {
     const b = document.createElement('button');
@@ -2299,6 +2604,51 @@ function openEditSheet(si, bi) {
     b.addEventListener('click', () => rotateBy(step));
     rotPresets.appendChild(b);
   });
+
+  // ── Abschnitt ────────────────────────────────────────────────────────────
+  // Jedes Feld kann genau einem Abschnitt angehören ("Nordseite", "Abschnitt
+  // A" …) – oder keinem, dann verhält es sich wie bisher.
+  const abschLabel = document.createElement('div');
+  abschLabel.className = 'sheet-section-label';
+  abschLabel.textContent = 'Abschnitt';
+
+  const abschRow = document.createElement('div');
+  abschRow.className = 'pos-toggle-row sheet-absch-row';
+
+  function buildAbschRow() {
+    abschRow.innerHTML = '';
+    const mk = (id, name, color) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'pos-chip absch-chip' + ((bay.abschnittId || null) === id ? ' active' : '');
+      chip.textContent = name;
+      chip.style.setProperty('--pos-color', color);
+      chip.addEventListener('click', () => {
+        bay.abschnittId = id;
+        buildAbschRow();
+        requestRender({ sidebar: true, bulk: true });
+      });
+      abschRow.appendChild(chip);
+    };
+    mk(null, 'Ohne Abschnitt', '#8a97a5');
+    abschnitteList().forEach(a => mk(a.id, a.name, a.color));
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'pos-chip absch-new-chip';
+    add.textContent = '+ neuer Abschnitt';
+    add.addEventListener('click', () => {
+      const name = prompt('Name des Abschnitts (z. B. „Nordseite"):',
+                          `Abschnitt ${abschnitteList().length + 1}`);
+      if (name === null) return;
+      const a = addAbschnitt(name.trim());
+      bay.abschnittId = a.id;
+      buildAbschRow();
+      requestRender({ sidebar: true, bulk: true });
+    });
+    abschRow.appendChild(add);
+  }
+  buildAbschRow();
 
   // ── Höhen (Gerüst-Grundfeld) ────────────────────────────────────────────
   const hLabel = document.createElement('div');
@@ -2322,7 +2672,7 @@ function openEditSheet(si, bi) {
       const v = parseFloat(hInp.value);
       bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
       buildPosDetails();   // Netz-m²-Vorschlag (Länge × kleinere Höhe) live nachführen
-      renderSvg();
+      requestRender();
     });
     field.appendChild(lab); field.appendChild(hInp);
     return { field, input: hInp };
@@ -2338,7 +2688,7 @@ function openEditSheet(si, bi) {
     bay.hL = src; bay.hR = src;
     hLeft.input.value = src.toFixed(2); hRight.input.value = src.toFixed(2);
     buildPosDetails();
-    renderSvg();
+    requestRender();
   });
   hRow.appendChild(hLeft.field); hRow.appendChild(hEqBtn); hRow.appendChild(hRight.field);
 
@@ -2353,7 +2703,7 @@ function openEditSheet(si, bi) {
     if (i >= 0) bay.positions.splice(i, 1);
     else bay.positions.push({ id: ++_bId, cat: key, qty: null, unit: defaultUnit(key) });
     buildPosDetails();
-    renderSvg();
+    requestRender();
   };
 
   // Toggle-Chips für einfache Positionen (alles außer Konsole)
@@ -2416,7 +2766,7 @@ function openEditSheet(si, bi) {
       const v = parseFloat(qtyInp.value);
       pos.qty = (qtyInp.value === '' || isNaN(v)) ? null : v;
       updateCalc();
-      renderSvg();
+      requestRender();
     });
 
     const unitRow = document.createElement('div');
@@ -2431,7 +2781,7 @@ function openEditSheet(si, bi) {
         unitRow.querySelectorAll('.punit-btn').forEach(x => x.classList.toggle('active', x === b));
         syncPlaceholder();
         updateCalc();
-        renderSvg();
+        requestRender();
       });
       unitRow.appendChild(b);
     });
@@ -2474,7 +2824,7 @@ function openEditSheet(si, bi) {
     rm.addEventListener('click', () => {
       const i = bay.positions.indexOf(pos);
       if (i >= 0) bay.positions.splice(i, 1);
-      buildKonsole(); renderSvg();
+      buildKonsole(); requestRender();
     });
     const calc = document.createElement('span');
     calc.className = 'pos-detail-calc konsole-row-calc';
@@ -2495,7 +2845,7 @@ function openEditSheet(si, bi) {
       b.addEventListener('click', () => {
         pos.typ = typ;
         typeRow.querySelectorAll('.ktype-btn').forEach(x => x.classList.toggle('active', x.textContent === typ));
-        renderSvg();
+        requestRender();
       });
       typeRow.appendChild(b);
     });
@@ -2519,7 +2869,7 @@ function openEditSheet(si, bi) {
         pos.lagen = val; freeInp.value = '';
         lagenRow.querySelectorAll('.klagen-btn').forEach(x => x.classList.toggle('active', x === b));
         updateCalc();
-        renderSvg();
+        requestRender();
       });
       lagenRow.appendChild(b);
     });
@@ -2533,7 +2883,7 @@ function openEditSheet(si, bi) {
         lagenRow.querySelectorAll('.klagen-btn').forEach(x => x.classList.remove('active'));
       }
       updateCalc();
-      renderSvg();
+      requestRender();
     });
     lagenRow.appendChild(freeInp);
 
@@ -2549,7 +2899,7 @@ function openEditSheet(si, bi) {
       const v = parseFloat(meterInp.value);
       pos.meterValue = (meterInp.value === '' || isNaN(v)) ? null : v;
       updateCalc();
-      renderSvg();
+      requestRender();
     });
     const meterUnit = document.createElement('span');
     meterUnit.className = 'kmeter-unit';
@@ -2571,7 +2921,7 @@ function openEditSheet(si, bi) {
         billingRow.querySelectorAll('.kbill-btn').forEach(x => x.classList.toggle('active', x === b));
         syncBillingRows();
         updateCalc();
-        renderSvg();
+        requestRender();
       });
       billingRow.appendChild(b);
     });
@@ -2595,7 +2945,7 @@ function openEditSheet(si, bi) {
   addKonsBtn.textContent = '+ Konsole';
   addKonsBtn.addEventListener('click', () => {
     bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1', billing: 'lagen' });
-    buildKonsole(); renderSvg();
+    buildKonsole(); requestRender();
   });
 
   // ── Notiz ────────────────────────────────────────────────────────────────
@@ -2608,7 +2958,7 @@ function openEditSheet(si, bi) {
   noteInp.placeholder = 'z. B. Fenster freihalten, nur teilweise eingerüstet …';
   noteInp.rows = 2;
   noteInp.value = bay.note || '';
-  noteInp.addEventListener('input', () => { bay.note = noteInp.value; renderSvg(); });
+  noteInp.addEventListener('input', () => { bay.note = noteInp.value; requestRender(); });
 
   // ── Favoriten / Vorlagen ─────────────────────────────────────────────────
   const favLabel = document.createElement('div');
@@ -2639,7 +2989,7 @@ function openEditSheet(si, bi) {
         applyFavoriteToBay(fav, bay);
         hLeft.input.value = bay.hL == null ? '' : bay.hL.toFixed(2);
         hRight.input.value = bay.hR == null ? '' : bay.hR.toFixed(2);
-        buildPosDetails(); buildKonsole(); renderSvg();
+        buildPosDetails(); buildKonsole(); requestRender();
         showToast('Vorlage „' + fav.name + '" angewendet');
       });
       const rm = document.createElement('button');
@@ -2707,7 +3057,7 @@ function openEditSheet(si, bi) {
   pasteBtn.disabled = !copiedBayData;
   pasteBtn.addEventListener('click', () => {
     pasteBayPositions(bay);
-    renderSvg();
+    requestRender();
     closeSheet();
     openEditSheet(si, bi);   // Sheet mit den neuen Werten neu aufbauen
   });
@@ -2748,6 +3098,8 @@ function openEditSheet(si, bi) {
   sheet.appendChild(rotLabel);
   sheet.appendChild(rotRow);
   sheet.appendChild(rotPresets);
+  sheet.appendChild(abschLabel);
+  sheet.appendChild(abschRow);
   sheet.appendChild(hLabel);
   sheet.appendChild(hRow);
   sheet.appendChild(posLabel);
@@ -2942,6 +3294,193 @@ function allBaysFlat() {
   return state.sections.flatMap(s => s.bays);
 }
 
+/** Alle aktuell "gemeinten" Felder: in der Mehrfachauswahl die angehakten,
+ *  sonst das einzeln ausgewählte Feld. */
+function currentSelectionBays() {
+  if (bulkMode) return allBaysFlat().filter(b => bulkSelected.has(b.id));
+  if (selectedSi == null) return [];
+  const sec = state.sections[selectedSi];
+  const bay = sec && sec.bays[selectedBi];
+  return bay ? [bay] : [];
+}
+
+/* ── Abschnitts-Verwaltung (Seitenleiste) ────────────────────────────────────
+   Abschnitte anlegen, umbenennen, löschen – und mit einem Klick alle Felder
+   eines Abschnitts in die Mehrfachauswahl übernehmen. */
+
+function renderAbschnittBar() {
+  const el = document.getElementById('abschnittBar');
+  if (!el) return;
+  el.innerHTML = '';
+
+  const head = document.createElement('div');
+  head.className = 'absch-head';
+
+  const title = document.createElement('span');
+  title.className = 'absch-title';
+  title.textContent = 'Abschnitte';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'absch-add-btn';
+  addBtn.textContent = '+ Abschnitt';
+  addBtn.title = 'Neuen Abschnitt anlegen (z. B. „Nordseite")';
+  addBtn.addEventListener('click', () => {
+    const name = prompt('Name des Abschnitts (z. B. „Nordseite", „Abschnitt A"):',
+                        `Abschnitt ${abschnitteList().length + 1}`);
+    if (name === null) return;
+    const a = addAbschnitt(name.trim());
+    // Direkt nutzbar: liegt eine Auswahl vor, wandert sie gleich in den neuen
+    // Abschnitt – das ist der mit Abstand häufigste nächste Schritt.
+    const sel = currentSelectionBays();
+    if (sel.length) {
+      assignAbschnitt(sel, a.id);
+      showToast(`Abschnitt „${a.name}" angelegt · ${sel.length} Feld${sel.length === 1 ? '' : 'er'} zugeordnet`);
+    } else {
+      showToast(`Abschnitt „${a.name}" angelegt`);
+    }
+    renderAll();
+  });
+
+  head.appendChild(title); head.appendChild(addBtn);
+  el.appendChild(head);
+
+  const list = abschnitteList();
+  if (!list.length) {
+    const hint = document.createElement('p');
+    hint.className = 'absch-hint';
+    hint.textContent = 'Noch keine Abschnitte. Felder ohne Abschnitt funktionieren normal weiter.';
+    el.appendChild(hint);
+    return;
+  }
+
+  const counts = abschnittCounts();
+  const wrap = document.createElement('div');
+  wrap.className = 'absch-list';
+
+  const makeRow = (a, count) => {
+    const row = document.createElement('div');
+    row.className = 'absch-row';
+    row.style.setProperty('--absch-color', a ? a.color : '#8a97a5');
+
+    const dot = document.createElement('span');
+    dot.className = 'absch-dot';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'absch-name';
+    nameEl.textContent = a ? a.name : 'Ohne Abschnitt';
+
+    const cnt = document.createElement('span');
+    cnt.className = 'absch-count';
+    cnt.textContent = count + ' Feld' + (count === 1 ? '' : 'er');
+
+    // Klick auf die Zeile: alle Felder dieses Abschnitts markieren
+    // (schaltet die Mehrfachauswahl bei Bedarf ein).
+    const pick = document.createElement('button');
+    pick.type = 'button'; pick.className = 'absch-pick';
+    pick.title = 'Alle Felder dieses Abschnitts auswählen';
+    pick.appendChild(dot); pick.appendChild(nameEl); pick.appendChild(cnt);
+    pick.addEventListener('click', () => {
+      bulkMode = true;
+      bulkSelected.clear();
+      allBaysFlat().forEach(b => {
+        const match = a ? b.abschnittId === a.id : !abschnittById(b.abschnittId);
+        if (match) bulkSelected.add(b.id);
+      });
+      renderAll();
+    });
+    row.appendChild(pick);
+
+    if (a) {
+      const ren = document.createElement('button');
+      ren.type = 'button'; ren.className = 'absch-mini-btn';
+      ren.textContent = '✎'; ren.title = 'Abschnitt umbenennen';
+      ren.addEventListener('click', () => {
+        const next = prompt('Neuer Name für den Abschnitt:', a.name);
+        if (next === null) return;
+        const trimmed = next.trim();
+        if (!trimmed) return;
+        renameAbschnitt(a.id, trimmed);
+        renderAll();
+      });
+
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'absch-mini-btn danger';
+      del.textContent = '×';
+      del.title = 'Abschnitt löschen (Felder bleiben erhalten)';
+      del.addEventListener('click', () => {
+        if (count && !confirm(`Abschnitt „${a.name}" löschen?\n\nDie ${count} zugeordneten Felder bleiben erhalten und gelten danach als „Ohne Abschnitt".`)) return;
+        deleteAbschnitt(a.id);
+        showToast(`Abschnitt „${a.name}" gelöscht`);
+        renderAll();
+      });
+
+      row.appendChild(ren); row.appendChild(del);
+    }
+    return row;
+  };
+
+  list.forEach(a => wrap.appendChild(makeRow(a, counts[a.id] || 0)));
+  if (counts['']) wrap.appendChild(makeRow(null, counts['']));
+  el.appendChild(wrap);
+}
+
+/** Zeigt oben links auf der Zeichenfläche, welche Felder gerade ausgewählt
+ *  sind und welchem Abschnitt / welchen Abschnitten sie angehören. Bei
+ *  Mehrfachauswahl ist das die geforderte Sammelanzeige, bei Einzelauswahl
+ *  eine kompakte Zeile zum selben Zweck. */
+function renderSelectionInfo() {
+  const el = document.getElementById('selectionInfo');
+  if (!el) return;
+  const bays = currentSelectionBays();
+
+  if (!bays.length) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  const sum = abschnittSummary(bays);
+  el.innerHTML = '';
+  el.classList.remove('hidden');
+  el.classList.toggle('multi', bulkMode);
+
+  const head = document.createElement('div');
+  head.className = 'sel-info-head';
+  head.textContent = bulkMode
+    ? `${bays.length} Feld${bays.length === 1 ? '' : 'er'} ausgewählt`
+    : 'Feld ' + bayLabel(state.sections[selectedSi], selectedBi);
+  el.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'sel-info-body';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'sel-info-label';
+  lbl.textContent = sum.names.length > 1 ? 'Abschnitte:' : 'Abschnitt:';
+  body.appendChild(lbl);
+
+  const chips = document.createElement('span');
+  chips.className = 'sel-info-chips';
+  const addChip = (name, color) => {
+    const c = document.createElement('span');
+    c.className = 'sel-info-chip';
+    c.style.setProperty('--absch-color', color);
+    c.textContent = name;
+    chips.appendChild(c);
+  };
+  sum.ids.forEach(id => addChip(abschnittName(id), abschnittColor(id)));
+  if (sum.hasUnassigned) addChip('Ohne Abschnitt', '#8a97a5');
+  body.appendChild(chips);
+  el.appendChild(body);
+
+  if (sum.mixed) {
+    const note = document.createElement('div');
+    note.className = 'sel-info-note';
+    note.textContent = 'gemischte Zuordnung';
+    el.appendChild(note);
+  }
+}
+
 /** Leiste über der Feldliste: Mehrfachauswahl an/aus + Sammel-Aktionen.
  *  Erlaubt, EINE Position (Konsole, Netz, Tunnelrahmen …) auf beliebig viele,
  *  auch nicht benachbarte Felder anzuwenden, ohne deren Höhen oder sonstige
@@ -2978,6 +3517,31 @@ function renderBulkBar() {
   info.textContent = `${bulkSelected.size} von ${bays.length} Feldern ausgewählt`;
   el.appendChild(info);
 
+  // Abschnitts-Zuordnung der Auswahl – dieselbe Information wie in der Anzeige
+  // oben links auf der Zeichenfläche, hier direkt über den Sammel-Aktionen.
+  {
+    const selNow = bays.filter(b => bulkSelected.has(b.id));
+    if (selNow.length) {
+      const sum = abschnittSummary(selNow);
+      const line = document.createElement('div');
+      line.className = 'bulk-absch-info';
+      const lab = document.createElement('span');
+      lab.className = 'bulk-absch-info-label';
+      lab.textContent = sum.names.length > 1 ? 'Abschnitte:' : 'Abschnitt:';
+      line.appendChild(lab);
+      const add = (name, color) => {
+        const c = document.createElement('span');
+        c.className = 'sel-info-chip';
+        c.style.setProperty('--absch-color', color);
+        c.textContent = name;
+        line.appendChild(c);
+      };
+      sum.ids.forEach(id => add(abschnittName(id), abschnittColor(id)));
+      if (sum.hasUnassigned) add('Ohne Abschnitt', '#8a97a5');
+      el.appendChild(line);
+    }
+  }
+
   const selRow = document.createElement('div');
   selRow.className = 'bulk-sel-row';
   const allBtn = document.createElement('button');
@@ -2999,6 +3563,54 @@ function renderBulkBar() {
     el.appendChild(hint);
     return;
   }
+
+  // Abschnitt der gesamten Auswahl zuweisen bzw. entfernen.
+  const abschLabel = document.createElement('div');
+  abschLabel.className = 'bulk-section-label';
+  abschLabel.textContent = 'Abschnitt für Auswahl';
+  el.appendChild(abschLabel);
+
+  const abschRow = document.createElement('div');
+  abschRow.className = 'bulk-chip-row';
+  const curIds = abschnittSummary(selectedBays).ids;
+  const mkAbschChip = (id, name, color) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    const isAll = id
+      ? selectedBays.every(b => b.abschnittId === id)
+      : selectedBays.every(b => !abschnittById(b.abschnittId));
+    const isSome = !isAll && (id ? curIds.includes(id)
+                                 : selectedBays.some(b => !abschnittById(b.abschnittId)));
+    chip.className = 'bulk-pos-chip' + (isAll ? ' active' : '') + (isSome ? ' partial' : '');
+    chip.textContent = name;
+    chip.style.setProperty('--pos-color', color);
+    chip.addEventListener('click', () => {
+      assignAbschnitt(selectedBays, id);
+      renderAll();
+      showToast(id
+        ? `${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'er'} → „${name}"`
+        : `Abschnitt bei ${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'ern'} entfernt`);
+    });
+    abschRow.appendChild(chip);
+  };
+  abschnitteList().forEach(a => mkAbschChip(a.id, a.name, a.color));
+  mkAbschChip(null, 'Ohne Abschnitt', '#8a97a5');
+
+  const newAbschBtn = document.createElement('button');
+  newAbschBtn.type = 'button';
+  newAbschBtn.className = 'bulk-pos-chip absch-new-chip';
+  newAbschBtn.textContent = '+ neuer Abschnitt';
+  newAbschBtn.addEventListener('click', () => {
+    const name = prompt('Name des Abschnitts (z. B. „Nordseite"):',
+                        `Abschnitt ${abschnitteList().length + 1}`);
+    if (name === null) return;
+    const a = addAbschnitt(name.trim());
+    assignAbschnitt(selectedBays, a.id);
+    renderAll();
+    showToast(`${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'er'} → „${a.name}"`);
+  });
+  abschRow.appendChild(newAbschBtn);
+  el.appendChild(abschRow);
 
   // Vorlage auf die gesamte Auswahl anwenden: überschreibt Höhen + Positionen
   // aller markierten Felder mit einem Klick.
@@ -3238,10 +3850,16 @@ function renderBulkBar() {
 function renderSections() {
   const container = document.getElementById('sectionsContainer');
   const hint      = document.getElementById('noSectionsHint');
-  container.innerHTML = '';
 
-  if (!state.sections.length) { hint.classList.remove('hidden'); return; }
+  if (!state.sections.length) {
+    container.textContent = '';
+    hint.classList.remove('hidden');
+    return;
+  }
   hint.classList.add('hidden');
+  // Wie beim Plan: erst im Fragment aufbauen, dann einmal einhängen. Die
+  // Feldliste ist mit ~30 Elementen je Feld der teuerste Teil des Neuaufbaus.
+  const frag = document.createDocumentFragment();
 
   state.sections.forEach((sec, si) => {
     const card = document.createElement('div');
@@ -3253,7 +3871,7 @@ function renderSections() {
 
     const nameIn = document.createElement('input');
     nameIn.type = 'text'; nameIn.className = 'sec-name'; nameIn.value = sec.name;
-    nameIn.addEventListener('input', e => { sec.name = e.target.value; renderSvg(); });
+    nameIn.addEventListener('input', e => { sec.name = e.target.value; requestRender(); });
 
     const rmSec = document.createElement('button');
     rmSec.className = 'remove-btn small'; rmSec.textContent = '×';
@@ -3310,6 +3928,18 @@ function renderSections() {
       num.className = 'bay-num'; num.textContent = bayLabel(sec, bi);
       top.appendChild(num);
 
+      // Abschnitts-Marker: zeigt auf einen Blick, wohin das Feld gehört.
+      // Ohne Zuordnung bleibt die Zeile wie bisher – kein zusätzlicher Marker.
+      const bayAbsch = abschnittById(bay.abschnittId);
+      if (bayAbsch) {
+        const tag = document.createElement('span');
+        tag.className = 'bay-absch-tag';
+        tag.style.setProperty('--absch-color', bayAbsch.color);
+        tag.textContent = bayAbsch.name;
+        tag.title = 'Abschnitt: ' + bayAbsch.name;
+        top.appendChild(tag);
+      }
+
       if ((bay.note || '').trim()) {
         const noteIcon = document.createElement('span');
         noteIcon.className = 'bay-note-icon';
@@ -3330,7 +3960,7 @@ function renderSections() {
       const inp = document.createElement('input');
       inp.type = 'number'; inp.className = 'bay-inp';
       inp.value = bay.len.toFixed(2); inp.min = '0.01'; inp.step = '0.01';
-      inp.addEventListener('input', e => { bay.len = +parseFloat(e.target.value || 0).toFixed(2); renderSvg(); });
+      inp.addEventListener('input', e => { bay.len = +parseFloat(e.target.value || 0).toFixed(2); requestRender(); });
 
       const rmBay = document.createElement('button');
       rmBay.className = 'remove-btn small'; rmBay.textContent = '×';
@@ -3356,7 +3986,7 @@ function renderSections() {
         hInp.addEventListener('input', () => {
           const v = parseFloat(hInp.value);
           bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
-          renderSvg();
+          requestRender();
         });
         field.appendChild(lab); field.appendChild(hInp);
         return { field, input: hInp };
@@ -3371,7 +4001,7 @@ function renderSections() {
         if (src == null) return;
         bay.hL = src; bay.hR = src;
         hLeftSide.input.value = src.toFixed(2); hRightSide.input.value = src.toFixed(2);
-        renderSvg();
+        requestRender();
       });
       heightRow.appendChild(hLeftSide.field);
       heightRow.appendChild(hEqBtnSide);
@@ -3385,7 +4015,7 @@ function renderSections() {
       FIELD_PRESETS.forEach(l => {
         const qb = document.createElement('button');
         qb.className = 'quick-btn'; qb.textContent = l.toFixed(2);
-        qb.addEventListener('click', () => { bay.len = l; inp.value = l.toFixed(2); renderSvg(); });
+        qb.addEventListener('click', () => { bay.len = l; inp.value = l.toFixed(2); requestRender(); });
         qd.appendChild(qb);
       });
       bottom.appendChild(qd);
@@ -3410,7 +4040,7 @@ function renderSections() {
       const editBtn = document.createElement('button');
       editBtn.type = 'button'; editBtn.className = 'bay-pos-edit';
       editBtn.textContent = '+ Positionen';
-      editBtn.addEventListener('click', () => { selectedSi = si; selectedBi = bi; renderSvg(); openEditSheet(si, bi); });
+      editBtn.addEventListener('click', () => { selectedSi = si; selectedBi = bi; requestRender(); openEditSheet(si, bi); });
       posLine.appendChild(editBtn);
 
       const copyBtn = document.createElement('button');
@@ -3449,11 +4079,71 @@ function renderSections() {
 
     card.appendChild(hdr); card.appendChild(dirRow); card.appendChild(totEl);
     card.appendChild(baysDiv); card.appendChild(addBayBtn);
-    container.appendChild(card);
+    frag.appendChild(card);
   });
+
+  container.replaceChildren(frag);
 }
 
-function renderAll() { renderBulkBar(); renderSections(); renderSvg(); }
+/* ── Render-Planer ───────────────────────────────────────────────────────────
+   Früher rief jeder Eingabe-Handler (Schieberegler, Zahlenfeld, Chip …)
+   `renderSvg()` bzw. `renderAll()` SYNCHRON auf. Ein Regler feuert beim Ziehen
+   aber 60–120 `input`-Events je Sekunde – und `renderAll()` baut die komplette
+   Seitenleiste neu auf (bei 40 Feldern ~140 ms, bei 100 Feldern ~0,4 s). Die
+   Events stauten sich schneller, als sie abgearbeitet werden konnten; die App
+   „hing" danach sekunden- bis minutenlang nach.
+
+   Jetzt melden alle Handler ihren Bedarf nur noch an; pro Bildschirm-Frame
+   wird höchstens EINMAL gezeichnet, und nur die Teile, die sich wirklich
+   geändert haben. Während einer Zieh-Geste bleibt die (teure) Seitenleiste
+   ganz außen vor und wird erst danach nachgezogen.                           */
+
+let _renderRaf   = 0;
+const _renderNeed = { svg: false, sidebar: false, bulk: false };
+
+function _runRender() {
+  _renderRaf = 0;
+  const need = { ..._renderNeed };
+  _renderNeed.svg = _renderNeed.sidebar = _renderNeed.bulk = false;
+  // Seitenleiste während einer laufenden Geste nicht anfassen – sie ist der
+  // teuerste Teil und währenddessen ohnehin nicht sichtbar in Benutzung.
+  if (drag && (need.sidebar || need.bulk)) {
+    _renderNeed.sidebar = _renderNeed.sidebar || need.sidebar;
+    _renderNeed.bulk    = _renderNeed.bulk    || need.bulk;
+    need.sidebar = need.bulk = false;
+  }
+  if (need.bulk)    renderBulkBar();
+  if (need.sidebar) { renderAbschnittBar(); renderSections(); }
+  if (need.svg)     renderSvg();
+  renderSelectionInfo();
+}
+
+/** Zeichnen anfordern. Mehrere Aufrufe innerhalb eines Frames werden zu einem
+ *  einzigen Neuaufbau zusammengefasst. */
+function requestRender(need = {}) {
+  if (need.svg !== false)  _renderNeed.svg = true;
+  if (need.sidebar)        _renderNeed.sidebar = true;
+  if (need.bulk)           _renderNeed.bulk = true;
+  if (_renderRaf) return;
+  _renderRaf = requestAnimationFrame(_runRender);
+}
+
+/** Wartende Zeichenarbeit sofort erledigen (z. B. vor dem PDF-Export). */
+function flushRender() {
+  if (!_renderRaf) return;
+  cancelAnimationFrame(_renderRaf);
+  _runRender();
+}
+
+/** Vollständiger Neuaufbau (Seitenleiste + Zeichnung) – gebündelt. */
+function renderAll() { requestRender({ svg: true, sidebar: true, bulk: true }); }
+
+/** Vollständiger Neuaufbau, sofort und synchron. Nur dort verwenden, wo direkt
+ *  danach mit dem fertigen DOM weitergearbeitet wird. */
+function renderAllNow() {
+  renderAll();
+  flushRender();
+}
 
 // ── Preset layouts ─────────────────────────────────────────────────────────
 
@@ -3510,7 +4200,7 @@ function applyRect() {
 // ── Save / Load ────────────────────────────────────────────────────────────
 
 function savePlan() {
-  const payload = JSON.stringify({ version: 2, state, _sId, _bId });
+  const payload = JSON.stringify({ version: 3, state, _sId, _bId });
   const blob = new Blob([payload], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -3530,6 +4220,9 @@ function onLoadFile(e) {
       const s = d.state || d;
       state.project  = s.project  || '';
       state.depth    = s.depth    || 0.73;
+      // v1/v2-Dateien kennen noch keine Abschnitte → leere Liste, alle Felder
+      // gelten als „ohne Abschnitt" und bleiben vollständig erhalten.
+      state.abschnitte = Array.isArray(s.abschnitte) ? s.abschnitte : [];
       // Migrate v1 saves (no x0/y0): reconstruct chain positions
       let cx = 0, cy = 0;
       state.sections = (s.sections || []).map(sec => {
@@ -3543,6 +4236,7 @@ function onLoadFile(e) {
       });
       _sId = d._sId || state.sections.length;
       _bId = d._bId || state.sections.flatMap(x => x.bays).length;
+      normalizeState();
       document.getElementById('projectName').value = state.project;
       document.getElementById('scaffDepth').value  = state.depth;
       autoFit = true;
@@ -3660,9 +4354,14 @@ function aggQtyText(a) {
        unlesbar klein gequetscht.                                             */
 
 // Papier & Maßstab
-const PDF_MARGIN       = 10;     // mm Seitenrand
+const PDF_MARGIN       = 12;     // mm Seitenrand
 const PDF_MM_PER_M_MIN = 11;     // mind. 11 mm je Meter (≈ 1:91) – Baustellen-lesbar
 const PDF_MM_PER_M_MAX = 45;     // höchstens 45 mm je Meter (≈ 1:22)
+
+// Höhe der wiederkehrenden Seitenelemente (mm)
+const PDF_HEADER_H = 17;   // Kopfzeile mit Projekt/Blattangabe
+const PDF_FOOTER_H = 11;   // Fußzeile mit Kennzahlen, Datum, Seitenzahl
+const PDF_LEGEND_H = 9;    // Legendenstreifen auf Planseiten
 
 // Schriftgrößen in pt – bewusst fix, damit auf Papier nichts unter die
 // Lesbarkeitsgrenze rutscht.
@@ -3670,6 +4369,95 @@ const PDF_FS_LEN   = 8.5;   // Feldlänge
 const PDF_FS_H     = 7.5;   // Höhenangaben
 const PDF_FS_LABEL = 7;     // Feldbezeichnung (A1 …)
 const PDF_FS_BADGE = 6.5;   // Positions-Badges
+
+/* ── Layout-Varianten ────────────────────────────────────────────────────────
+   Drei Gestaltungen für dasselbe Dokument – die Wahl merkt sich die App.
+     technisch : Weißes Blatt, feine Linien, marineblauer Akzent, Kopf- und
+                 Fußleiste als schmale Regellinien. Wirkt wie eine
+                 Werkplan-Zeichnung und druckt sparsam.
+     kontrast  : Durchgehend farbige Kopfleiste, kräftige Tabellenköpfe,
+                 großzügige Zebra-Zeilen. Am besten lesbar auf der Baustelle
+                 und beim schnellen Durchblättern am Bildschirm.
+     monochrom : Reine Graustufen ohne Farbflächen – für schwarz-weiße
+                 Bürodrucker, Kopien und Faxversand. Positionen werden über
+                 Graustufen und Kürzel unterschieden statt über Farbe.        */
+
+const PDF_THEMES = {
+  technisch: {
+    label: 'Technisch',
+    desc: 'Weißes Blatt, feine Linien, marineblauer Akzent – wie ein Werkplan.',
+    accent:   [26, 74, 122],
+    accentSoft: [232, 240, 248],
+    ink:      [23, 32, 42],
+    inkSoft:  [96, 110, 124],
+    rule:     [186, 196, 206],
+    bandFill: null,              // kein Farbbalken – nur Regellinien
+    bandText: [23, 32, 42],
+    tableHead:[236, 240, 245],
+    tableHeadText: [60, 72, 84],
+    groupFill:[26, 74, 122],
+    groupText:[255, 255, 255],
+    zebra:    [246, 248, 251],
+    bayFill:  [226, 238, 250],
+    bayStroke:[44, 111, 168],
+    colored:  true
+  },
+  kontrast: {
+    label: 'Kontrast',
+    desc: 'Farbige Kopfleiste, kräftige Tabellen – gut lesbar auf der Baustelle.',
+    accent:   [11, 61, 105],
+    accentSoft: [225, 236, 247],
+    ink:      [17, 24, 33],
+    inkSoft:  [88, 100, 114],
+    rule:     [200, 209, 218],
+    bandFill: [11, 61, 105],
+    bandText: [255, 255, 255],
+    tableHead:[11, 61, 105],
+    tableHeadText: [255, 255, 255],
+    groupFill:[233, 240, 248],
+    groupText:[11, 61, 105],
+    zebra:    [243, 247, 251],
+    bayFill:  [219, 234, 249],
+    bayStroke:[11, 61, 105],
+    colored:  true
+  },
+  monochrom: {
+    label: 'Monochrom',
+    desc: 'Reine Graustufen – für Schwarz-Weiß-Druck und Kopien.',
+    accent:   [40, 40, 40],
+    accentSoft: [238, 238, 238],
+    ink:      [20, 20, 20],
+    inkSoft:  [105, 105, 105],
+    rule:     [175, 175, 175],
+    bandFill: null,
+    bandText: [20, 20, 20],
+    tableHead:[232, 232, 232],
+    tableHeadText: [45, 45, 45],
+    groupFill:[60, 60, 60],
+    groupText:[255, 255, 255],
+    zebra:    [245, 245, 245],
+    bayFill:  [240, 240, 240],
+    bayStroke:[80, 80, 80],
+    colored:  false
+  }
+};
+
+const PDF_THEME_KEY = 'av_2d_pdf_theme';
+
+function pdfThemeName() {
+  const n = localStorage.getItem(PDF_THEME_KEY);
+  return PDF_THEMES[n] ? n : 'technisch';
+}
+
+/** Farbe im gewählten Layout: in „monochrom" wird jede Farbe in einen
+ *  Grauwert gleicher Helligkeit übersetzt, damit auch Schwarz-Weiß-Ausdrucke
+ *  die Positionen unterscheidbar zeigen. */
+function pdfCol(theme, rgb) {
+  if (theme.colored) return rgb;
+  const l = Math.round(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]);
+  const v = Math.round(40 + (l / 255) * 150);   // auf 40…190 stauchen
+  return [v, v, v];
+}
 
 /** #rrggbb → [r,g,b] */
 function pdfHex(h) {
@@ -3726,6 +4514,155 @@ function pdfPill(doc, str, cx, cy, deg, fill, stroke, textCol) {
   pdfText(doc, str, cx, cy, deg);
 }
 
+/* ── Wiederkehrende Seitenelemente ───────────────────────────────────────────
+   Kopfzeile, Legende und Fußzeile werden auf JEDER Seite gezeichnet – auch auf
+   Tabellen-, Notiz- und Fotoseiten. Damit bleibt bei einem mehrseitigen
+   Ausdruck auf jedem Blatt erkennbar, zu welchem Projekt es gehört, welcher
+   Ausschnitt zu sehen ist und wie die Farben zu lesen sind.                  */
+
+/** Kopfzeile. Liefert die Oberkante des freien Inhaltsbereichs (mm). */
+function pdfDrawHeader(ctx, opts = {}) {
+  const { doc, theme, pdfW, margin } = ctx;
+  const y = margin;
+  const h = PDF_HEADER_H;
+
+  if (theme.bandFill) {
+    doc.setFillColor(...theme.bandFill);
+    doc.rect(0, 0, pdfW, y + h - 2, 'F');
+  } else {
+    // Akzentbalken links + feine Trennlinie unten
+    doc.setFillColor(...theme.accent);
+    doc.rect(margin, y, 1.6, h - 4, 'F');
+  }
+
+  const tx = theme.bandFill ? margin : margin + 4;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13.5);
+  doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.ink));
+  doc.text(ctx.title, tx, y + 5.4);
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.2);
+  doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.inkSoft));
+  if (ctx.subtitle) doc.text(ctx.subtitle, tx, y + 10.2);
+
+  // Rechts: Dokumentart + Blattangabe
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.accent));
+  doc.text(opts.kicker || 'Gerüst-Aufmaß', pdfW - margin, y + 5.4, { align: 'right' });
+  if (opts.sheet) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.2);
+    doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.inkSoft));
+    doc.text(opts.sheet, pdfW - margin, y + 10.2, { align: 'right' });
+  }
+
+  if (!theme.bandFill) {
+    doc.setDrawColor(...theme.rule); doc.setLineWidth(0.3);
+    doc.line(margin, y + h - 3.2, pdfW - margin, y + h - 3.2);
+  }
+  return y + h;
+}
+
+/** Fußzeile mit Kennzahlen, Datum und Seitenzahl (auf jeder Seite). */
+function pdfDrawFooter(ctx, pageNo, pageCount) {
+  const { doc, theme, pdfW, pdfH, margin } = ctx;
+  const y = pdfH - margin - PDF_FOOTER_H;
+  doc.setDrawColor(...theme.rule); doc.setLineWidth(0.3);
+  doc.line(margin, y + 3, pdfW - margin, y + 3);
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+  doc.setTextColor(...theme.inkSoft);
+  doc.text(ctx.metaLine, margin, y + 7.2);
+  doc.text(`${ctx.dateStr}   ·   Seite ${pageNo} von ${pageCount}`,
+           pdfW - margin, y + 7.2, { align: 'right' });
+}
+
+/** Legendenstreifen: Positionsarten und Abschnitte mit ihren Farben.
+ *  Wird auf jeder Planseite wiederholt. Liefert die neue Oberkante. */
+function pdfDrawLegend(ctx, top, entries) {
+  const { doc, theme, pdfW, margin } = ctx;
+  if (!entries.length) return top;
+  const h = PDF_LEGEND_H;
+
+  doc.setFillColor(...theme.accentSoft);
+  doc.rect(margin, top, pdfW - 2 * margin, h, 'F');
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6.6);
+  doc.setTextColor(...theme.inkSoft);
+  doc.text('LEGENDE', margin + 2.5, top + h / 2 + 0.6, { baseline: 'middle' });
+
+  let x = margin + 16;
+  const maxX = pdfW - margin - 2;
+  doc.setFontSize(7);
+  entries.forEach(e => {
+    doc.setFont('helvetica', 'normal');
+    const w = doc.getTextWidth(e.label) + 8.5;
+    if (x + w > maxX) return;              // was nicht passt, entfällt still
+    const col = pdfCol(theme, e.color);
+    doc.setFillColor(...col);
+    doc.setDrawColor(...col); doc.setLineWidth(0.2);
+    if (e.shape === 'line') {
+      doc.setLineWidth(0.9);
+      doc.line(x, top + h / 2, x + 4, top + h / 2);
+    } else {
+      doc.rect(x, top + h / 2 - 1.7, 3.6, 3.4, 'FD');
+    }
+    doc.setTextColor(...theme.ink);
+    doc.text(e.label, x + 5.6, top + h / 2 + 0.6, { baseline: 'middle' });
+    x += w;
+  });
+  return top + h + 2.5;
+}
+
+/** Legendeneinträge aus der aktuellen Zeichnung ableiten. */
+function pdfLegendEntries() {
+  const entries = [];
+  const seen = new Set();
+  allBaysFlat().forEach(bay => (bay.positions || []).forEach(pos => {
+    const p = POS_BY_KEY[pos.cat];
+    if (!p || seen.has(p.key)) return;
+    seen.add(p.key);
+    entries.push({ label: p.label, color: pdfHex(p.color) });
+  }));
+  entries.sort((a, b) => a.label.localeCompare(b.label));
+  abschnitteList().forEach(a => {
+    if (allBaysFlat().some(b => b.abschnittId === a.id)) {
+      entries.push({ label: a.name, color: pdfHex(a.color), shape: 'line' });
+    }
+  });
+  return entries;
+}
+
+/**
+ * Schneidet ein Polygon am achsparallelen Rechteck ab (Sutherland–Hodgman).
+ * Gebraucht für die blass gezeichneten Anschlussfelder der Nachbarblätter:
+ * die ragen naturgemäß über den Blattausschnitt hinaus und würden sonst in
+ * Kopf- oder Fußzeile hineinlaufen.
+ * @returns {Array<{x:number,y:number}>} leeres Array, wenn nichts übrig bleibt
+ */
+function clipPolyToRect(pts, r) {
+  const edges = [
+    { inside: p => p.x >= r.minX, cut: (a, b) => (r.minX - a.x) / (b.x - a.x) },
+    { inside: p => p.x <= r.maxX, cut: (a, b) => (r.maxX - a.x) / (b.x - a.x) },
+    { inside: p => p.y >= r.minY, cut: (a, b) => (r.minY - a.y) / (b.y - a.y) },
+    { inside: p => p.y <= r.maxY, cut: (a, b) => (r.maxY - a.y) / (b.y - a.y) }
+  ];
+  let out = pts;
+  for (const e of edges) {
+    const src = out;
+    out = [];
+    for (let i = 0; i < src.length; i++) {
+      const a = src[i], b = src[(i + 1) % src.length];
+      const ain = e.inside(a), bin = e.inside(b);
+      if (ain) out.push(a);
+      if (ain !== bin) {
+        const t = e.cut(a, b);
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      }
+    }
+    if (!out.length) return [];
+  }
+  return out;
+}
+
 /** Bounding-Box eines Feld-Elements (Welt-px). */
 function elBBox(el) {
   const xs = el.pts.map(p => p.x), ys = el.pts.map(p => p.y);
@@ -3741,29 +4678,88 @@ function elBBox(el) {
  * @param layout  vollständiges computeLayout() (für Ecken/Wandlinien)
  * @param shapesOnly  true = nur Flächen zeichnen (Übersichtskarte)
  */
-function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
+/** Ursprung der Papier-Abbildung: Ausschnitt mittig im verfügbaren Bereich. */
+function pdfPlanOrigin(win, area, s) {
+  return {
+    x: area.x + (area.w - win.w * s) / 2 - win.minX * s,
+    y: area.y + (area.h - win.h * s) / 2 - win.minY * s
+  };
+}
+
+/**
+ * Sucht die Ecke des Zeichenbereichs, in der die Übersichtskarte am wenigsten
+ * vom Plan verdeckt. Sonst landete sie stur unten rechts – und damit bei
+ * L-förmigen Gerüsten mitten auf der abgehenden Wand.
+ */
+function pdfPickLocatorBox(area, win, s, bayEls, lw, lh) {
+  const o = pdfPlanOrigin(win, area, s);
+  const boxes = [
+    { x: area.x + area.w - lw, y: area.y + area.h - lh },   // unten rechts (bevorzugt)
+    { x: area.x,               y: area.y + area.h - lh },   // unten links
+    { x: area.x + area.w - lw, y: area.y },                 // oben rechts
+    { x: area.x,               y: area.y }                  // oben links
+  ].map(p => ({ ...p, w: lw, h: lh }));
+
+  const rects = bayEls.map(el => {
+    const b = elBBox(el);
+    return { x1: o.x + b.minX * s, x2: o.x + b.maxX * s,
+             y1: o.y + b.minY * s, y2: o.y + b.maxY * s };
+  });
+  let best = boxes[0], bestScore = Infinity;
+  boxes.forEach(box => {
+    const hits = rects.filter(r =>
+      r.x2 > box.x && r.x1 < box.x + box.w && r.y2 > box.y && r.y1 < box.y + box.h).length;
+    if (hits < bestScore) { bestScore = hits; best = box; }
+  });
+  return best;
+}
+
+function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
+  const theme  = opts.theme || PDF_THEMES[pdfThemeName()];
+  const ghosts = opts.ghosts || [];
   // Ausschnitt mittig im verfügbaren Bereich platzieren
-  const originX = area.x + (area.w - win.w * s) / 2 - win.minX * s;
-  const originY = area.y + (area.h - win.h * s) / 2 - win.minY * s;
+  const _o = pdfPlanOrigin(win, area, s);
+  const originX = _o.x;
+  const originY = _o.y;
   const P  = p => ({ x: originX + p.x * s, y: originY + p.y * s });
   const XY = (x, y) => ({ x: originX + x * s, y: originY + y * s });
 
   const depth   = state.depth * PX_PER_M;
-  const drawSet = new Set(bayEls.map(e => e.si + ':' + e.bi));
+
+  // Alles, was über den Blattausschnitt hinausragt, wird am Rand des
+  // Ausschnitts abgeschnitten – sonst liefen Anschlussfelder und Eckstücke in
+  // Kopf- oder Fußzeile hinein.
+  const clipRect = { minX: win.minX, minY: win.minY,
+                     maxX: win.minX + win.w, maxY: win.minY + win.h };
+  const drawClipped = (pts, style) => {
+    const c = clipPolyToRect(pts, clipRect);
+    if (c.length >= 3) pdfPoly(doc, c.map(P), style);
+  };
+
+  // 0. Anschluss-Felder der Nachbarblätter: blass und ohne Beschriftung, damit
+  //    am Blattschnitt sichtbar bleibt, wie es weitergeht – ohne dass unklar
+  //    wird, welche Felder zu DIESEM Blatt gehören.
+  if (ghosts.length) {
+    doc.setFillColor(245, 246, 248);
+    doc.setDrawColor(198, 204, 211); doc.setLineWidth(0.3);
+    ghosts.forEach(el => drawClipped(el.pts, 'FD'));
+  }
 
   // 1. Eckstücke (nur die, deren Nachbarfelder auf dieser Seite liegen)
-  doc.setDrawColor(44, 111, 168); doc.setLineWidth(0.4);
-  doc.setFillColor(181, 212, 240);
+  const cornerStroke = pdfCol(theme, [44, 111, 168]);
+  const cornerFill   = pdfCol(theme, [181, 212, 240]);
+  doc.setDrawColor(...cornerStroke); doc.setLineWidth(0.4);
+  doc.setFillColor(...cornerFill);
   layout.filter(e => e.type === 'corner').forEach(el => {
     const b = elBBox(el);
     if (b.maxX < win.minX || b.minX > win.minX + win.w) return;
     if (b.maxY < win.minY || b.minY > win.minY + win.h) return;
-    pdfPoly(doc, el.pts.map(P), 'FD');
+    drawClipped(el.pts, 'FD');
   });
 
   // 2. Wandlinien – am Rand des Ausschnitts abgeschnitten (Liang-Barsky),
   //    damit auf einer Seite keine Linie ins Nichts weiterläuft.
-  doc.setDrawColor(90, 107, 122); doc.setLineWidth(0.3);
+  doc.setDrawColor(...pdfCol(theme, [90, 107, 122])); doc.setLineWidth(0.3);
   const clipSeg = (x1, y1, x2, y2) => {
     const dx = x2 - x1, dy = y2 - y1;
     let t0 = 0, t1 = 1;
@@ -3784,12 +4780,15 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
     doc.line(a.x, a.y, b.x, b.y);
   });
 
-  // 3. Felder
+  // 3. Felder – mit Abschnittsfarbe, falls das Feld einem Abschnitt angehört.
   bayEls.forEach(el => {
     const bay = state.sections[el.si].bays[el.bi];
     normalizeBay(bay);
-    doc.setFillColor(222, 238, 255);
-    doc.setDrawColor(44, 111, 168); doc.setLineWidth(0.45);
+    const absch = abschnittById(bay.abschnittId);
+    const fill  = absch ? pdfCol(theme, pdfHex(tintHex(absch.color, 0.86))) : theme.bayFill;
+    const strk  = absch ? pdfCol(theme, pdfHex(absch.color))                : theme.bayStroke;
+    doc.setFillColor(...fill);
+    doc.setDrawColor(...strk); doc.setLineWidth(0.45);
     pdfPoly(doc, el.pts.map(P), 'FD');
   });
 
@@ -3818,17 +4817,20 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
     const maxTxt = lenMM * 0.92;
 
     // Feldlänge mittig im Feld
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(10, 47, 88);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...theme.ink);
     pdfFitFont(doc, el.len.toFixed(2).replace('.', ','), maxTxt, PDF_FS_LEN, 5.5);
     pdfText(doc, el.len.toFixed(2).replace('.', ','), c.x, c.y, rot);
 
-    // Feldbezeichnung an der Wandseite
+    // Feldbezeichnung an der Wandseite – in der Abschnittsfarbe, sodass sich
+    // die Abschnitte auch im Ausdruck auf einen Blick unterscheiden.
+    const absch = abschnittById(bay.abschnittId);
+    const lblBg = absch ? pdfCol(theme, pdfHex(absch.color)) : theme.accent;
     const label = bayLabel(state.sections[el.si], el.bi);
     doc.setFont('helvetica', 'bold');
     const lblFs = pdfFitFont(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
     const lblD  = depthMM / 2 + lblFs * 0.352778 * 1.0;
     pdfPill(doc, label, c.x - ox * lblD, c.y - oy * lblD, rot,
-            [10, 47, 88], [10, 47, 88], [255, 255, 255]);
+            lblBg, lblBg, [255, 255, 255]);
 
     // Offene Seite: Höhen, darunter je Position eine Zeile
     const lines = [];
@@ -3837,12 +4839,13 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
     if (hL || hR) {
       lines.push({
         text: hL && hR ? (hL === hR ? 'h ' + hL : hL + ' | ' + hR) : 'h ' + (hL || hR),
-        fill: [240, 249, 243], stroke: [31, 122, 61], col: [22, 92, 45], fs: PDF_FS_H
+        fill: pdfCol(theme, [240, 249, 243]), stroke: pdfCol(theme, [31, 122, 61]),
+        col: pdfCol(theme, [22, 92, 45]), fs: PDF_FS_H
       });
     }
     (bay.positions || []).forEach(pos => {
       const meta = POS_BY_KEY[pos.cat];
-      const col  = pdfHex((meta && meta.color) || '#333333');
+      const col  = pdfCol(theme, pdfHex((meta && meta.color) || '#333333'));
       lines.push({ text: posBadge(pos, bay), fill: [255, 255, 255], stroke: col, col, fs: PDF_FS_BADGE });
     });
 
@@ -3860,34 +4863,66 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
   doc.setTextColor(0, 0, 0);
 }
 
-/** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt blau. */
-function pdfDrawLocator(doc, bounds, win, box) {
-  const s = Math.min(box.w / Math.max(bounds.w, 1), box.h / Math.max(bounds.h, 1)) * 0.9;
-  const ox = box.x + (box.w - bounds.w * s) / 2 - bounds.minX * s;
-  const oy = box.y + (box.h - bounds.h * s) / 2 - bounds.minY * s;
+/** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt farbig
+ *  hervorgehoben – zeigt auf jedem Blatt, wo man sich im Gesamtplan befindet. */
+function pdfDrawLocator(doc, bounds, win, box, theme, caption) {
+  const th = theme || PDF_THEMES[pdfThemeName()];
 
-  doc.setDrawColor(200, 205, 212); doc.setLineWidth(0.2);
-  doc.setFillColor(252, 253, 255);
+  doc.setDrawColor(...th.rule); doc.setLineWidth(0.25);
+  doc.setFillColor(255, 255, 255);
   doc.rect(box.x, box.y, box.w, box.h, 'FD');
 
-  doc.setFillColor(196, 205, 214); doc.setDrawColor(196, 205, 214);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5.6);
+  doc.setTextColor(...th.inkSoft);
+  doc.text(caption || 'LAGE IM GESAMTPLAN', box.x + 1.8, box.y + 3.2);
+
+  // Zeichenfläche UNTER der Beschriftung, damit sich beides nicht überlagert.
+  const capH = 4.6;
+  const inner = { x: box.x + 1.8, y: box.y + capH, w: box.w - 3.6, h: box.h - capH - 1.8 };
+  const s  = Math.min(inner.w / Math.max(bounds.w, 1), inner.h / Math.max(bounds.h, 1));
+  const ox = inner.x + (inner.w - bounds.w * s) / 2 - bounds.minX * s;
+  const oy = inner.y + (inner.h - bounds.h * s) / 2 - bounds.minY * s;
+
+  // Gerüst als Umriss MIT Kontur: bei 0,73 m Tiefe wäre eine reine Füllung in
+  // dieser Größe eine unsichtbare Haarlinie.
+  doc.setFillColor(198, 206, 214); doc.setDrawColor(150, 160, 172);
+  doc.setLineWidth(0.18);
   state.sections.forEach(sec => {
     sectionBayPolys(sec, sec.x0, sec.y0).forEach(poly => {
-      pdfPoly(doc, poly.map(p => ({ x: ox + p.x * s, y: oy + p.y * s })), 'F');
+      pdfPoly(doc, poly.map(p => ({ x: ox + p.x * s, y: oy + p.y * s })), 'FD');
     });
   });
 
-  doc.setDrawColor(0, 122, 255); doc.setLineWidth(0.5);
+  doc.setDrawColor(...th.accent); doc.setLineWidth(0.7);
   doc.rect(ox + win.minX * s, oy + win.minY * s, win.w * s, win.h * s, 'S');
 }
 
-/** Ermittelt die Papierseiten-Aufteilung des Plans. */
+/**
+ * Ermittelt die Papierseiten-Aufteilung des Plans.
+ *
+ * Grundsätze der Aufteilung:
+ *  • EIN gemeinsamer Maßstab für alle Planseiten – nur so lassen sich die
+ *    Blätter nebeneinanderlegen und Längen von Blatt zu Blatt vergleichen.
+ *  • ALLE Ausschnitte sind gleich groß und liegen auf einem festen Raster.
+ *    Blatt 2 schließt damit exakt an Blatt 1 an (früher war jeder Ausschnitt
+ *    die Hüllbox seiner Felder – die Blätter passten nicht zusammen).
+ *  • Zugeordnet wird über den Feldmittelpunkt, und jeder Ausschnitt ist um die
+ *    größte Feldausdehnung größer als sein Rasterfeld. Dadurch liegt jedes
+ *    Feld vollständig auf genau einem Blatt – nie angeschnitten.
+ *  • Zusätzlich wird notiert, welche FREMDEN Felder in den Ausschnitt ragen;
+ *    die zeichnet pdfDrawPlan blass als Anschluss-Kontext (Blattschnitt).
+ *
+ * @returns {{pages:Array, bounds:Object|null, scale:number, tiled:boolean,
+ *            cols:number, rows:number}}
+ */
 function pdfPlanPages(layout, availW, availH) {
   const bayEls = layout.filter(e => e.type === 'bay');
   const bounds = contentBounds();
-  if (!bayEls.length || !bounds) return { pages: [], bounds: null, scale: 0 };
+  if (!bayEls.length || !bounds) {
+    return { pages: [], bounds: null, scale: 0, tiled: false, cols: 0, rows: 0 };
+  }
 
-  const pad = state.depth * PX_PER_M * 0.9;
+  const pad = state.depth * PX_PER_M * 1.1;
   const full = {
     minX: bounds.minX - pad, minY: bounds.minY - pad,
     w: bounds.w + pad * 2,   h: bounds.h + pad * 2
@@ -3899,84 +4934,206 @@ function pdfPlanPages(layout, availW, availH) {
 
   // Passt alles bei lesbarem Maßstab auf eine Seite → genau eine Planseite.
   if (sFit >= sMin) {
-    return { pages: [{ win: full, els: bayEls }], bounds: full, scale: Math.min(sFit, sMax), tiled: false };
+    return { pages: [{ win: full, els: bayEls, ghosts: [], col: 0, row: 0 }],
+             bounds: full, scale: Math.min(sFit, sMax), tiled: false, cols: 1, rows: 1 };
   }
 
-  // Sonst kacheln. Die Kachel wird um die größte Feldausdehnung verkleinert,
-  // damit ein Feld, das gerade noch zur Kachel gehört, garantiert vollständig
-  // auf die Seite passt – es wird also nie mitten durch ein Feld geschnitten.
-  let bayExtent = 0;
-  bayEls.forEach(el => {
+  const boxes = bayEls.map(el => {
     const b = elBBox(el);
-    bayExtent = Math.max(bayExtent, b.maxX - b.minX, b.maxY - b.minY);
+    return { el, b };
   });
-  const tileW = Math.max(availW / sMin - bayExtent, availW / sMin * 0.4);
-  const tileH = Math.max(availH / sMin - bayExtent, availH / sMin * 0.4);
 
-  const cols = Math.max(1, Math.ceil(full.w / tileW));
-  const rows = Math.max(1, Math.ceil(full.h / tileH));
-  const stepX = cols > 1 ? full.w / cols : full.w;
-  const stepY = rows > 1 ? full.h / rows : full.h;
+  /* Blätter greedy in Leserichtung füllen (oben-links zuerst).
+     Ein starres Raster über die Gesamtausdehnung zu legen wäre einfacher,
+     verschwendet bei ring- oder U-förmigen Gerüsten aber massiv Papier: die
+     Mitte ist leer, trotzdem entstünde für jede Rasterzelle ein Blatt. Beim
+     greedy Füllen wandert stattdessen ein Blattfenster über die tatsächlich
+     belegten Bereiche und nimmt jeweils alles mit, was VOLLSTÄNDIG hineinpasst
+     – dadurch bleibt garantiert kein Feld angeschnitten, und leere Bereiche
+     kosten keine Seite. */
+  const w0 = availW / sMin, h0 = availH / sMin;    // Fenster bei Mindestmaßstab
+  // Nutzbarer Bereich OHNE den Rand, der rings um den Inhalt frei bleiben soll.
+  // Nur so passt später Inhalt + Rand garantiert auf das Blatt; ohne diesen
+  // Abzug ragte der Plan um bis zu zwei Randbreiten in die Fußzeile.
+  const useW = Math.max(w0 - 2 * pad, w0 * 0.5);
+  const useH = Math.max(h0 - 2 * pad, h0 * 0.5);
 
-  const pages = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const rect = {
-        minX: full.minX + c * stepX, maxX: full.minX + (c + 1) * stepX,
-        minY: full.minY + r * stepY, maxY: full.minY + (r + 1) * stepY
-      };
-      // Zuordnung über den Feld-MITTELPUNKT → jedes Feld landet auf genau
-      // einer Seite, wird dort aber vollständig gezeichnet.
-      const els = bayEls.filter(el => {
-        const b = elBBox(el);
-        const mx = (b.minX + b.maxX) / 2, my = (b.minY + b.maxY) / 2;
-        return mx >= rect.minX && (mx < rect.maxX || c === cols - 1)
-            && my >= rect.minY && (my < rect.maxY || r === rows - 1);
-      });
-      if (!els.length) continue;
+  const order = boxes.slice().sort((a, b) =>
+    (a.b.minY - b.b.minY) || (a.b.minX - b.b.minX));
 
-      // Fensterausschnitt = Hüllbox der zugeordneten Felder (+ Rand)
-      let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-      els.forEach(el => {
-        const b = elBBox(el);
-        mnX = Math.min(mnX, b.minX); mxX = Math.max(mxX, b.maxX);
-        mnY = Math.min(mnY, b.minY); mxY = Math.max(mxY, b.maxY);
-      });
-      pages.push({
-        win: { minX: mnX - pad, minY: mnY - pad, w: (mxX - mnX) + pad * 2, h: (mxY - mnY) + pad * 2 },
-        els
-      });
+  const taken  = new Set();
+  const groups = [];
+  for (const start of order) {
+    if (taken.has(start.el)) continue;
+    const wx = start.b.minX, wy = start.b.minY;
+    const els = [];
+    for (const o of order) {
+      if (taken.has(o.el)) continue;
+      if (o.b.minX >= wx && o.b.maxX <= wx + useW &&
+          o.b.minY >= wy && o.b.maxY <= wy + useH) { els.push(o); taken.add(o.el); }
     }
+    groups.push(els);
   }
 
-  // Die Kacheln wurden für den Mindestmaßstab gebildet. Bleibt danach auf allen
-  // Seiten Platz übrig (typisch bei schmalen, langen Gerüsten), wird EIN
-  // gemeinsamer, größerer Maßstab gewählt – alle Planseiten behalten so
-  // denselben Maßstab, nutzen aber das Blatt voll aus.
+  // Gemeinsamer Maßstab für ALLE Blätter: so groß wie möglich, aber so, dass
+  // der Inhalt jedes Blattes noch vollständig passt. Ein einheitlicher Maßstab
+  // ist Voraussetzung dafür, dass sich Längen von Blatt zu Blatt vergleichen
+  // lassen.
   let maxW = 0, maxH = 0;
-  pages.forEach(pg => { maxW = Math.max(maxW, pg.win.w); maxH = Math.max(maxH, pg.win.h); });
-  const sUsed = Math.max(sMin, Math.min(sMax, availW / maxW, availH / maxH));
-  return { pages, bounds: full, scale: sUsed, tiled: true };
+  const bbox = g => {
+    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+    g.forEach(o => {
+      mnX = Math.min(mnX, o.b.minX); mxX = Math.max(mxX, o.b.maxX);
+      mnY = Math.min(mnY, o.b.minY); mxY = Math.max(mxY, o.b.maxY);
+    });
+    return { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY,
+             cx: (mnX + mxX) / 2, cy: (mnY + mxY) / 2 };
+  };
+  const bbs = groups.map(bbox);
+  bbs.forEach(b => {
+    maxW = Math.max(maxW, b.maxX - b.minX + 2 * pad);
+    maxH = Math.max(maxH, b.maxY - b.minY + 2 * pad);
+  });
+  const scale = Math.min(sMax,
+    Math.max(sMin, Math.min(availW / Math.max(maxW, 1), availH / Math.max(maxH, 1))));
+  const winW = availW / scale;
+  const winH = availH / scale;
+
+  const pages = groups.map((g, i) => {
+    const b   = bbs[i];
+    const win = { minX: b.cx - winW / 2, minY: b.cy - winH / 2, w: winW, h: winH };
+    // Hüllbox des tatsächlichen Blattinhalts – die Blattübersicht setzt ihre
+    // Blattnummer dorthin, wo auch wirklich etwas steht.
+    const cbox = { minX: b.minX - pad, minY: b.minY - pad,
+                   w: (b.maxX - b.minX) + 2 * pad, h: (b.maxY - b.minY) + 2 * pad };
+    const own = new Set(g.map(o => o.el));
+    // Anschluss-Felder: liegen sichtbar im Ausschnitt, gehören aber zu einem
+    // anderen Blatt – sie werden blass als Kontext gezeichnet.
+    const ghosts = boxes.filter(o =>
+      !own.has(o.el) &&
+      o.b.maxX > win.minX && o.b.minX < win.minX + win.w &&
+      o.b.maxY > win.minY && o.b.minY < win.minY + win.h).map(o => o.el);
+    return { win, cbox, els: g.map(o => o.el), ghosts };
+  });
+
+  return { pages, bounds: full, scale, tiled: true };
 }
 
 let pdfBusy    = false;
 let pdfLastDone = 0;
 const PDF_COOLDOWN_MS = 800;   // Schutz gegen ungeduldiges Doppeltippen
 
-/** Klick-Handler des PDF-Buttons: genau ein Export je Klick. */
-async function exportPdf() {
-  // Läuft bereits ein Export – oder ist gerade eben einer fertig geworden –,
-  // laufen weitere Klicks bewusst ins Leere.
+/** Klick-Handler des PDF-Buttons: fragt zuerst das Layout ab. */
+function exportPdf() {
+  if (pdfBusy || Date.now() - pdfLastDone < PDF_COOLDOWN_MS) return;
+  openPdfSheet();
+}
+
+/** Auswahl des PDF-Layouts. Die zuletzt gewählte Variante ist vorausgewählt,
+ *  ein Tipp auf „PDF erstellen" genügt also im Alltag. */
+function openPdfSheet() {
+  closeSheet();
+  let chosen = pdfThemeName();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = 'PDF erstellen';
+  sheet.appendChild(hdr);
+
+  const lbl = document.createElement('div');
+  lbl.className = 'sheet-section-label';
+  lbl.textContent = 'Layout';
+  sheet.appendChild(lbl);
+
+  const list = document.createElement('div');
+  list.className = 'pdf-theme-list';
+  const cards = {};
+  Object.entries(PDF_THEMES).forEach(([key, t]) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'pdf-theme-card' + (key === chosen ? ' active' : '');
+
+    const prev = document.createElement('span');
+    prev.className = 'pdf-theme-prev pdf-theme-prev--' + key;
+    prev.setAttribute('aria-hidden', 'true');
+    prev.innerHTML = '<i class="ptp-band"></i><i class="ptp-l ptp-l1"></i>'
+                   + '<i class="ptp-l ptp-l2"></i><i class="ptp-l ptp-l3"></i>';
+
+    const name = document.createElement('span');
+    name.className = 'pdf-theme-name';
+    name.textContent = t.label;
+
+    const desc = document.createElement('span');
+    desc.className = 'pdf-theme-desc';
+    desc.textContent = t.desc;
+
+    card.appendChild(prev); card.appendChild(name); card.appendChild(desc);
+    card.addEventListener('click', () => {
+      chosen = key;
+      Object.entries(cards).forEach(([k, c]) => c.classList.toggle('active', k === key));
+    });
+    cards[key] = card;
+    list.appendChild(card);
+  });
+  sheet.appendChild(list);
+
+  const note = document.createElement('p');
+  note.className = 'pdf-sheet-note';
+  note.textContent = 'Passt der Plan nicht auf ein Blatt, wird er automatisch auf mehrere '
+                   + 'Blätter im gleichen Maßstab aufgeteilt – mit Blattübersicht, '
+                   + 'wiederholter Kopfzeile und Legende auf jeder Seite.';
+  sheet.appendChild(note);
+
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'sheet-del';
+  cancel.textContent = 'Abbrechen';
+  cancel.addEventListener('click', closeSheet);
+
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'sheet-ok';
+  ok.textContent = 'PDF erstellen';
+  ok.addEventListener('click', () => {
+    localStorage.setItem(PDF_THEME_KEY, chosen);
+    closeSheet();
+    runPdfExport(chosen);
+  });
+
+  actRow.appendChild(cancel); actRow.appendChild(ok);
+  sheet.appendChild(actRow);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/** Erzeugt genau eine PDF; weitere Klicks währenddessen laufen ins Leere. */
+async function runPdfExport(themeName) {
   if (pdfBusy || Date.now() - pdfLastDone < PDF_COOLDOWN_MS) return;
   pdfBusy = true;
   const btn      = document.getElementById('exportPdfBtn');
   const prevText = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'PDF wird erstellt …'; }
+  // Ausstehende Zeichenarbeit zuerst erledigen, damit die PDF garantiert den
+  // aktuellen Stand zeigt.
+  flushRender();
   // Ein Frame Pause, damit der Button-Zustand sichtbar wird, bevor der
   // (synchrone) Aufbau der PDF startet.
   await new Promise(r => requestAnimationFrame(() => r()));
   try {
-    await buildPdf();
+    await buildPdf(themeName);
   } catch (err) {
     console.error('PDF-Export fehlgeschlagen:', err);
     showToast('PDF konnte nicht erstellt werden.');
@@ -3986,12 +5143,18 @@ async function exportPdf() {
     if (btn) { btn.disabled = false; btn.textContent = prevText; }
   }
 }
-
-async function buildPdf() {
+async function buildPdf(themeName) {
   const { jsPDF } = window.jspdf;
+  const theme  = PDF_THEMES[themeName] || PDF_THEMES[pdfThemeName()];
   const layout = computeLayout();
   const margin = PDF_MARGIN;
-  const headerH = 19;
+
+  // Nutzbare Fläche einer PLANSEITE = Blatt − Rand − Kopf − Legende − Fuß.
+  // Muss EXAKT der später gezeichneten Fläche entsprechen (siehe `area` weiter
+  // unten), sonst rechnet die Seitenaufteilung mit mehr Platz, als beim
+  // Zeichnen zur Verfügung steht, und der Plan läuft in die Fußzeile.
+  const PLAN_GAP = 2;   // Luft zwischen Legende/Fußzeile und Zeichnung
+  const chromeH = PDF_HEADER_H + PDF_LEGEND_H + 2.5 + PLAN_GAP + PDF_FOOTER_H;
 
   // Hoch- oder Querformat? Es gewinnt die Ausrichtung, die bei lesbarem
   // Mindestmaßstab mit WENIGER Planseiten auskommt (bei Gleichstand die mit
@@ -4000,7 +5163,7 @@ async function buildPdf() {
     const w = o === 'landscape' ? 297 : 210;
     const h = o === 'landscape' ? 210 : 297;
     return { orient: o, pdfW: w, pdfH: h,
-             plan: pdfPlanPages(layout, w - 2 * margin, h - 2 * margin - headerH) };
+             plan: pdfPlanPages(layout, w - 2 * margin, h - 2 * margin - chromeH) };
   }).sort((a, b) => (a.plan.pages.length - b.plan.pages.length) || (b.plan.scale - a.plan.scale));
 
   const { orient, pdfW, pdfH, plan } = cand[0];
@@ -4009,94 +5172,127 @@ async function buildPdf() {
 
   const totalLen     = state.sections.reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
   const totalFlaeche = computeTotalFlaeche();
+  const allBays      = allBaysFlat();
   const dateStr      = new Date().toLocaleDateString('de-DE');
   const title        = state.project || 'Gerüst 2D-Ansicht';
 
-  /** Kopfzeile einer Planseite; liefert die Oberkante des Zeichenbereichs. */
-  const drawHeader = (sub, scaleTxt) => {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
-    doc.text(title, margin, margin + 5);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(70, 70, 70);
-    doc.text(`Gerüsttiefe: ${state.depth.toFixed(2).replace('.', ',')} m   |   Gesamtlänge: ${fmtQty(totalLen)} m   |   Gesamtfläche: ${fmtQty(totalFlaeche)} m²`,
-             margin, margin + 10.5);
-    doc.text(`Datum: ${dateStr}`, margin, margin + 15);
-    if (sub) {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(31, 78, 121);
-      doc.text(sub, pdfW - margin, margin + 5, { align: 'right' });
-    }
-    if (scaleTxt) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(110, 110, 110);
-      doc.text(scaleTxt, pdfW - margin, margin + 10.5, { align: 'right' });
-    }
-    doc.setTextColor(0, 0, 0);
-    return margin + 19;
+  // Gemeinsamer Zeichen-Kontext für Kopf-/Fußzeile und Legende.
+  const ctx = {
+    doc, theme, pdfW, pdfH, margin, title, dateStr,
+    subtitle: `${allBays.length} Feld${allBays.length === 1 ? '' : 'er'}   ·   `
+            + `Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`,
+    metaLine: `Gesamtlänge ${fmtQty(totalLen)} m   ·   Gerüstfläche ${fmtQty(totalFlaeche)} m²`
+            + `   ·   Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`
   };
 
-  const planTop    = margin + headerH;
-  const planAvailH = pdfH - planTop - margin;
+  const legend  = pdfLegendEntries();
+  const contentBottom = pdfH - margin - PDF_FOOTER_H;
 
+  // Seitenbuchhaltung: jede Seite bekommt am Ende ihre Fußzeile mit der
+  // endgültigen Gesamtzahl (die steht erst fest, wenn alles gezeichnet ist).
+  let firstPage = true;
+  /** Neue Seite beginnen (die erste Seite existiert bereits) + Kopfzeile.
+   *  @returns {number} Oberkante des freien Inhaltsbereichs (mm) */
+  const startPage = (opts = {}) => {
+    if (!firstPage) doc.addPage();
+    firstPage = false;
+    return pdfDrawHeader(ctx, opts);
+  };
+
+  // ── Planseiten ──────────────────────────────────────────────────────────
   if (!plan.pages.length) {
-    drawHeader('', '');
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(90, 90, 90);
-    doc.text('Keine Gerüstfelder erfasst.', margin, planTop + 10);
+    const top = startPage({ kicker: 'Gerüst-Aufmaß' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+    doc.setTextColor(...theme.inkSoft);
+    doc.text('Keine Gerüstfelder erfasst.', margin, top + 10);
   } else {
     const scaleTxt = 'Maßstab ca. 1:' + Math.round(10 / plan.scale);
 
-    // Bei mehrseitigem Plan zuerst eine Übersichtsseite mit Seiteneinteilung –
-    // sie zeigt, welcher Ausschnitt auf welcher Seite steht.
+    // Bei mehrseitigem Plan zuerst eine Übersichtsseite mit der Blatteinteilung –
+    // sie zeigt, welcher Ausschnitt auf welchem Blatt steht.
     if (plan.tiled) {
-      const oTop = drawHeader(`Übersicht · Plan auf ${plan.pages.length} Seiten`, '');
-      const oArea = { x: margin, y: oTop, w: availW, h: planAvailH };
-      const oScale = Math.min(oArea.w / plan.bounds.w, oArea.h / plan.bounds.h);
-      const oWin  = { minX: plan.bounds.minX, minY: plan.bounds.minY, w: plan.bounds.w, h: plan.bounds.h };
-      pdfDrawPlan(doc, oWin, oArea, oScale, layout.filter(e => e.type === 'bay'), layout, true);
+      const oTop  = startPage({ kicker: 'Blattübersicht',
+                                sheet: `Plan auf ${plan.pages.length} Blättern` });
+      const legendH = 6;   // Platz für die Erläuterungszeile unten
+      const oArea = { x: margin, y: oTop + 2, w: availW,
+                      h: contentBottom - oTop - 4 - legendH };
+      // Maßstab der Übersicht aus der Hülle ALLER Blattfenster ableiten (nicht
+      // nur aus dem Inhalt) – sonst ragen die Blattrahmen über den Rand.
+      const oWin = plan.pages.reduce((acc, pg) => ({
+        minX: Math.min(acc.minX, pg.win.minX), minY: Math.min(acc.minY, pg.win.minY),
+        maxX: Math.max(acc.maxX, pg.win.minX + pg.win.w),
+        maxY: Math.max(acc.maxY, pg.win.minY + pg.win.h)
+      }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+      oWin.w = oWin.maxX - oWin.minX; oWin.h = oWin.maxY - oWin.minY;
+      const oScale = Math.min(oArea.w / oWin.w, oArea.h / oWin.h);
+      pdfDrawPlan(doc, oWin, oArea, oScale, plan.pages.flatMap(p => p.els), layout, true, { theme });
 
       const ox = oArea.x + (oArea.w - oWin.w * oScale) / 2 - oWin.minX * oScale;
       const oy = oArea.y + (oArea.h - oWin.h * oScale) / 2 - oWin.minY * oScale;
-      doc.setDrawColor(0, 122, 255); doc.setLineWidth(0.45);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-      plan.pages.forEach((pg, i) => {
+      doc.setDrawColor(...theme.accent); doc.setLineWidth(0.3);
+      doc.setLineDashPattern([1.2, 1.0], 0);
+      plan.pages.forEach(pg => {
         doc.rect(ox + pg.win.minX * oScale, oy + pg.win.minY * oScale,
                  pg.win.w * oScale, pg.win.h * oScale, 'S');
-        doc.setFillColor(0, 122, 255);
-        doc.circle(ox + (pg.win.minX + 3) * oScale, oy + (pg.win.minY + 3) * oScale, 2.6, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.text(String(i + 1), ox + (pg.win.minX + 3) * oScale, oy + (pg.win.minY + 3) * oScale,
-                 { align: 'center', baseline: 'middle' });
       });
-      doc.setTextColor(0, 0, 0);
+      doc.setLineDashPattern([], 0);
+      // Blattnummer dorthin, wo auf dem Blatt tatsächlich Felder stehen –
+      // die Blattfenster überlappen sich, die Inhalte nicht.
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      plan.pages.forEach((pg, i) => {
+        const bx = ox + (pg.cbox.minX + pg.cbox.w / 2) * oScale;
+        const by = oy + (pg.cbox.minY + pg.cbox.h / 2) * oScale;
+        doc.setFillColor(...theme.accent);
+        doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.4);
+        doc.circle(bx, by, 3.1, 'FD');
+        doc.setTextColor(255, 255, 255);
+        doc.text('B' + (i + 1), bx, by, { align: 'center', baseline: 'middle' });
+      });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+      doc.setTextColor(...theme.inkSoft);
+      doc.text(`${plan.pages.length} Planblätter   ·   ${scaleTxt} auf allen Blättern   ·   `
+             + `gestrichelt: Blattgrenzen   ·   Anschlussfelder der Nachbarblätter sind auf den `
+             + `Planblättern blassgrau dargestellt`,
+               margin, contentBottom - 1.5);
     }
 
     plan.pages.forEach((pg, i) => {
-      if (plan.tiled || i > 0) doc.addPage();
-      const labels = pg.els.map(el => bayLabel(state.sections[el.si], el.bi));
-      const sub = plan.tiled
-        ? `Ausschnitt ${i + 1} von ${plan.pages.length} · ${labels[0]} – ${labels[labels.length - 1]}`
-        : '';
-      const top  = drawHeader(sub, scaleTxt);
-      const area = { x: margin, y: top, w: availW, h: pdfH - top - margin };
-      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout);
+      const sheet = plan.tiled
+        ? `Planblatt B${i + 1} von ${plan.pages.length}   ·   ${scaleTxt}`
+        : scaleTxt;
+      let top = startPage({ kicker: 'Grundriss', sheet });
+      top = pdfDrawLegend(ctx, top, legend);
+
+      const area = { x: margin, y: top, w: availW, h: contentBottom - top - PLAN_GAP };
+      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout, false,
+                  { theme, ghosts: pg.ghosts });
 
       // Mini-Orientierungskarte rechts unten
       if (plan.tiled) {
-        const lw = Math.min(52, availW * 0.28), lh = lw * 0.62;
-        pdfDrawLocator(doc, plan.bounds, pg.win,
-                       { x: pdfW - margin - lw, y: pdfH - margin - lh, w: lw, h: lh });
+        const lw = Math.min(58, availW * 0.30), lh = lw * 0.62;
+        const box = pdfPickLocatorBox(area, pg.win, plan.scale, pg.els, lw, lh);
+        pdfDrawLocator(doc, plan.bounds, pg.win, box, theme,
+                       `LAGE IM GESAMTPLAN · BLATT B${i + 1}`);
       }
     });
   }
 
-  // ── Aufmaß nach Gerüstseite ───────────────────────────────────────────
-  // Je Gebäudeseite (Oben/Rechts/Unten/Links) eine Tabelle, am Ende eine
-  // Gesamt-Tabelle über alle Seiten – Material-/Bestellgrundlage.
-  const allBays = state.sections.flatMap(s => s.bays);
-  const anyPos  = allBays.some(b => (b.positions || []).length);
+  // ── Aufmaß-Tabellen ─────────────────────────────────────────────────────
+  // Gegliedert nach ABSCHNITT, sobald welche angelegt sind – das ist die vom
+  // Nutzer selbst gewählte Struktur. Ohne Abschnitte bleibt es bei der
+  // automatischen Einteilung nach Gebäudeseite.
+  const anyPos = allBays.some(b => (b.positions || []).length);
 
   if (anyPos) {
-    const groups = fieldsBySide();
-    const sideBlocks = SIDE_ORDER
-      .map(side => ({ side, bays: groups[side] }))
-      .filter(b => b.bays.some(bay => (bay.positions || []).length));
+    const useAbschnitte = abschnitteList().length > 0;
+    const blocks = useAbschnitte
+      ? baysByAbschnitt().map(g => ({
+          title: g.abschnitt ? g.abschnitt.name : 'Ohne Abschnitt',
+          color: g.abschnitt ? pdfHex(g.abschnitt.color) : null,
+          bays: g.bays
+        }))
+      : SIDE_ORDER.map(side => ({ title: SIDE_LABEL[side], color: null, bays: fieldsBySide()[side] }));
+    const sideBlocks = blocks.filter(b => b.bays.some(bay => (bay.positions || []).length));
 
     const tableW = availW;
     const cols = [
@@ -4109,98 +5305,125 @@ async function buildPdf() {
     cols.forEach(c => { colX.push(acc); acc += c.w * tableW; });
     const colMid   = i => colX[i] + cols[i].w * tableW / 2;
     const colRight = i => colX[i] + cols[i].w * tableW - 2.5;
-    const rowH = 7, headH = 7, sideHdrH = 8.5;
+    const rowH = 7, headH = 7.5, blockHdrH = 9;
 
-    doc.addPage();
-    let py = margin + 4;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-    doc.text('Aufmaß nach Gerüstseite', margin, py);
-    py += 9;
+    let py = startPage({ kicker: 'Aufmaß',
+                         sheet: useAbschnitte ? 'nach Abschnitt' : 'nach Gerüstseite' }) + 3;
 
     const drawColHeader = () => {
-      doc.setFillColor(236, 239, 243);
+      doc.setFillColor(...theme.tableHead);
       doc.rect(margin, py, tableW, headH, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(70, 70, 70);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.2);
+      doc.setTextColor(...theme.tableHeadText);
       cols.forEach((c, i) => {
         const tx = c.align === 'right' ? colRight(i) : c.align === 'center' ? colMid(i) : colX[i] + (i === 0 ? 8 : 2);
-        doc.text(c.title, tx, py + headH - 2.2, { align: c.align });
+        doc.text(c.title, tx, py + headH - 2.5, { align: c.align });
       });
       py += headH;
     };
 
     const drawRow = (a, shade) => {
-      if (shade) { doc.setFillColor(247, 249, 251); doc.rect(margin, py, tableW, rowH, 'F'); }
-      const [r, g2, b2] = pdfHex(a.color);
-      doc.setFillColor(r, g2, b2); doc.setDrawColor(130, 130, 130); doc.setLineWidth(0.2);
-      doc.rect(colX[0] + 1.5, py + rowH / 2 - 2, 4, 4, 'FD');
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(25, 25, 25);
+      if (shade) { doc.setFillColor(...theme.zebra); doc.rect(margin, py, tableW, rowH, 'F'); }
+      const swatch = pdfCol(theme, pdfHex(a.color));
+      doc.setFillColor(...swatch); doc.setDrawColor(...swatch); doc.setLineWidth(0.2);
+      doc.rect(colX[0] + 1.8, py + rowH / 2 - 1.9, 3.8, 3.8, 'FD');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.2);
+      doc.setTextColor(...theme.ink);
       doc.text(a.label, colX[0] + 8, py + rowH - 2.7);
       doc.text(a.n + '×', colMid(1), py + rowH - 2.7, { align: 'center' });
-      doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+      doc.setFontSize(8.8); doc.setTextColor(...theme.inkSoft);
       doc.text(aggQtyText(a), colX[2] + 2, py + rowH - 2.7);
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 25, 25);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.2);
+      doc.setTextColor(...theme.ink);
       doc.text(a.meters ? fmtQty(a.meters) + ' m' : '–', colRight(3), py + rowH - 2.7, { align: 'right' });
       py += rowH;
-      doc.setDrawColor(224, 227, 231); doc.setLineWidth(0.1);
+      doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
       doc.line(margin, py, margin + tableW, py);
     };
 
-    const drawTable = (ttl, subtitle, aggList) => {
-      // Passt die ganze Tabelle nicht mehr auf die Seite, aber auf eine leere
-      // Seite → komplett umbrechen, damit Tabellen nicht zerrissen werden.
-      const tableH = sideHdrH + headH + aggList.length * rowH;
-      if (py + tableH > pdfH - margin && tableH <= pdfH - 2 * margin - 6) { doc.addPage(); py = margin + 6; }
-      else if (py + sideHdrH + headH + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; }
-      doc.setFillColor(31, 78, 121);
-      doc.rect(margin, py, tableW, sideHdrH, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
-      doc.text(ttl, margin + 3, py + sideHdrH - 2.7);
-      if (subtitle) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-        doc.text(subtitle, margin + tableW - 3, py + sideHdrH - 2.7, { align: 'right' });
+    const drawTable = (ttl, subtitle, aggList, accentColor) => {
+      // Tabellen möglichst nicht zerreißen: passt der ganze Block nicht mehr
+      // aufs Blatt, aber auf ein leeres, wird komplett umgebrochen. Sonst
+      // bleibt mindestens Blockkopf + Spaltenkopf + eine Zeile zusammen.
+      const tableH = blockHdrH + headH + aggList.length * rowH;
+      const room   = contentBottom - py;
+      if ((tableH > room && tableH <= contentBottom - margin - 6) ||
+          (blockHdrH + headH + rowH > room)) {
+        py = startPage({ kicker: 'Aufmaß', sheet: 'Fortsetzung' }) + 3;
       }
-      py += sideHdrH;
+      doc.setFillColor(...(accentColor ? pdfCol(theme, accentColor) : theme.groupFill));
+      doc.rect(margin, py, tableW, blockHdrH, 'F');
+      const headText = accentColor ? [255, 255, 255] : theme.groupText;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+      doc.setTextColor(...headText);
+      doc.text(ttl, margin + 3, py + blockHdrH - 2.9);
+      if (subtitle) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6);
+        doc.text(subtitle, margin + tableW - 3, py + blockHdrH - 2.9, { align: 'right' });
+      }
+      py += blockHdrH;
       drawColHeader();
       aggList.forEach((a, i) => {
-        if (py + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; drawColHeader(); }
+        if (py + rowH > contentBottom) {
+          py = startPage({ kicker: 'Aufmaß', sheet: 'Fortsetzung' }) + 3;
+          // Nach dem Umbruch Blockname wiederholen, damit die Zeilen
+          // zuordenbar bleiben.
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+          doc.setTextColor(...theme.inkSoft);
+          doc.text(ttl + ' (Fortsetzung)', margin, py + 3);
+          py += 6;
+          drawColHeader();
+        }
         drawRow(a, i % 2 === 1);
       });
-      py += 6;
+      py += 7;
     };
 
-    sideBlocks.forEach(({ side, bays }) => {
+    sideBlocks.forEach(({ title: ttl, color, bays }) => {
       const len  = bays.reduce((s, b) => s + b.len, 0);
       const flae = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
       const cnt  = bays.filter(bay => (bay.positions || []).length).length;
-      drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`, aggregatePositions(bays));
+      drawTable(ttl, `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`,
+                aggregatePositions(bays), color);
     });
 
     const totalLenAll = allBays.reduce((s, b) => s + b.len, 0);
-    drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`, aggregatePositions(allBays));
+    drawTable('Gesamt · alle Felder',
+              `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`,
+              aggregatePositions(allBays), null);
   }
 
   // ── Notizen ────────────────────────────────────────────────────────────
   const notedFields = [];
   state.sections.forEach(sec => {
     sec.bays.forEach((bay, bi) => {
-      if ((bay.note || '').trim()) notedFields.push({ label: bayLabel(sec, bi), note: bay.note.trim() });
+      if ((bay.note || '').trim()) {
+        notedFields.push({
+          label: bayLabel(sec, bi),
+          abschnitt: abschnittName(bay.abschnittId),
+          note: bay.note.trim()
+        });
+      }
     });
   });
   if (notedFields.length) {
-    doc.addPage();
-    let ny = margin + 4;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-    doc.text('Notizen', margin, ny);
-    ny += 9;
-    notedFields.forEach(({ label, note }) => {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25, 25, 25);
-      const lines = doc.splitTextToSize(note, availW - 22);
-      const blockH = 6 + lines.length * 5 + 3;
-      if (ny + blockH > pdfH - margin) { doc.addPage(); ny = margin + 6; }
-      doc.text(label + ':', margin, ny);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
-      doc.text(lines, margin + 22, ny);
-      ny += Math.max(6, lines.length * 5) + 3;
+    let ny = startPage({ kicker: 'Notizen', sheet: `${notedFields.length} Eintr${notedFields.length === 1 ? 'ag' : 'äge'}` }) + 4;
+    notedFields.forEach(({ label, abschnitt, note }) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.2);
+      const lines = doc.splitTextToSize(note, availW - 30);
+      const blockH = Math.max(7, lines.length * 4.6) + 4;
+      if (ny + blockH > contentBottom) ny = startPage({ kicker: 'Notizen', sheet: 'Fortsetzung' }) + 4;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      doc.setTextColor(...theme.accent);
+      doc.text(label, margin, ny);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.4);
+      doc.setTextColor(...theme.inkSoft);
+      doc.text(abschnitt, margin, ny + 4);
+      doc.setFontSize(9.2); doc.setTextColor(...theme.ink);
+      doc.text(lines, margin + 30, ny);
+      ny += blockH;
+      doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
+      doc.line(margin, ny - 2, pdfW - margin, ny - 2);
     });
   }
 
@@ -4210,23 +5433,19 @@ async function buildPdf() {
   if (linkedProjectId) {
     const photos = (await listProjectPhotos(linkedProjectId)).filter(p => p.include !== false);
     photos.forEach((photo, i) => {
-      doc.addPage();
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
-      doc.text(`Foto ${i + 1} von ${photos.length}`, margin, margin + 5);
-      const photoAvailH = pdfH - margin - (margin + 10) - margin;
+      const top = startPage({ kicker: 'Fotos', sheet: `Foto ${i + 1} von ${photos.length}` });
+      const photoAvailH = contentBottom - top - 2;
       const ratio = Math.min(availW / photo.w, photoAvailH / photo.h);
       const pw = photo.w * ratio, ph = photo.h * ratio;
-      const px = margin + (availW - pw) / 2;
-      doc.addImage(photo.dataUrl, 'JPEG', px, margin + 10, pw, ph, undefined, 'FAST');
+      doc.addImage(photo.dataUrl, 'JPEG', margin + (availW - pw) / 2, top + 1, pw, ph, undefined, 'FAST');
     });
   }
 
-  // Seitenzahlen
+  // Fußzeile auf JEDER Seite – erst jetzt bekannt, wie viele es geworden sind.
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
-    doc.text(`Seite ${i} von ${pageCount}`, pdfW - margin, pdfH - 4, { align: 'right' });
+    pdfDrawFooter(ctx, i, pageCount);
   }
 
   doc.save(`${title.replace(/[\\/:*?"<>|\s]+/g, '_')}_2d.pdf`);
@@ -4279,6 +5498,7 @@ function showDevicePicker(onPicked) {
 
 function init() {
   loadFromLinkedProject();
+  normalizeState();
   // Ausgangs-Snapshot SOFORT (synchron) setzen, nicht erst über das Debounce –
   // sonst würde eine schnelle erste Aktion (z. B. direkt nach dem Laden eine
   // Vorlage wählen) den Ausgangszustand überschreiben, bevor er als
@@ -4310,7 +5530,7 @@ function init() {
   });
   document.getElementById('scaffDepth').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
-    if (v > 0) { state.depth = v; renderSvg(); }
+    if (v > 0) { state.depth = v; requestRender(); }
   });
 
   document.getElementById('savePlanBtn').addEventListener('click', savePlan);
@@ -4342,11 +5562,20 @@ function init() {
   // wird, damit das native Undo dort (z. B. einen Tippfehler rückgängig
   // machen) weiter normal funktioniert.
   document.addEventListener('keydown', e => {
-    if (!(e.ctrlKey || e.metaKey)) return;
     const active = document.activeElement;
     const tag = active && active.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (active && active.isContentEditable)) return;
     const k = e.key.toLowerCase();
+
+    // „R" dreht das ausgewählte Feld um 90° (mit Umschalt gegen den
+    // Uhrzeigersinn) – am Rechner der schnellste Weg zum Drehen.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'r' && selectedSi !== null) {
+      e.preventDefault();
+      rotateSectionBy(selectedSi, e.shiftKey ? -90 : 90);
+      return;
+    }
+
+    if (!(e.ctrlKey || e.metaKey)) return;
     if (k === 'z' && !e.shiftKey) { e.preventDefault(); performUndo(); }
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); performRedo(); }
   });
@@ -4358,7 +5587,10 @@ function init() {
   // Tap empty canvas → deselect section (hides + buttons)
   const deselect = () => {
     if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → nicht abwählen
-    if (selectedSi !== null) { selectedSi = null; selectedBi = null; renderSvg(); }
+    // Klick, der nur die Nachwehe eines gerade losgelassenen Griffs ist,
+    // darf die eben getroffene Auswahl nicht wieder aufheben.
+    if (Date.now() - handleReleasedAt < CLICK_AFTER_HANDLE_MS) return;
+    if (selectedSi !== null) { selectedSi = null; selectedBi = null; requestRender(); }
   };
   svg.addEventListener('click',       deselect);
   svg.addEventListener('pointerdown', e => { if (e.target === svg || e.target.id === 'gridBg') deselect(); });
@@ -4395,7 +5627,7 @@ function init() {
     showDevicePicker(() => renderAll());
   }
 
-  renderAll();
+  renderAllNow();
 }
 
 document.addEventListener('DOMContentLoaded', init);
