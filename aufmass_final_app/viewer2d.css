@@ -1834,3 +1834,42 @@ body[data-mode="ipad"] .bottom-sheet.open {
   font-weight: 700;
   color: #7a8794;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Keine versehentliche Text-/Bereichsmarkierung
+   ══════════════════════════════════════════════════════════════════════════
+   Ein Ziehen über den Plan oder ein längeres Antippen löste bisher die
+   BROWSER-eigene Textauswahl aus: die halbe Seite färbte sich blau und iOS
+   blendete das „Kopieren"-Menü ein – von der App völlig unbemerkt und ohne
+   dass ein Feld reagierte. Die Auswahl wird deshalb überall unterbunden,
+   außer in echten Eingabefeldern.                                            */
+
+.viewer-header,
+#toolbar,
+#appLayout,
+#sidePanel,
+#viewerPanel,
+#planSvg,
+.bottom-sheet,
+.sheet-overlay {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Eingaben bleiben normal bedienbar (markieren, kopieren, einfügen). */
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Doppeltipp auf der Zeichenfläche zoomt – der Browser soll dabei weder
+   markieren noch sein eigenes Doppeltipp-Zoom starten. */
+#planSvg * {
+  -webkit-user-select: none;
+  user-select: none;
+}

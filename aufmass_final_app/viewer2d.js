@@ -408,7 +408,8 @@ function normalizeState() {
 }
 
 let drag           = null;
-let rafPending     = false;
+// (Das frühere `rafPending` ist entfallen – das Bündeln übernimmt jetzt
+//  zentral requestRender(); siehe „Render-Planer".)
 let addCtx         = null;   // null = FAB,  { x, y } = from junction
 let pendingDir     = 'S';
 let pendingLen     = null;
@@ -954,6 +955,8 @@ function zoomAt(clientX, clientY, factor) {
 const canvasPointers = new Map();   // pointerId → { x, y } (Client-Koordinaten)
 let canvasGesture     = null;       // { mode:'pan'|'pinch', ... } – siehe beginCanvasGesture()
 let canvasJustMoved   = false;      // unterdrückt den Tap/Klick direkt nach einem Pan/Pinch
+let handleReleasedAt  = 0;          // Zeitpunkt des letzten Griff-Loslassens (ms)
+const CLICK_AFTER_HANDLE_MS = 400;  // so lange gilt ein Klick als Nachwehe eines Griffs
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -1354,35 +1357,62 @@ function computeLayout() {
     if (sec.bays.length > 0) {
       els.push({ type: 'wallLine', x1: startX, y1: startY, x2: x, y2: y });
 
-      // Move handle at wall-line midpoint
+      // Move handle at wall-line midpoint. `secLen` wird mitgeführt, damit der
+      // Griff nie größer gezeichnet wird als das Feld selbst (siehe renderSvg).
       els.push({
         type: 'moveHandle',
         x: (startX + x) / 2,
         y: (startY + y) / 2,
+        secLen: Math.hypot(x - startX, y - startY),
         si
       });
 
-      // Rotation handle – sitzt jenseits des Sektionsendes in Laufrichtung
-      const rotOff = HANDLE_R * 3.4;
+      // Rotation handle – sitzt MITTIG an der offenen (wandabgewandten) Seite.
+      // Früher lag er in Laufrichtung hinter dem Sektionsende und damit genau
+      // dort, wo auch der blaue „+"-Knopf sitzt: beim Herauszoomen überlappten
+      // beide Trefferflächen, und ein Tipp auf „Drehen" hängte stattdessen ein
+      // neues Feld an. Quer zur Laufrichtung kann das nicht mehr passieren.
+      // Der Abstand kommt erst beim Zeichnen dazu (bildschirmbezogen).
       els.push({
         type: 'rotateHandle',
-        x: x + dir.dx * rotOff,
-        y: y + dir.dy * rotOff,
+        ax: (startX + x) / 2 + out.dx * depth,
+        ay: (startY + y) / 2 + out.dy * depth,
+        odx: out.dx, ody: out.dy,
         si, ang
       });
     }
   });
 
   // ── Corner pieces between connected sections ────────────────────────────
+  // Früher wurde jede Sektion gegen JEDE andere geprüft (quadratischer
+  // Aufwand: bei 150 Feldern über 22 000 Vergleiche je Neuzeichnung – und
+  // neu gezeichnet wird bei jeder Mausbewegung). Jetzt liegen die
+  // Sektionsanfänge in einem groben 2-px-Raster; geprüft werden nur noch die
+  // Nachbarzellen des jeweiligen Sektionsendes. Ergebnis identisch, Aufwand
+  // linear zur Feldanzahl.
+  const cellKey  = (x, y) => Math.round(x / 2) + ',' + Math.round(y / 2);
+  const startBuckets = new Map();
+  state.sections.forEach((s, i) => {
+    const k = cellKey(s.x0, s.y0);
+    const arr = startBuckets.get(k);
+    if (arr) arr.push(i); else startBuckets.set(k, [i]);
+  });
+
   state.sections.forEach((sec, si) => {
     const end = sectionEnd(sec);
     const out = outVec(secVec(sec), sec.flip);
-    state.sections.forEach((next, ni) => {
-      if (ni === si) return;
-      if (Math.abs(next.x0 - end.x) < 2 && Math.abs(next.y0 - end.y) < 2) {
-        const nOut  = outVec(secVec(next), next.flip);
-        const cross = out.dx * nOut.dy - out.dy * nOut.dx;
-        if (cross > 0) {
+    const bx  = Math.round(end.x / 2), by = Math.round(end.y / 2);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const arr = startBuckets.get((bx + ox) + ',' + (by + oy));
+        if (!arr) continue;
+        for (const ni of arr) {
+          if (ni === si) continue;
+          const next = state.sections[ni];
+          if (Math.abs(next.x0 - end.x) >= 2 || Math.abs(next.y0 - end.y) >= 2) continue;
+          const nOut  = outVec(secVec(next), next.flip);
+          const cross = out.dx * nOut.dy - out.dy * nOut.dx;
+          if (cross <= 0) continue;
           const c0 = { x: end.x, y: end.y };
           const c1 = { x: end.x + out.dx * depth, y: end.y + out.dy * depth };
           const c2 = { x: c1.x + nOut.dx * depth, y: c1.y + nOut.dy * depth };
@@ -1390,7 +1420,7 @@ function computeLayout() {
           els.push({ type: 'corner', pts: [c0, c1, c2, c3] });
         }
       }
-    });
+    }
   });
 
   return els;
@@ -1422,10 +1452,14 @@ function tintHex(hex, t) {
 // ── Main SVG render ────────────────────────────────────────────────────────
 
 function renderSvg() {
-  const g    = document.getElementById('planGroup');
-  const svg  = document.getElementById('planSvg');
-  const hint = document.getElementById('emptyHint');
-  g.innerHTML = '';
+  const gLive = document.getElementById('planGroup');
+  const svg   = document.getElementById('planSvg');
+  const hint  = document.getElementById('emptyHint');
+  // In ein Fragment zeichnen und erst am Ende EINMAL einhängen: der Browser
+  // muss dann nicht bei jedem der (bei großen Gerüsten mehreren tausend)
+  // Elemente Layout/Stil neu bewerten.
+  const g = document.createDocumentFragment();
+  gLive.textContent = '';
   invalidateViewCaches();
   updateAreaReadout();
   updateWarningsReadout();
@@ -1490,11 +1524,7 @@ function renderSvg() {
     });
     poly.addEventListener('click', ev => {
       ev.stopPropagation();
-      if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → kein Öffnen
-      selectedSi = el.si;
-      selectedBi = el.bi;
-      renderSvg();
-      openEditSheet(el.si, el.bi);
+      handleBayTap(el.si, el.bi);
     });
     g.appendChild(poly);
 
@@ -1666,21 +1696,34 @@ function renderSvg() {
 
   // 5b. Move handles (orange ✥)
   {
-    const MOVE_R = hs(HANDLE_R * 1.25);
+    // Der Verschiebe-Griff darf nie größer sein als das Feld, zu dem er
+    // gehört: Früher war er rein bildschirmbezogen bemessen, sodass er beim
+    // Herauszoomen (und bei vielen Feldern) über die Nachbarfelder wuchs. Ein
+    // Tipp landete dann auf einem fremden Griff – „falsches Feld reagiert" –
+    // und die Zeichnung verschwand unter orangen Punkten. Deshalb wird die
+    // Größe zusätzlich an Feldlänge und Gerüsttiefe gedeckelt.
     els.filter(e => e.type === 'moveHandle').forEach(el => {
       const isActive = drag && drag.type === 'move' && drag.si === el.si;
+      // Bewusst ohne Mindestgröße in Bildschirm-Pixeln: weit herausgezoomt ist
+      // das Feld selbst nur wenige Pixel groß – ein „mindestens gut treffbarer"
+      // Griff wäre dort zwangsläufig größer als das Feld und würde erneut die
+      // Nachbarn überdecken. Zum Verschieben zoomt man ohnehin heran.
+      const MOVE_R = Math.min(hs(HANDLE_R * 1.1), el.secLen * 0.20, depth * 0.40);
 
       const hit = svgEl('circle', {
-        cx: el.x, cy: el.y, r: MOVE_R * 1.7,
+        cx: el.x, cy: el.y, r: MOVE_R * 1.15,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:move', 'data-si': el.si
       });
       hit.addEventListener('pointerdown', onMoveHandleDown);
+      const hitTitle = svgEl('title', {});
+      hitTitle.textContent = 'Ziehen: Feld verschieben · Tippen: Feld bearbeiten';
+      hit.appendChild(hitTitle);
       g.appendChild(hit);
 
       g.appendChild(svgEl('circle', {
         cx: el.x, cy: el.y, r: MOVE_R,
         fill: isActive ? '#c85000' : '#ff8800',
-        stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
+        stroke: '#fff', 'stroke-width': Math.min(hs(2.5), MOVE_R * 0.22), 'pointer-events': 'none'
       }));
 
       const sym = svgEl('text', {
@@ -1700,30 +1743,38 @@ function renderSvg() {
     els.filter(e => e.type === 'rotateHandle' && e.si === selectedSi && !movingNow0).forEach(el => {
       const isActive = drag && drag.type === 'rotate' && drag.si === el.si;
 
-      // Verbindungslinie vom Sektionsende zum Drehgriff
+      // Abstand zur Feldkante bildschirmbezogen – der Griff bleibt bei jedem
+      // Zoom gleich weit weg und wächst nicht in die Nachbarfelder hinein.
+      const rotOff = hs(HANDLE_R * 2.2);
+      const hx = el.ax + el.odx * rotOff;
+      const hy = el.ay + el.ody * rotOff;
+
+      // Verbindungslinie von der Feldkante zum Drehgriff
       const sec = state.sections[el.si];
-      const end = sectionEnd(sec);
       g.appendChild(svgEl('line', {
-        x1: end.x, y1: end.y, x2: el.x, y2: el.y,
+        x1: el.ax, y1: el.ay, x2: hx, y2: hy,
         stroke: '#8e44ec', 'stroke-width': hs(2), 'stroke-dasharray': `${hs(4)} ${hs(4)}`,
         'pointer-events': 'none'
       }));
 
       const hit = svgEl('circle', {
-        cx: el.x, cy: el.y, r: ROT_R * 2.8,
+        cx: hx, cy: hy, r: ROT_R * 1.9,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:grab', 'data-si': el.si
       });
       hit.addEventListener('pointerdown', onRotateHandleDown);
+      const hitTitle = svgEl('title', {});
+      hitTitle.textContent = 'Tippen: 90° drehen · Ziehen: frei drehen';
+      hit.appendChild(hitTitle);
       g.appendChild(hit);
 
       g.appendChild(svgEl('circle', {
-        cx: el.x, cy: el.y, r: ROT_R,
+        cx: hx, cy: hy, r: ROT_R,
         fill: isActive ? '#6c2bd9' : '#8e44ec',
         stroke: '#fff', 'stroke-width': hs(2.5), 'pointer-events': 'none'
       }));
 
       const sym = svgEl('text', {
-        x: el.x, y: el.y,
+        x: hx, y: hy,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
         'font-size': ROT_R * 1.15,
         'font-family': 'system-ui, sans-serif',
@@ -1735,7 +1786,7 @@ function renderSvg() {
       // Winkel-Tooltip während des Drehens
       if (isActive) {
         const deg = Math.round(secAngle(sec));
-        const bx = el.x, by = el.y - ROT_R * 2.6;
+        const bx = hx, by = hy - ROT_R * 2.6;
         g.appendChild(svgEl('rect', { x: bx - hs(30), y: by - hs(14), width: hs(60), height: hs(28), rx: hs(7), fill: '#6c2bd9', 'pointer-events': 'none' }));
         const bt = svgEl('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': hs(14), 'font-family': 'system-ui, sans-serif', fill: '#fff', 'font-weight': '700', 'pointer-events': 'none' });
         bt.textContent = deg + '°';
@@ -1753,7 +1804,10 @@ function renderSvg() {
     const dir = secVec(selSec);
     const out = outVec(dir, selSec.flip);
     const end = sectionEnd(selSec);
-    const EXT_R = hs(HANDLE_R * 1.05);
+    // Auch die „+"-Knöpfe bleiben an die Feldgröße gekoppelt, damit sie beim
+    // Herauszoomen nicht über die Nachbarfelder wachsen.
+    const selLenPx = Math.hypot(end.x - selSec.x0, end.y - selSec.y0) || depth;
+    const EXT_R = Math.min(hs(HANDLE_R * 1.05), selLenPx * 0.26);
     const axOff = EXT_R * 1.7;
     const addPts = [
       { x: selSec.x0 + out.dx * depth / 2 - dir.dx * axOff,
@@ -1764,8 +1818,10 @@ function renderSvg() {
     addPts.forEach(pt => {
       // Klickfläche: rgba mit minimaler Deckkraft fängt Pointer-Events zuverlässig
       // (transparent-fill ist auf manchen Touch-Geräten unzuverlässig).
+      // Trefferfläche eng am sichtbaren Knopf halten: eine deutlich größere
+      // hätte (wie früher) benachbarte Bedienelemente überlagert.
       const hit = svgEl('circle', {
-        cx: pt.x, cy: pt.y, r: EXT_R * 2.4,
+        cx: pt.x, cy: pt.y, r: EXT_R * 1.45,
         fill: 'rgba(0,0,0,0.001)', style: 'cursor:pointer', 'data-side': pt.side
       });
       const fireAdd = ev => {
@@ -1806,6 +1862,8 @@ function renderSvg() {
     camera.cy - camVp.h / camera.scale / 2,
     camVp.w / camera.scale, camVp.h / camera.scale,
     hs(12));
+
+  gLive.appendChild(g);   // fertiges Fragment in einem Rutsch einhängen
 }
 
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
@@ -1886,9 +1944,56 @@ function quickExtend(si, side) {
   renderAll();
 }
 
+/* ── Tippen auf ein Feld ─────────────────────────────────────────────────────
+   Zentrale Stelle für „Feld angetippt". Sie wird von der Feldfläche UND von
+   einem folgenlosen Tipp auf den Verschiebe-Griff aufgerufen.
+
+   Hintergrund: Der orange Verschiebe-Griff sitzt in der Mitte der Wandkante
+   und hatte eine unsichtbare Trefferfläche von 38 px Radius – bei der geringen
+   Gerüsttiefe (≈ 0,73 m) überdeckte sie praktisch das ganze Feld. Ein Tipp
+   aufs Feld landete deshalb meist auf dem Griff, startete ein Verschieben um
+   0 px und endete in `onSvgPointerUp` mit einem vollständigen Neuaufbau –
+   sichtbar passierte NICHTS. Genau das war das „Feld reagiert nicht / erst
+   nach vielen Versuchen"-Verhalten. Jetzt öffnet auch ein Tipp auf den Griff
+   direkt das Feld. */
+function handleBayTap(si, bi) {
+  // Tipp unmittelbar nach einem Verschieben/Zoomen der Ansicht ignorieren.
+  if (canvasJustMoved) { canvasJustMoved = false; return; }
+  const sec = state.sections[si];
+  const bay = sec && sec.bays[bi];
+  if (!bay) return;
+
+  // In der Mehrfachauswahl hakt ein Tipp das Feld an bzw. ab, statt das
+  // Bearbeiten-Sheet zu öffnen – so lässt sich direkt im Plan auswählen.
+  if (bulkMode) {
+    if (bulkSelected.has(bay.id)) bulkSelected.delete(bay.id);
+    else bulkSelected.add(bay.id);
+    selectedSi = si; selectedBi = bi;
+    requestRender({ svg: true, sidebar: true, bulk: true });
+    return;
+  }
+
+  selectedSi = si;
+  selectedBi = bi;
+  requestRender();            // Auswahl + Dreh-/Anfüge-Griffe sofort anzeigen
+  openEditSheet(si, bi);
+}
+
+/** Dreht die Sektion in 90°-Schritten und rastet sauber auf ein Vielfaches
+ *  von 90° ein – die Aktion hinter einem Tipp auf den Drehgriff. */
+function rotateSectionBy(si, step) {
+  const sec = state.sections[si];
+  if (!sec) return;
+  const a = (Math.round(normDeg(secAngle(sec) + step) / 90) * 90) % 360;
+  setSectionAngle(sec, a);
+  syncRotSheet(sec);
+  requestRender({ svg: true, sidebar: true });
+}
+
 function onRotateHandleDown(e) {
   e.preventDefault();
   e.stopPropagation();
+  canvasJustMoved = false;   // Griff-Bedienung ist nie die Nachwehe eines Wischens
   const si  = parseInt(e.currentTarget.dataset.si);
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
@@ -1897,6 +2002,7 @@ function onRotateHandleDown(e) {
   drag = {
     type: 'rotate', si,
     startAngle: secAngle(state.sections[si]),
+    startClientX: e.clientX, startClientY: e.clientY,
     moved: false
   };
 }
@@ -1904,6 +2010,7 @@ function onRotateHandleDown(e) {
 function onMoveHandleDown(e) {
   e.preventDefault();
   e.stopPropagation();
+  canvasJustMoved = false;   // Griff-Bedienung ist nie die Nachwehe eines Wischens
   const si  = parseInt(e.currentTarget.dataset.si);
   const svg = document.getElementById('planSvg');
   svg.setPointerCapture(e.pointerId);
@@ -1929,14 +2036,22 @@ function onSvgPointerMove(e) {
   const pt = screenToSvg(e.clientX, e.clientY);
 
   if (drag.type === 'rotate') {
+    // Erst ab einer echten Zieh-Bewegung frei drehen. Ohne diese Schwelle
+    // würde schon das minimale Wackeln beim Antippen als Drehung gelten – der
+    // Tipp-Kurzbefehl „90° drehen" (siehe onSvgPointerUp) käme nie zustande.
+    if (!drag.moved) {
+      const dxC = e.clientX - drag.startClientX;
+      const dyC = e.clientY - drag.startClientY;
+      if (Math.hypot(dxC, dyC) < 6) return;
+      drag.moved = true;
+    }
     const sec = state.sections[drag.si];
     // Winkel vom Sektionsanfang zum Finger – Sektion zeigt zum Finger
     let deg = Math.atan2(pt.y - sec.y0, pt.x - sec.x0) * 180 / Math.PI;
     if (snapEnabled) deg = snapAngle(deg);   // bei Magnet aus → frei drehbar
     setSectionAngle(sec, deg);
-    drag.moved = true;
     syncRotSheet(sec);
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    requestRender();
     return;
   }
 
@@ -1965,7 +2080,7 @@ function onSvgPointerMove(e) {
     // Feld folgt frei dem Finger; das endgültige Einrasten passiert erst beim Loslassen.
     sec.x0 = rawX; sec.y0 = rawY;
 
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    requestRender();
     return;
   }
 
@@ -1975,20 +2090,37 @@ function onSvgPointerMove(e) {
   const newLen = snapLen(drag.startLen + dPx / PX_PER_M);
   if (newLen !== state.sections[drag.si].bays[drag.bi].len) {
     state.sections[drag.si].bays[drag.bi].len = newLen;
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { renderSvg(); rafPending = false; }); }
+    requestRender();
   }
 }
 
 function onSvgPointerUp(e) {
   if (!drag) return;
   const d = drag; drag = null;
+  // Nach dem Loslassen eines Griffs schickt der Browser noch ein Klick-Event
+  // an das SVG. Ohne diese Sperre würde der „leere Fläche angetippt →
+  // Auswahl aufheben"-Handler die soeben getroffene Auswahl sofort wieder
+  // verwerfen. Zeitstempel statt Flag, damit nichts hängen bleiben kann,
+  // falls der Klick einmal ausbleibt.
+  handleReleasedAt = Date.now();
   if (d.type === 'rotate') {
-    renderAll();
+    // Kurzer Tipp auf den Drehgriff (ohne Ziehen) = eine Vierteldrehung.
+    // Damit ist „Feld drehen" eine einzige, sofort wirksame Berührung; das
+    // freie Drehen bleibt über das Ziehen desselben Griffs erhalten.
+    if (!d.moved) rotateSectionBy(d.si, 90);
+    else renderAll();
     return;
   }
   if (d.type === 'move') {
     const sec = state.sections[d.si];
-    if (d.moved && d.snap) {
+    if (!d.moved) {
+      // Nichts verschoben → als Tipp auf das Feld behandeln (siehe
+      // handleBayTap): Feld auswählen bzw. Bearbeiten öffnen.
+      movePreview = null;
+      handleBayTap(d.si, 0);
+      return;
+    }
+    if (d.snap) {
       // pixelgenau an der hervorgehobenen Andockstelle einrasten
       sec.x0 = d.snap.x0; sec.y0 = d.snap.y0;
     }
@@ -2031,7 +2163,7 @@ function scheduleCanvasRender() {
 /** Vollständiger Neuaufbau kurz nach Ende einer Zoom-/Pan-Interaktion. */
 function scheduleCameraSettle(delay = 140) {
   clearTimeout(camSettleTimer);
-  camSettleTimer = setTimeout(() => { renderSvg(); updateZoomResetBtn(); }, delay);
+  camSettleTimer = setTimeout(() => { requestRender(); updateZoomResetBtn(); }, delay);
 }
 
 /** Setzt canvasGesture anhand der aktuell aktiven Finger neu auf – wird bei
@@ -2072,6 +2204,11 @@ function beginCanvasGesture() {
 
 function onCanvasPointerDown(e) {
   if (drag) return;                                    // Handle-Drag hat Vorrang (stoppt Propagation ohnehin selbst)
+  // Neue Berührung → die Klick-Sperre der VORIGEN Geste verfällt. Ohne dieses
+  // Zurücksetzen blieb `canvasJustMoved` nach einem Wischen stehen (wenn der
+  // Browser danach keinen Klick nachreichte) und verschluckte dann den
+  // nächsten Tipp auf ein Feld – der erste Antippversuch blieb wirkungslos.
+  if (!canvasPointers.size) canvasJustMoved = false;
   if (canvasPointers.size >= 2 && !canvasPointers.has(e.pointerId)) return;  // max. 2 Finger verfolgen
   // Absichtlich KEIN setPointerCapture hier: das würde den Klick-Kompatibilitäts-
   // event bereits bei einem einfachen Tap auf das svg umleiten (statt auf das
@@ -2158,7 +2295,7 @@ function onCanvasDblClick(e) {
 function resetCanvasView() {
   autoFit = true;
   fitCameraToContent();
-  renderSvg();
+  requestRender();
   updateZoomResetBtn();
 }
 
@@ -2371,7 +2508,7 @@ function openEditSheet(si, bi) {
         b.classList.toggle('active', b.dataset.dir === dk)
       );
       syncRotSheet(sec);
-      renderSvg();
+      requestRender();
     });
     dirRow.appendChild(btn);
   });
@@ -2403,12 +2540,12 @@ function openEditSheet(si, bi) {
 
   // Feldlänge ist Standardwert der Meter-Positionen → bei Änderung deren
   // Platzhalter/Anzeige mitführen.
-  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); buildKonsole(); renderSvg(); };
+  const syncInp = () => { inp.value = bay.len.toFixed(2); buildPosDetails(); buildKonsole(); requestRender(); };
   minusBtn.addEventListener('click', () => { bay.len = Math.max(0.25, +(bay.len - 0.25).toFixed(2)); syncInp(); });
   plusBtn.addEventListener('click',  () => { bay.len = +(bay.len + 0.25).toFixed(2); syncInp(); });
   inp.addEventListener('change', () => {
     const v = parseFloat(inp.value);
-    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); buildKonsole(); renderSvg(); }
+    if (v >= 0.25) { bay.len = +v.toFixed(2); buildPosDetails(); buildKonsole(); requestRender(); }
   });
 
   adjRow.appendChild(minusBtn); adjRow.appendChild(inp); adjRow.appendChild(plusBtn);
@@ -2438,7 +2575,7 @@ function openEditSheet(si, bi) {
     if (snapEnabled) deg = snapAngle(deg);
     setSectionAngle(sec, deg);
     syncRotSheet(sec);
-    renderSvg();
+    requestRender();
   };
   rotSlider.addEventListener('input', () => applyRot(parseFloat(rotSlider.value)));
   rotMinus.addEventListener('click', () => applyRot(secAngle(sec) - 15));
@@ -2456,7 +2593,7 @@ function openEditSheet(si, bi) {
     a = (Math.round(a / 90) * 90) % 360;   // sauber auf 90°-Schritt einrasten
     setSectionAngle(sec, a);
     syncRotSheet(sec);
-    renderSvg();
+    requestRender();
   };
   [90, 180, 270].forEach(step => {
     const b = document.createElement('button');
@@ -2535,7 +2672,7 @@ function openEditSheet(si, bi) {
       const v = parseFloat(hInp.value);
       bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
       buildPosDetails();   // Netz-m²-Vorschlag (Länge × kleinere Höhe) live nachführen
-      renderSvg();
+      requestRender();
     });
     field.appendChild(lab); field.appendChild(hInp);
     return { field, input: hInp };
@@ -2551,7 +2688,7 @@ function openEditSheet(si, bi) {
     bay.hL = src; bay.hR = src;
     hLeft.input.value = src.toFixed(2); hRight.input.value = src.toFixed(2);
     buildPosDetails();
-    renderSvg();
+    requestRender();
   });
   hRow.appendChild(hLeft.field); hRow.appendChild(hEqBtn); hRow.appendChild(hRight.field);
 
@@ -2566,7 +2703,7 @@ function openEditSheet(si, bi) {
     if (i >= 0) bay.positions.splice(i, 1);
     else bay.positions.push({ id: ++_bId, cat: key, qty: null, unit: defaultUnit(key) });
     buildPosDetails();
-    renderSvg();
+    requestRender();
   };
 
   // Toggle-Chips für einfache Positionen (alles außer Konsole)
@@ -2629,7 +2766,7 @@ function openEditSheet(si, bi) {
       const v = parseFloat(qtyInp.value);
       pos.qty = (qtyInp.value === '' || isNaN(v)) ? null : v;
       updateCalc();
-      renderSvg();
+      requestRender();
     });
 
     const unitRow = document.createElement('div');
@@ -2644,7 +2781,7 @@ function openEditSheet(si, bi) {
         unitRow.querySelectorAll('.punit-btn').forEach(x => x.classList.toggle('active', x === b));
         syncPlaceholder();
         updateCalc();
-        renderSvg();
+        requestRender();
       });
       unitRow.appendChild(b);
     });
@@ -2687,7 +2824,7 @@ function openEditSheet(si, bi) {
     rm.addEventListener('click', () => {
       const i = bay.positions.indexOf(pos);
       if (i >= 0) bay.positions.splice(i, 1);
-      buildKonsole(); renderSvg();
+      buildKonsole(); requestRender();
     });
     const calc = document.createElement('span');
     calc.className = 'pos-detail-calc konsole-row-calc';
@@ -2708,7 +2845,7 @@ function openEditSheet(si, bi) {
       b.addEventListener('click', () => {
         pos.typ = typ;
         typeRow.querySelectorAll('.ktype-btn').forEach(x => x.classList.toggle('active', x.textContent === typ));
-        renderSvg();
+        requestRender();
       });
       typeRow.appendChild(b);
     });
@@ -2732,7 +2869,7 @@ function openEditSheet(si, bi) {
         pos.lagen = val; freeInp.value = '';
         lagenRow.querySelectorAll('.klagen-btn').forEach(x => x.classList.toggle('active', x === b));
         updateCalc();
-        renderSvg();
+        requestRender();
       });
       lagenRow.appendChild(b);
     });
@@ -2746,7 +2883,7 @@ function openEditSheet(si, bi) {
         lagenRow.querySelectorAll('.klagen-btn').forEach(x => x.classList.remove('active'));
       }
       updateCalc();
-      renderSvg();
+      requestRender();
     });
     lagenRow.appendChild(freeInp);
 
@@ -2762,7 +2899,7 @@ function openEditSheet(si, bi) {
       const v = parseFloat(meterInp.value);
       pos.meterValue = (meterInp.value === '' || isNaN(v)) ? null : v;
       updateCalc();
-      renderSvg();
+      requestRender();
     });
     const meterUnit = document.createElement('span');
     meterUnit.className = 'kmeter-unit';
@@ -2784,7 +2921,7 @@ function openEditSheet(si, bi) {
         billingRow.querySelectorAll('.kbill-btn').forEach(x => x.classList.toggle('active', x === b));
         syncBillingRows();
         updateCalc();
-        renderSvg();
+        requestRender();
       });
       billingRow.appendChild(b);
     });
@@ -2808,7 +2945,7 @@ function openEditSheet(si, bi) {
   addKonsBtn.textContent = '+ Konsole';
   addKonsBtn.addEventListener('click', () => {
     bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1', billing: 'lagen' });
-    buildKonsole(); renderSvg();
+    buildKonsole(); requestRender();
   });
 
   // ── Notiz ────────────────────────────────────────────────────────────────
@@ -2821,7 +2958,7 @@ function openEditSheet(si, bi) {
   noteInp.placeholder = 'z. B. Fenster freihalten, nur teilweise eingerüstet …';
   noteInp.rows = 2;
   noteInp.value = bay.note || '';
-  noteInp.addEventListener('input', () => { bay.note = noteInp.value; renderSvg(); });
+  noteInp.addEventListener('input', () => { bay.note = noteInp.value; requestRender(); });
 
   // ── Favoriten / Vorlagen ─────────────────────────────────────────────────
   const favLabel = document.createElement('div');
@@ -2852,7 +2989,7 @@ function openEditSheet(si, bi) {
         applyFavoriteToBay(fav, bay);
         hLeft.input.value = bay.hL == null ? '' : bay.hL.toFixed(2);
         hRight.input.value = bay.hR == null ? '' : bay.hR.toFixed(2);
-        buildPosDetails(); buildKonsole(); renderSvg();
+        buildPosDetails(); buildKonsole(); requestRender();
         showToast('Vorlage „' + fav.name + '" angewendet');
       });
       const rm = document.createElement('button');
@@ -2920,7 +3057,7 @@ function openEditSheet(si, bi) {
   pasteBtn.disabled = !copiedBayData;
   pasteBtn.addEventListener('click', () => {
     pasteBayPositions(bay);
-    renderSvg();
+    requestRender();
     closeSheet();
     openEditSheet(si, bi);   // Sheet mit den neuen Werten neu aufbauen
   });
@@ -3713,10 +3850,16 @@ function renderBulkBar() {
 function renderSections() {
   const container = document.getElementById('sectionsContainer');
   const hint      = document.getElementById('noSectionsHint');
-  container.innerHTML = '';
 
-  if (!state.sections.length) { hint.classList.remove('hidden'); return; }
+  if (!state.sections.length) {
+    container.textContent = '';
+    hint.classList.remove('hidden');
+    return;
+  }
   hint.classList.add('hidden');
+  // Wie beim Plan: erst im Fragment aufbauen, dann einmal einhängen. Die
+  // Feldliste ist mit ~30 Elementen je Feld der teuerste Teil des Neuaufbaus.
+  const frag = document.createDocumentFragment();
 
   state.sections.forEach((sec, si) => {
     const card = document.createElement('div');
@@ -3728,7 +3871,7 @@ function renderSections() {
 
     const nameIn = document.createElement('input');
     nameIn.type = 'text'; nameIn.className = 'sec-name'; nameIn.value = sec.name;
-    nameIn.addEventListener('input', e => { sec.name = e.target.value; renderSvg(); });
+    nameIn.addEventListener('input', e => { sec.name = e.target.value; requestRender(); });
 
     const rmSec = document.createElement('button');
     rmSec.className = 'remove-btn small'; rmSec.textContent = '×';
@@ -3817,7 +3960,7 @@ function renderSections() {
       const inp = document.createElement('input');
       inp.type = 'number'; inp.className = 'bay-inp';
       inp.value = bay.len.toFixed(2); inp.min = '0.01'; inp.step = '0.01';
-      inp.addEventListener('input', e => { bay.len = +parseFloat(e.target.value || 0).toFixed(2); renderSvg(); });
+      inp.addEventListener('input', e => { bay.len = +parseFloat(e.target.value || 0).toFixed(2); requestRender(); });
 
       const rmBay = document.createElement('button');
       rmBay.className = 'remove-btn small'; rmBay.textContent = '×';
@@ -3843,7 +3986,7 @@ function renderSections() {
         hInp.addEventListener('input', () => {
           const v = parseFloat(hInp.value);
           bay[key] = (isNaN(v) || v < 0) ? null : +v.toFixed(2);
-          renderSvg();
+          requestRender();
         });
         field.appendChild(lab); field.appendChild(hInp);
         return { field, input: hInp };
@@ -3858,7 +4001,7 @@ function renderSections() {
         if (src == null) return;
         bay.hL = src; bay.hR = src;
         hLeftSide.input.value = src.toFixed(2); hRightSide.input.value = src.toFixed(2);
-        renderSvg();
+        requestRender();
       });
       heightRow.appendChild(hLeftSide.field);
       heightRow.appendChild(hEqBtnSide);
@@ -3872,7 +4015,7 @@ function renderSections() {
       FIELD_PRESETS.forEach(l => {
         const qb = document.createElement('button');
         qb.className = 'quick-btn'; qb.textContent = l.toFixed(2);
-        qb.addEventListener('click', () => { bay.len = l; inp.value = l.toFixed(2); renderSvg(); });
+        qb.addEventListener('click', () => { bay.len = l; inp.value = l.toFixed(2); requestRender(); });
         qd.appendChild(qb);
       });
       bottom.appendChild(qd);
@@ -3897,7 +4040,7 @@ function renderSections() {
       const editBtn = document.createElement('button');
       editBtn.type = 'button'; editBtn.className = 'bay-pos-edit';
       editBtn.textContent = '+ Positionen';
-      editBtn.addEventListener('click', () => { selectedSi = si; selectedBi = bi; renderSvg(); openEditSheet(si, bi); });
+      editBtn.addEventListener('click', () => { selectedSi = si; selectedBi = bi; requestRender(); openEditSheet(si, bi); });
       posLine.appendChild(editBtn);
 
       const copyBtn = document.createElement('button');
@@ -3936,8 +4079,10 @@ function renderSections() {
 
     card.appendChild(hdr); card.appendChild(dirRow); card.appendChild(totEl);
     card.appendChild(baysDiv); card.appendChild(addBayBtn);
-    container.appendChild(card);
+    frag.appendChild(card);
   });
+
+  container.replaceChildren(frag);
 }
 
 /* ── Render-Planer ───────────────────────────────────────────────────────────
@@ -4860,7 +5005,7 @@ function init() {
   });
   document.getElementById('scaffDepth').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
-    if (v > 0) { state.depth = v; renderSvg(); }
+    if (v > 0) { state.depth = v; requestRender(); }
   });
 
   document.getElementById('savePlanBtn').addEventListener('click', savePlan);
@@ -4892,11 +5037,20 @@ function init() {
   // wird, damit das native Undo dort (z. B. einen Tippfehler rückgängig
   // machen) weiter normal funktioniert.
   document.addEventListener('keydown', e => {
-    if (!(e.ctrlKey || e.metaKey)) return;
     const active = document.activeElement;
     const tag = active && active.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (active && active.isContentEditable)) return;
     const k = e.key.toLowerCase();
+
+    // „R" dreht das ausgewählte Feld um 90° (mit Umschalt gegen den
+    // Uhrzeigersinn) – am Rechner der schnellste Weg zum Drehen.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'r' && selectedSi !== null) {
+      e.preventDefault();
+      rotateSectionBy(selectedSi, e.shiftKey ? -90 : 90);
+      return;
+    }
+
+    if (!(e.ctrlKey || e.metaKey)) return;
     if (k === 'z' && !e.shiftKey) { e.preventDefault(); performUndo(); }
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); performRedo(); }
   });
@@ -4908,7 +5062,10 @@ function init() {
   // Tap empty canvas → deselect section (hides + buttons)
   const deselect = () => {
     if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → nicht abwählen
-    if (selectedSi !== null) { selectedSi = null; selectedBi = null; renderSvg(); }
+    // Klick, der nur die Nachwehe eines gerade losgelassenen Griffs ist,
+    // darf die eben getroffene Auswahl nicht wieder aufheben.
+    if (Date.now() - handleReleasedAt < CLICK_AFTER_HANDLE_MS) return;
+    if (selectedSi !== null) { selectedSi = null; selectedBi = null; requestRender(); }
   };
   svg.addEventListener('click',       deselect);
   svg.addEventListener('pointerdown', e => { if (e.target === svg || e.target.id === 'gridBg') deselect(); });
