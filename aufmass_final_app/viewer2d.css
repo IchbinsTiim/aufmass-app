@@ -1873,3 +1873,87 @@ select,
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* ── PDF-Export: Layout-Auswahl ─────────────────────────────────────────── */
+.pdf-theme-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.6rem;
+}
+.pdf-theme-card {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 0.3rem;
+  padding: 0.6rem;
+  border: 2px solid #d7dde3;
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.pdf-theme-card.active {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.14);
+}
+.pdf-theme-name {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #16222e;
+}
+.pdf-theme-desc {
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: #7b8794;
+}
+
+/* Miniatur-Vorschau der drei Varianten */
+.pdf-theme-prev {
+  position: relative;
+  display: block;
+  height: 3.4rem;
+  border: 1px solid #e2e6ea;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+.pdf-theme-prev .ptp-band {
+  position: absolute;
+  top: 0.32rem;
+  left: 0.32rem;
+  right: 0.32rem;
+  height: 0.5rem;
+  border-radius: 2px;
+}
+.pdf-theme-prev .ptp-l {
+  position: absolute;
+  left: 0.32rem;
+  height: 0.34rem;
+  border-radius: 2px;
+  background: #dfe4e9;
+}
+.pdf-theme-prev .ptp-l1 { top: 1.15rem; right: 0.32rem; }
+.pdf-theme-prev .ptp-l2 { top: 1.75rem; right: 1.4rem; }
+.pdf-theme-prev .ptp-l3 { top: 2.35rem; right: 0.9rem; }
+
+.pdf-theme-prev--technisch .ptp-band {
+  background: linear-gradient(to right, #1a4a7a 0 3px, transparent 3px);
+  border-bottom: 1px solid #bac4ce;
+  border-radius: 0;
+}
+.pdf-theme-prev--kontrast .ptp-band { background: #0b3d69; }
+.pdf-theme-prev--kontrast .ptp-l1   { background: #cbdcec; }
+.pdf-theme-prev--monochrom .ptp-band {
+  background: linear-gradient(to right, #282828 0 3px, transparent 3px);
+  border-bottom: 1px solid #afafaf;
+  border-radius: 0;
+}
+.pdf-theme-prev--monochrom .ptp-l { background: #dcdcdc; }
+
+.pdf-sheet-note {
+  margin: 0.7rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #7b8794;
+}

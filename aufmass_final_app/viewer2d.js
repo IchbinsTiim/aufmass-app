@@ -4354,9 +4354,14 @@ function aggQtyText(a) {
        unlesbar klein gequetscht.                                             */
 
 // Papier & Maßstab
-const PDF_MARGIN       = 10;     // mm Seitenrand
+const PDF_MARGIN       = 12;     // mm Seitenrand
 const PDF_MM_PER_M_MIN = 11;     // mind. 11 mm je Meter (≈ 1:91) – Baustellen-lesbar
 const PDF_MM_PER_M_MAX = 45;     // höchstens 45 mm je Meter (≈ 1:22)
+
+// Höhe der wiederkehrenden Seitenelemente (mm)
+const PDF_HEADER_H = 17;   // Kopfzeile mit Projekt/Blattangabe
+const PDF_FOOTER_H = 11;   // Fußzeile mit Kennzahlen, Datum, Seitenzahl
+const PDF_LEGEND_H = 9;    // Legendenstreifen auf Planseiten
 
 // Schriftgrößen in pt – bewusst fix, damit auf Papier nichts unter die
 // Lesbarkeitsgrenze rutscht.
@@ -4364,6 +4369,95 @@ const PDF_FS_LEN   = 8.5;   // Feldlänge
 const PDF_FS_H     = 7.5;   // Höhenangaben
 const PDF_FS_LABEL = 7;     // Feldbezeichnung (A1 …)
 const PDF_FS_BADGE = 6.5;   // Positions-Badges
+
+/* ── Layout-Varianten ────────────────────────────────────────────────────────
+   Drei Gestaltungen für dasselbe Dokument – die Wahl merkt sich die App.
+     technisch : Weißes Blatt, feine Linien, marineblauer Akzent, Kopf- und
+                 Fußleiste als schmale Regellinien. Wirkt wie eine
+                 Werkplan-Zeichnung und druckt sparsam.
+     kontrast  : Durchgehend farbige Kopfleiste, kräftige Tabellenköpfe,
+                 großzügige Zebra-Zeilen. Am besten lesbar auf der Baustelle
+                 und beim schnellen Durchblättern am Bildschirm.
+     monochrom : Reine Graustufen ohne Farbflächen – für schwarz-weiße
+                 Bürodrucker, Kopien und Faxversand. Positionen werden über
+                 Graustufen und Kürzel unterschieden statt über Farbe.        */
+
+const PDF_THEMES = {
+  technisch: {
+    label: 'Technisch',
+    desc: 'Weißes Blatt, feine Linien, marineblauer Akzent – wie ein Werkplan.',
+    accent:   [26, 74, 122],
+    accentSoft: [232, 240, 248],
+    ink:      [23, 32, 42],
+    inkSoft:  [96, 110, 124],
+    rule:     [186, 196, 206],
+    bandFill: null,              // kein Farbbalken – nur Regellinien
+    bandText: [23, 32, 42],
+    tableHead:[236, 240, 245],
+    tableHeadText: [60, 72, 84],
+    groupFill:[26, 74, 122],
+    groupText:[255, 255, 255],
+    zebra:    [246, 248, 251],
+    bayFill:  [226, 238, 250],
+    bayStroke:[44, 111, 168],
+    colored:  true
+  },
+  kontrast: {
+    label: 'Kontrast',
+    desc: 'Farbige Kopfleiste, kräftige Tabellen – gut lesbar auf der Baustelle.',
+    accent:   [11, 61, 105],
+    accentSoft: [225, 236, 247],
+    ink:      [17, 24, 33],
+    inkSoft:  [88, 100, 114],
+    rule:     [200, 209, 218],
+    bandFill: [11, 61, 105],
+    bandText: [255, 255, 255],
+    tableHead:[11, 61, 105],
+    tableHeadText: [255, 255, 255],
+    groupFill:[233, 240, 248],
+    groupText:[11, 61, 105],
+    zebra:    [243, 247, 251],
+    bayFill:  [219, 234, 249],
+    bayStroke:[11, 61, 105],
+    colored:  true
+  },
+  monochrom: {
+    label: 'Monochrom',
+    desc: 'Reine Graustufen – für Schwarz-Weiß-Druck und Kopien.',
+    accent:   [40, 40, 40],
+    accentSoft: [238, 238, 238],
+    ink:      [20, 20, 20],
+    inkSoft:  [105, 105, 105],
+    rule:     [175, 175, 175],
+    bandFill: null,
+    bandText: [20, 20, 20],
+    tableHead:[232, 232, 232],
+    tableHeadText: [45, 45, 45],
+    groupFill:[60, 60, 60],
+    groupText:[255, 255, 255],
+    zebra:    [245, 245, 245],
+    bayFill:  [240, 240, 240],
+    bayStroke:[80, 80, 80],
+    colored:  false
+  }
+};
+
+const PDF_THEME_KEY = 'av_2d_pdf_theme';
+
+function pdfThemeName() {
+  const n = localStorage.getItem(PDF_THEME_KEY);
+  return PDF_THEMES[n] ? n : 'technisch';
+}
+
+/** Farbe im gewählten Layout: in „monochrom" wird jede Farbe in einen
+ *  Grauwert gleicher Helligkeit übersetzt, damit auch Schwarz-Weiß-Ausdrucke
+ *  die Positionen unterscheidbar zeigen. */
+function pdfCol(theme, rgb) {
+  if (theme.colored) return rgb;
+  const l = Math.round(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]);
+  const v = Math.round(40 + (l / 255) * 150);   // auf 40…190 stauchen
+  return [v, v, v];
+}
 
 /** #rrggbb → [r,g,b] */
 function pdfHex(h) {
@@ -4420,6 +4514,155 @@ function pdfPill(doc, str, cx, cy, deg, fill, stroke, textCol) {
   pdfText(doc, str, cx, cy, deg);
 }
 
+/* ── Wiederkehrende Seitenelemente ───────────────────────────────────────────
+   Kopfzeile, Legende und Fußzeile werden auf JEDER Seite gezeichnet – auch auf
+   Tabellen-, Notiz- und Fotoseiten. Damit bleibt bei einem mehrseitigen
+   Ausdruck auf jedem Blatt erkennbar, zu welchem Projekt es gehört, welcher
+   Ausschnitt zu sehen ist und wie die Farben zu lesen sind.                  */
+
+/** Kopfzeile. Liefert die Oberkante des freien Inhaltsbereichs (mm). */
+function pdfDrawHeader(ctx, opts = {}) {
+  const { doc, theme, pdfW, margin } = ctx;
+  const y = margin;
+  const h = PDF_HEADER_H;
+
+  if (theme.bandFill) {
+    doc.setFillColor(...theme.bandFill);
+    doc.rect(0, 0, pdfW, y + h - 2, 'F');
+  } else {
+    // Akzentbalken links + feine Trennlinie unten
+    doc.setFillColor(...theme.accent);
+    doc.rect(margin, y, 1.6, h - 4, 'F');
+  }
+
+  const tx = theme.bandFill ? margin : margin + 4;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13.5);
+  doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.ink));
+  doc.text(ctx.title, tx, y + 5.4);
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.2);
+  doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.inkSoft));
+  if (ctx.subtitle) doc.text(ctx.subtitle, tx, y + 10.2);
+
+  // Rechts: Dokumentart + Blattangabe
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.accent));
+  doc.text(opts.kicker || 'Gerüst-Aufmaß', pdfW - margin, y + 5.4, { align: 'right' });
+  if (opts.sheet) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.2);
+    doc.setTextColor(...(theme.bandFill ? theme.bandText : theme.inkSoft));
+    doc.text(opts.sheet, pdfW - margin, y + 10.2, { align: 'right' });
+  }
+
+  if (!theme.bandFill) {
+    doc.setDrawColor(...theme.rule); doc.setLineWidth(0.3);
+    doc.line(margin, y + h - 3.2, pdfW - margin, y + h - 3.2);
+  }
+  return y + h;
+}
+
+/** Fußzeile mit Kennzahlen, Datum und Seitenzahl (auf jeder Seite). */
+function pdfDrawFooter(ctx, pageNo, pageCount) {
+  const { doc, theme, pdfW, pdfH, margin } = ctx;
+  const y = pdfH - margin - PDF_FOOTER_H;
+  doc.setDrawColor(...theme.rule); doc.setLineWidth(0.3);
+  doc.line(margin, y + 3, pdfW - margin, y + 3);
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+  doc.setTextColor(...theme.inkSoft);
+  doc.text(ctx.metaLine, margin, y + 7.2);
+  doc.text(`${ctx.dateStr}   ·   Seite ${pageNo} von ${pageCount}`,
+           pdfW - margin, y + 7.2, { align: 'right' });
+}
+
+/** Legendenstreifen: Positionsarten und Abschnitte mit ihren Farben.
+ *  Wird auf jeder Planseite wiederholt. Liefert die neue Oberkante. */
+function pdfDrawLegend(ctx, top, entries) {
+  const { doc, theme, pdfW, margin } = ctx;
+  if (!entries.length) return top;
+  const h = PDF_LEGEND_H;
+
+  doc.setFillColor(...theme.accentSoft);
+  doc.rect(margin, top, pdfW - 2 * margin, h, 'F');
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6.6);
+  doc.setTextColor(...theme.inkSoft);
+  doc.text('LEGENDE', margin + 2.5, top + h / 2 + 0.6, { baseline: 'middle' });
+
+  let x = margin + 16;
+  const maxX = pdfW - margin - 2;
+  doc.setFontSize(7);
+  entries.forEach(e => {
+    doc.setFont('helvetica', 'normal');
+    const w = doc.getTextWidth(e.label) + 8.5;
+    if (x + w > maxX) return;              // was nicht passt, entfällt still
+    const col = pdfCol(theme, e.color);
+    doc.setFillColor(...col);
+    doc.setDrawColor(...col); doc.setLineWidth(0.2);
+    if (e.shape === 'line') {
+      doc.setLineWidth(0.9);
+      doc.line(x, top + h / 2, x + 4, top + h / 2);
+    } else {
+      doc.rect(x, top + h / 2 - 1.7, 3.6, 3.4, 'FD');
+    }
+    doc.setTextColor(...theme.ink);
+    doc.text(e.label, x + 5.6, top + h / 2 + 0.6, { baseline: 'middle' });
+    x += w;
+  });
+  return top + h + 2.5;
+}
+
+/** Legendeneinträge aus der aktuellen Zeichnung ableiten. */
+function pdfLegendEntries() {
+  const entries = [];
+  const seen = new Set();
+  allBaysFlat().forEach(bay => (bay.positions || []).forEach(pos => {
+    const p = POS_BY_KEY[pos.cat];
+    if (!p || seen.has(p.key)) return;
+    seen.add(p.key);
+    entries.push({ label: p.label, color: pdfHex(p.color) });
+  }));
+  entries.sort((a, b) => a.label.localeCompare(b.label));
+  abschnitteList().forEach(a => {
+    if (allBaysFlat().some(b => b.abschnittId === a.id)) {
+      entries.push({ label: a.name, color: pdfHex(a.color), shape: 'line' });
+    }
+  });
+  return entries;
+}
+
+/**
+ * Schneidet ein Polygon am achsparallelen Rechteck ab (Sutherland–Hodgman).
+ * Gebraucht für die blass gezeichneten Anschlussfelder der Nachbarblätter:
+ * die ragen naturgemäß über den Blattausschnitt hinaus und würden sonst in
+ * Kopf- oder Fußzeile hineinlaufen.
+ * @returns {Array<{x:number,y:number}>} leeres Array, wenn nichts übrig bleibt
+ */
+function clipPolyToRect(pts, r) {
+  const edges = [
+    { inside: p => p.x >= r.minX, cut: (a, b) => (r.minX - a.x) / (b.x - a.x) },
+    { inside: p => p.x <= r.maxX, cut: (a, b) => (r.maxX - a.x) / (b.x - a.x) },
+    { inside: p => p.y >= r.minY, cut: (a, b) => (r.minY - a.y) / (b.y - a.y) },
+    { inside: p => p.y <= r.maxY, cut: (a, b) => (r.maxY - a.y) / (b.y - a.y) }
+  ];
+  let out = pts;
+  for (const e of edges) {
+    const src = out;
+    out = [];
+    for (let i = 0; i < src.length; i++) {
+      const a = src[i], b = src[(i + 1) % src.length];
+      const ain = e.inside(a), bin = e.inside(b);
+      if (ain) out.push(a);
+      if (ain !== bin) {
+        const t = e.cut(a, b);
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      }
+    }
+    if (!out.length) return [];
+  }
+  return out;
+}
+
 /** Bounding-Box eines Feld-Elements (Welt-px). */
 function elBBox(el) {
   const xs = el.pts.map(p => p.x), ys = el.pts.map(p => p.y);
@@ -4435,29 +4678,88 @@ function elBBox(el) {
  * @param layout  vollständiges computeLayout() (für Ecken/Wandlinien)
  * @param shapesOnly  true = nur Flächen zeichnen (Übersichtskarte)
  */
-function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
+/** Ursprung der Papier-Abbildung: Ausschnitt mittig im verfügbaren Bereich. */
+function pdfPlanOrigin(win, area, s) {
+  return {
+    x: area.x + (area.w - win.w * s) / 2 - win.minX * s,
+    y: area.y + (area.h - win.h * s) / 2 - win.minY * s
+  };
+}
+
+/**
+ * Sucht die Ecke des Zeichenbereichs, in der die Übersichtskarte am wenigsten
+ * vom Plan verdeckt. Sonst landete sie stur unten rechts – und damit bei
+ * L-förmigen Gerüsten mitten auf der abgehenden Wand.
+ */
+function pdfPickLocatorBox(area, win, s, bayEls, lw, lh) {
+  const o = pdfPlanOrigin(win, area, s);
+  const boxes = [
+    { x: area.x + area.w - lw, y: area.y + area.h - lh },   // unten rechts (bevorzugt)
+    { x: area.x,               y: area.y + area.h - lh },   // unten links
+    { x: area.x + area.w - lw, y: area.y },                 // oben rechts
+    { x: area.x,               y: area.y }                  // oben links
+  ].map(p => ({ ...p, w: lw, h: lh }));
+
+  const rects = bayEls.map(el => {
+    const b = elBBox(el);
+    return { x1: o.x + b.minX * s, x2: o.x + b.maxX * s,
+             y1: o.y + b.minY * s, y2: o.y + b.maxY * s };
+  });
+  let best = boxes[0], bestScore = Infinity;
+  boxes.forEach(box => {
+    const hits = rects.filter(r =>
+      r.x2 > box.x && r.x1 < box.x + box.w && r.y2 > box.y && r.y1 < box.y + box.h).length;
+    if (hits < bestScore) { bestScore = hits; best = box; }
+  });
+  return best;
+}
+
+function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
+  const theme  = opts.theme || PDF_THEMES[pdfThemeName()];
+  const ghosts = opts.ghosts || [];
   // Ausschnitt mittig im verfügbaren Bereich platzieren
-  const originX = area.x + (area.w - win.w * s) / 2 - win.minX * s;
-  const originY = area.y + (area.h - win.h * s) / 2 - win.minY * s;
+  const _o = pdfPlanOrigin(win, area, s);
+  const originX = _o.x;
+  const originY = _o.y;
   const P  = p => ({ x: originX + p.x * s, y: originY + p.y * s });
   const XY = (x, y) => ({ x: originX + x * s, y: originY + y * s });
 
   const depth   = state.depth * PX_PER_M;
-  const drawSet = new Set(bayEls.map(e => e.si + ':' + e.bi));
+
+  // Alles, was über den Blattausschnitt hinausragt, wird am Rand des
+  // Ausschnitts abgeschnitten – sonst liefen Anschlussfelder und Eckstücke in
+  // Kopf- oder Fußzeile hinein.
+  const clipRect = { minX: win.minX, minY: win.minY,
+                     maxX: win.minX + win.w, maxY: win.minY + win.h };
+  const drawClipped = (pts, style) => {
+    const c = clipPolyToRect(pts, clipRect);
+    if (c.length >= 3) pdfPoly(doc, c.map(P), style);
+  };
+
+  // 0. Anschluss-Felder der Nachbarblätter: blass und ohne Beschriftung, damit
+  //    am Blattschnitt sichtbar bleibt, wie es weitergeht – ohne dass unklar
+  //    wird, welche Felder zu DIESEM Blatt gehören.
+  if (ghosts.length) {
+    doc.setFillColor(245, 246, 248);
+    doc.setDrawColor(198, 204, 211); doc.setLineWidth(0.3);
+    ghosts.forEach(el => drawClipped(el.pts, 'FD'));
+  }
 
   // 1. Eckstücke (nur die, deren Nachbarfelder auf dieser Seite liegen)
-  doc.setDrawColor(44, 111, 168); doc.setLineWidth(0.4);
-  doc.setFillColor(181, 212, 240);
+  const cornerStroke = pdfCol(theme, [44, 111, 168]);
+  const cornerFill   = pdfCol(theme, [181, 212, 240]);
+  doc.setDrawColor(...cornerStroke); doc.setLineWidth(0.4);
+  doc.setFillColor(...cornerFill);
   layout.filter(e => e.type === 'corner').forEach(el => {
     const b = elBBox(el);
     if (b.maxX < win.minX || b.minX > win.minX + win.w) return;
     if (b.maxY < win.minY || b.minY > win.minY + win.h) return;
-    pdfPoly(doc, el.pts.map(P), 'FD');
+    drawClipped(el.pts, 'FD');
   });
 
   // 2. Wandlinien – am Rand des Ausschnitts abgeschnitten (Liang-Barsky),
   //    damit auf einer Seite keine Linie ins Nichts weiterläuft.
-  doc.setDrawColor(90, 107, 122); doc.setLineWidth(0.3);
+  doc.setDrawColor(...pdfCol(theme, [90, 107, 122])); doc.setLineWidth(0.3);
   const clipSeg = (x1, y1, x2, y2) => {
     const dx = x2 - x1, dy = y2 - y1;
     let t0 = 0, t1 = 1;
@@ -4478,12 +4780,15 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
     doc.line(a.x, a.y, b.x, b.y);
   });
 
-  // 3. Felder
+  // 3. Felder – mit Abschnittsfarbe, falls das Feld einem Abschnitt angehört.
   bayEls.forEach(el => {
     const bay = state.sections[el.si].bays[el.bi];
     normalizeBay(bay);
-    doc.setFillColor(222, 238, 255);
-    doc.setDrawColor(44, 111, 168); doc.setLineWidth(0.45);
+    const absch = abschnittById(bay.abschnittId);
+    const fill  = absch ? pdfCol(theme, pdfHex(tintHex(absch.color, 0.86))) : theme.bayFill;
+    const strk  = absch ? pdfCol(theme, pdfHex(absch.color))                : theme.bayStroke;
+    doc.setFillColor(...fill);
+    doc.setDrawColor(...strk); doc.setLineWidth(0.45);
     pdfPoly(doc, el.pts.map(P), 'FD');
   });
 
@@ -4512,17 +4817,20 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
     const maxTxt = lenMM * 0.92;
 
     // Feldlänge mittig im Feld
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(10, 47, 88);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...theme.ink);
     pdfFitFont(doc, el.len.toFixed(2).replace('.', ','), maxTxt, PDF_FS_LEN, 5.5);
     pdfText(doc, el.len.toFixed(2).replace('.', ','), c.x, c.y, rot);
 
-    // Feldbezeichnung an der Wandseite
+    // Feldbezeichnung an der Wandseite – in der Abschnittsfarbe, sodass sich
+    // die Abschnitte auch im Ausdruck auf einen Blick unterscheiden.
+    const absch = abschnittById(bay.abschnittId);
+    const lblBg = absch ? pdfCol(theme, pdfHex(absch.color)) : theme.accent;
     const label = bayLabel(state.sections[el.si], el.bi);
     doc.setFont('helvetica', 'bold');
     const lblFs = pdfFitFont(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
     const lblD  = depthMM / 2 + lblFs * 0.352778 * 1.0;
     pdfPill(doc, label, c.x - ox * lblD, c.y - oy * lblD, rot,
-            [10, 47, 88], [10, 47, 88], [255, 255, 255]);
+            lblBg, lblBg, [255, 255, 255]);
 
     // Offene Seite: Höhen, darunter je Position eine Zeile
     const lines = [];
@@ -4531,12 +4839,13 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
     if (hL || hR) {
       lines.push({
         text: hL && hR ? (hL === hR ? 'h ' + hL : hL + ' | ' + hR) : 'h ' + (hL || hR),
-        fill: [240, 249, 243], stroke: [31, 122, 61], col: [22, 92, 45], fs: PDF_FS_H
+        fill: pdfCol(theme, [240, 249, 243]), stroke: pdfCol(theme, [31, 122, 61]),
+        col: pdfCol(theme, [22, 92, 45]), fs: PDF_FS_H
       });
     }
     (bay.positions || []).forEach(pos => {
       const meta = POS_BY_KEY[pos.cat];
-      const col  = pdfHex((meta && meta.color) || '#333333');
+      const col  = pdfCol(theme, pdfHex((meta && meta.color) || '#333333'));
       lines.push({ text: posBadge(pos, bay), fill: [255, 255, 255], stroke: col, col, fs: PDF_FS_BADGE });
     });
 
@@ -4554,34 +4863,66 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly) {
   doc.setTextColor(0, 0, 0);
 }
 
-/** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt blau. */
-function pdfDrawLocator(doc, bounds, win, box) {
-  const s = Math.min(box.w / Math.max(bounds.w, 1), box.h / Math.max(bounds.h, 1)) * 0.9;
-  const ox = box.x + (box.w - bounds.w * s) / 2 - bounds.minX * s;
-  const oy = box.y + (box.h - bounds.h * s) / 2 - bounds.minY * s;
+/** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt farbig
+ *  hervorgehoben – zeigt auf jedem Blatt, wo man sich im Gesamtplan befindet. */
+function pdfDrawLocator(doc, bounds, win, box, theme, caption) {
+  const th = theme || PDF_THEMES[pdfThemeName()];
 
-  doc.setDrawColor(200, 205, 212); doc.setLineWidth(0.2);
-  doc.setFillColor(252, 253, 255);
+  doc.setDrawColor(...th.rule); doc.setLineWidth(0.25);
+  doc.setFillColor(255, 255, 255);
   doc.rect(box.x, box.y, box.w, box.h, 'FD');
 
-  doc.setFillColor(196, 205, 214); doc.setDrawColor(196, 205, 214);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(5.6);
+  doc.setTextColor(...th.inkSoft);
+  doc.text(caption || 'LAGE IM GESAMTPLAN', box.x + 1.8, box.y + 3.2);
+
+  // Zeichenfläche UNTER der Beschriftung, damit sich beides nicht überlagert.
+  const capH = 4.6;
+  const inner = { x: box.x + 1.8, y: box.y + capH, w: box.w - 3.6, h: box.h - capH - 1.8 };
+  const s  = Math.min(inner.w / Math.max(bounds.w, 1), inner.h / Math.max(bounds.h, 1));
+  const ox = inner.x + (inner.w - bounds.w * s) / 2 - bounds.minX * s;
+  const oy = inner.y + (inner.h - bounds.h * s) / 2 - bounds.minY * s;
+
+  // Gerüst als Umriss MIT Kontur: bei 0,73 m Tiefe wäre eine reine Füllung in
+  // dieser Größe eine unsichtbare Haarlinie.
+  doc.setFillColor(198, 206, 214); doc.setDrawColor(150, 160, 172);
+  doc.setLineWidth(0.18);
   state.sections.forEach(sec => {
     sectionBayPolys(sec, sec.x0, sec.y0).forEach(poly => {
-      pdfPoly(doc, poly.map(p => ({ x: ox + p.x * s, y: oy + p.y * s })), 'F');
+      pdfPoly(doc, poly.map(p => ({ x: ox + p.x * s, y: oy + p.y * s })), 'FD');
     });
   });
 
-  doc.setDrawColor(0, 122, 255); doc.setLineWidth(0.5);
+  doc.setDrawColor(...th.accent); doc.setLineWidth(0.7);
   doc.rect(ox + win.minX * s, oy + win.minY * s, win.w * s, win.h * s, 'S');
 }
 
-/** Ermittelt die Papierseiten-Aufteilung des Plans. */
+/**
+ * Ermittelt die Papierseiten-Aufteilung des Plans.
+ *
+ * Grundsätze der Aufteilung:
+ *  • EIN gemeinsamer Maßstab für alle Planseiten – nur so lassen sich die
+ *    Blätter nebeneinanderlegen und Längen von Blatt zu Blatt vergleichen.
+ *  • ALLE Ausschnitte sind gleich groß und liegen auf einem festen Raster.
+ *    Blatt 2 schließt damit exakt an Blatt 1 an (früher war jeder Ausschnitt
+ *    die Hüllbox seiner Felder – die Blätter passten nicht zusammen).
+ *  • Zugeordnet wird über den Feldmittelpunkt, und jeder Ausschnitt ist um die
+ *    größte Feldausdehnung größer als sein Rasterfeld. Dadurch liegt jedes
+ *    Feld vollständig auf genau einem Blatt – nie angeschnitten.
+ *  • Zusätzlich wird notiert, welche FREMDEN Felder in den Ausschnitt ragen;
+ *    die zeichnet pdfDrawPlan blass als Anschluss-Kontext (Blattschnitt).
+ *
+ * @returns {{pages:Array, bounds:Object|null, scale:number, tiled:boolean,
+ *            cols:number, rows:number}}
+ */
 function pdfPlanPages(layout, availW, availH) {
   const bayEls = layout.filter(e => e.type === 'bay');
   const bounds = contentBounds();
-  if (!bayEls.length || !bounds) return { pages: [], bounds: null, scale: 0 };
+  if (!bayEls.length || !bounds) {
+    return { pages: [], bounds: null, scale: 0, tiled: false, cols: 0, rows: 0 };
+  }
 
-  const pad = state.depth * PX_PER_M * 0.9;
+  const pad = state.depth * PX_PER_M * 1.1;
   const full = {
     minX: bounds.minX - pad, minY: bounds.minY - pad,
     w: bounds.w + pad * 2,   h: bounds.h + pad * 2
@@ -4593,84 +4934,206 @@ function pdfPlanPages(layout, availW, availH) {
 
   // Passt alles bei lesbarem Maßstab auf eine Seite → genau eine Planseite.
   if (sFit >= sMin) {
-    return { pages: [{ win: full, els: bayEls }], bounds: full, scale: Math.min(sFit, sMax), tiled: false };
+    return { pages: [{ win: full, els: bayEls, ghosts: [], col: 0, row: 0 }],
+             bounds: full, scale: Math.min(sFit, sMax), tiled: false, cols: 1, rows: 1 };
   }
 
-  // Sonst kacheln. Die Kachel wird um die größte Feldausdehnung verkleinert,
-  // damit ein Feld, das gerade noch zur Kachel gehört, garantiert vollständig
-  // auf die Seite passt – es wird also nie mitten durch ein Feld geschnitten.
-  let bayExtent = 0;
-  bayEls.forEach(el => {
+  const boxes = bayEls.map(el => {
     const b = elBBox(el);
-    bayExtent = Math.max(bayExtent, b.maxX - b.minX, b.maxY - b.minY);
+    return { el, b };
   });
-  const tileW = Math.max(availW / sMin - bayExtent, availW / sMin * 0.4);
-  const tileH = Math.max(availH / sMin - bayExtent, availH / sMin * 0.4);
 
-  const cols = Math.max(1, Math.ceil(full.w / tileW));
-  const rows = Math.max(1, Math.ceil(full.h / tileH));
-  const stepX = cols > 1 ? full.w / cols : full.w;
-  const stepY = rows > 1 ? full.h / rows : full.h;
+  /* Blätter greedy in Leserichtung füllen (oben-links zuerst).
+     Ein starres Raster über die Gesamtausdehnung zu legen wäre einfacher,
+     verschwendet bei ring- oder U-förmigen Gerüsten aber massiv Papier: die
+     Mitte ist leer, trotzdem entstünde für jede Rasterzelle ein Blatt. Beim
+     greedy Füllen wandert stattdessen ein Blattfenster über die tatsächlich
+     belegten Bereiche und nimmt jeweils alles mit, was VOLLSTÄNDIG hineinpasst
+     – dadurch bleibt garantiert kein Feld angeschnitten, und leere Bereiche
+     kosten keine Seite. */
+  const w0 = availW / sMin, h0 = availH / sMin;    // Fenster bei Mindestmaßstab
+  // Nutzbarer Bereich OHNE den Rand, der rings um den Inhalt frei bleiben soll.
+  // Nur so passt später Inhalt + Rand garantiert auf das Blatt; ohne diesen
+  // Abzug ragte der Plan um bis zu zwei Randbreiten in die Fußzeile.
+  const useW = Math.max(w0 - 2 * pad, w0 * 0.5);
+  const useH = Math.max(h0 - 2 * pad, h0 * 0.5);
 
-  const pages = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const rect = {
-        minX: full.minX + c * stepX, maxX: full.minX + (c + 1) * stepX,
-        minY: full.minY + r * stepY, maxY: full.minY + (r + 1) * stepY
-      };
-      // Zuordnung über den Feld-MITTELPUNKT → jedes Feld landet auf genau
-      // einer Seite, wird dort aber vollständig gezeichnet.
-      const els = bayEls.filter(el => {
-        const b = elBBox(el);
-        const mx = (b.minX + b.maxX) / 2, my = (b.minY + b.maxY) / 2;
-        return mx >= rect.minX && (mx < rect.maxX || c === cols - 1)
-            && my >= rect.minY && (my < rect.maxY || r === rows - 1);
-      });
-      if (!els.length) continue;
+  const order = boxes.slice().sort((a, b) =>
+    (a.b.minY - b.b.minY) || (a.b.minX - b.b.minX));
 
-      // Fensterausschnitt = Hüllbox der zugeordneten Felder (+ Rand)
-      let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-      els.forEach(el => {
-        const b = elBBox(el);
-        mnX = Math.min(mnX, b.minX); mxX = Math.max(mxX, b.maxX);
-        mnY = Math.min(mnY, b.minY); mxY = Math.max(mxY, b.maxY);
-      });
-      pages.push({
-        win: { minX: mnX - pad, minY: mnY - pad, w: (mxX - mnX) + pad * 2, h: (mxY - mnY) + pad * 2 },
-        els
-      });
+  const taken  = new Set();
+  const groups = [];
+  for (const start of order) {
+    if (taken.has(start.el)) continue;
+    const wx = start.b.minX, wy = start.b.minY;
+    const els = [];
+    for (const o of order) {
+      if (taken.has(o.el)) continue;
+      if (o.b.minX >= wx && o.b.maxX <= wx + useW &&
+          o.b.minY >= wy && o.b.maxY <= wy + useH) { els.push(o); taken.add(o.el); }
     }
+    groups.push(els);
   }
 
-  // Die Kacheln wurden für den Mindestmaßstab gebildet. Bleibt danach auf allen
-  // Seiten Platz übrig (typisch bei schmalen, langen Gerüsten), wird EIN
-  // gemeinsamer, größerer Maßstab gewählt – alle Planseiten behalten so
-  // denselben Maßstab, nutzen aber das Blatt voll aus.
+  // Gemeinsamer Maßstab für ALLE Blätter: so groß wie möglich, aber so, dass
+  // der Inhalt jedes Blattes noch vollständig passt. Ein einheitlicher Maßstab
+  // ist Voraussetzung dafür, dass sich Längen von Blatt zu Blatt vergleichen
+  // lassen.
   let maxW = 0, maxH = 0;
-  pages.forEach(pg => { maxW = Math.max(maxW, pg.win.w); maxH = Math.max(maxH, pg.win.h); });
-  const sUsed = Math.max(sMin, Math.min(sMax, availW / maxW, availH / maxH));
-  return { pages, bounds: full, scale: sUsed, tiled: true };
+  const bbox = g => {
+    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+    g.forEach(o => {
+      mnX = Math.min(mnX, o.b.minX); mxX = Math.max(mxX, o.b.maxX);
+      mnY = Math.min(mnY, o.b.minY); mxY = Math.max(mxY, o.b.maxY);
+    });
+    return { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY,
+             cx: (mnX + mxX) / 2, cy: (mnY + mxY) / 2 };
+  };
+  const bbs = groups.map(bbox);
+  bbs.forEach(b => {
+    maxW = Math.max(maxW, b.maxX - b.minX + 2 * pad);
+    maxH = Math.max(maxH, b.maxY - b.minY + 2 * pad);
+  });
+  const scale = Math.min(sMax,
+    Math.max(sMin, Math.min(availW / Math.max(maxW, 1), availH / Math.max(maxH, 1))));
+  const winW = availW / scale;
+  const winH = availH / scale;
+
+  const pages = groups.map((g, i) => {
+    const b   = bbs[i];
+    const win = { minX: b.cx - winW / 2, minY: b.cy - winH / 2, w: winW, h: winH };
+    // Hüllbox des tatsächlichen Blattinhalts – die Blattübersicht setzt ihre
+    // Blattnummer dorthin, wo auch wirklich etwas steht.
+    const cbox = { minX: b.minX - pad, minY: b.minY - pad,
+                   w: (b.maxX - b.minX) + 2 * pad, h: (b.maxY - b.minY) + 2 * pad };
+    const own = new Set(g.map(o => o.el));
+    // Anschluss-Felder: liegen sichtbar im Ausschnitt, gehören aber zu einem
+    // anderen Blatt – sie werden blass als Kontext gezeichnet.
+    const ghosts = boxes.filter(o =>
+      !own.has(o.el) &&
+      o.b.maxX > win.minX && o.b.minX < win.minX + win.w &&
+      o.b.maxY > win.minY && o.b.minY < win.minY + win.h).map(o => o.el);
+    return { win, cbox, els: g.map(o => o.el), ghosts };
+  });
+
+  return { pages, bounds: full, scale, tiled: true };
 }
 
 let pdfBusy    = false;
 let pdfLastDone = 0;
 const PDF_COOLDOWN_MS = 800;   // Schutz gegen ungeduldiges Doppeltippen
 
-/** Klick-Handler des PDF-Buttons: genau ein Export je Klick. */
-async function exportPdf() {
-  // Läuft bereits ein Export – oder ist gerade eben einer fertig geworden –,
-  // laufen weitere Klicks bewusst ins Leere.
+/** Klick-Handler des PDF-Buttons: fragt zuerst das Layout ab. */
+function exportPdf() {
+  if (pdfBusy || Date.now() - pdfLastDone < PDF_COOLDOWN_MS) return;
+  openPdfSheet();
+}
+
+/** Auswahl des PDF-Layouts. Die zuletzt gewählte Variante ist vorausgewählt,
+ *  ein Tipp auf „PDF erstellen" genügt also im Alltag. */
+function openPdfSheet() {
+  closeSheet();
+  let chosen = pdfThemeName();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = 'PDF erstellen';
+  sheet.appendChild(hdr);
+
+  const lbl = document.createElement('div');
+  lbl.className = 'sheet-section-label';
+  lbl.textContent = 'Layout';
+  sheet.appendChild(lbl);
+
+  const list = document.createElement('div');
+  list.className = 'pdf-theme-list';
+  const cards = {};
+  Object.entries(PDF_THEMES).forEach(([key, t]) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'pdf-theme-card' + (key === chosen ? ' active' : '');
+
+    const prev = document.createElement('span');
+    prev.className = 'pdf-theme-prev pdf-theme-prev--' + key;
+    prev.setAttribute('aria-hidden', 'true');
+    prev.innerHTML = '<i class="ptp-band"></i><i class="ptp-l ptp-l1"></i>'
+                   + '<i class="ptp-l ptp-l2"></i><i class="ptp-l ptp-l3"></i>';
+
+    const name = document.createElement('span');
+    name.className = 'pdf-theme-name';
+    name.textContent = t.label;
+
+    const desc = document.createElement('span');
+    desc.className = 'pdf-theme-desc';
+    desc.textContent = t.desc;
+
+    card.appendChild(prev); card.appendChild(name); card.appendChild(desc);
+    card.addEventListener('click', () => {
+      chosen = key;
+      Object.entries(cards).forEach(([k, c]) => c.classList.toggle('active', k === key));
+    });
+    cards[key] = card;
+    list.appendChild(card);
+  });
+  sheet.appendChild(list);
+
+  const note = document.createElement('p');
+  note.className = 'pdf-sheet-note';
+  note.textContent = 'Passt der Plan nicht auf ein Blatt, wird er automatisch auf mehrere '
+                   + 'Blätter im gleichen Maßstab aufgeteilt – mit Blattübersicht, '
+                   + 'wiederholter Kopfzeile und Legende auf jeder Seite.';
+  sheet.appendChild(note);
+
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'sheet-del';
+  cancel.textContent = 'Abbrechen';
+  cancel.addEventListener('click', closeSheet);
+
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'sheet-ok';
+  ok.textContent = 'PDF erstellen';
+  ok.addEventListener('click', () => {
+    localStorage.setItem(PDF_THEME_KEY, chosen);
+    closeSheet();
+    runPdfExport(chosen);
+  });
+
+  actRow.appendChild(cancel); actRow.appendChild(ok);
+  sheet.appendChild(actRow);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/** Erzeugt genau eine PDF; weitere Klicks währenddessen laufen ins Leere. */
+async function runPdfExport(themeName) {
   if (pdfBusy || Date.now() - pdfLastDone < PDF_COOLDOWN_MS) return;
   pdfBusy = true;
   const btn      = document.getElementById('exportPdfBtn');
   const prevText = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'PDF wird erstellt …'; }
+  // Ausstehende Zeichenarbeit zuerst erledigen, damit die PDF garantiert den
+  // aktuellen Stand zeigt.
+  flushRender();
   // Ein Frame Pause, damit der Button-Zustand sichtbar wird, bevor der
   // (synchrone) Aufbau der PDF startet.
   await new Promise(r => requestAnimationFrame(() => r()));
   try {
-    await buildPdf();
+    await buildPdf(themeName);
   } catch (err) {
     console.error('PDF-Export fehlgeschlagen:', err);
     showToast('PDF konnte nicht erstellt werden.');
@@ -4680,12 +5143,18 @@ async function exportPdf() {
     if (btn) { btn.disabled = false; btn.textContent = prevText; }
   }
 }
-
-async function buildPdf() {
+async function buildPdf(themeName) {
   const { jsPDF } = window.jspdf;
+  const theme  = PDF_THEMES[themeName] || PDF_THEMES[pdfThemeName()];
   const layout = computeLayout();
   const margin = PDF_MARGIN;
-  const headerH = 19;
+
+  // Nutzbare Fläche einer PLANSEITE = Blatt − Rand − Kopf − Legende − Fuß.
+  // Muss EXAKT der später gezeichneten Fläche entsprechen (siehe `area` weiter
+  // unten), sonst rechnet die Seitenaufteilung mit mehr Platz, als beim
+  // Zeichnen zur Verfügung steht, und der Plan läuft in die Fußzeile.
+  const PLAN_GAP = 2;   // Luft zwischen Legende/Fußzeile und Zeichnung
+  const chromeH = PDF_HEADER_H + PDF_LEGEND_H + 2.5 + PLAN_GAP + PDF_FOOTER_H;
 
   // Hoch- oder Querformat? Es gewinnt die Ausrichtung, die bei lesbarem
   // Mindestmaßstab mit WENIGER Planseiten auskommt (bei Gleichstand die mit
@@ -4694,7 +5163,7 @@ async function buildPdf() {
     const w = o === 'landscape' ? 297 : 210;
     const h = o === 'landscape' ? 210 : 297;
     return { orient: o, pdfW: w, pdfH: h,
-             plan: pdfPlanPages(layout, w - 2 * margin, h - 2 * margin - headerH) };
+             plan: pdfPlanPages(layout, w - 2 * margin, h - 2 * margin - chromeH) };
   }).sort((a, b) => (a.plan.pages.length - b.plan.pages.length) || (b.plan.scale - a.plan.scale));
 
   const { orient, pdfW, pdfH, plan } = cand[0];
@@ -4703,94 +5172,127 @@ async function buildPdf() {
 
   const totalLen     = state.sections.reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
   const totalFlaeche = computeTotalFlaeche();
+  const allBays      = allBaysFlat();
   const dateStr      = new Date().toLocaleDateString('de-DE');
   const title        = state.project || 'Gerüst 2D-Ansicht';
 
-  /** Kopfzeile einer Planseite; liefert die Oberkante des Zeichenbereichs. */
-  const drawHeader = (sub, scaleTxt) => {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
-    doc.text(title, margin, margin + 5);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(70, 70, 70);
-    doc.text(`Gerüsttiefe: ${state.depth.toFixed(2).replace('.', ',')} m   |   Gesamtlänge: ${fmtQty(totalLen)} m   |   Gesamtfläche: ${fmtQty(totalFlaeche)} m²`,
-             margin, margin + 10.5);
-    doc.text(`Datum: ${dateStr}`, margin, margin + 15);
-    if (sub) {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(31, 78, 121);
-      doc.text(sub, pdfW - margin, margin + 5, { align: 'right' });
-    }
-    if (scaleTxt) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(110, 110, 110);
-      doc.text(scaleTxt, pdfW - margin, margin + 10.5, { align: 'right' });
-    }
-    doc.setTextColor(0, 0, 0);
-    return margin + 19;
+  // Gemeinsamer Zeichen-Kontext für Kopf-/Fußzeile und Legende.
+  const ctx = {
+    doc, theme, pdfW, pdfH, margin, title, dateStr,
+    subtitle: `${allBays.length} Feld${allBays.length === 1 ? '' : 'er'}   ·   `
+            + `Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`,
+    metaLine: `Gesamtlänge ${fmtQty(totalLen)} m   ·   Gerüstfläche ${fmtQty(totalFlaeche)} m²`
+            + `   ·   Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`
   };
 
-  const planTop    = margin + headerH;
-  const planAvailH = pdfH - planTop - margin;
+  const legend  = pdfLegendEntries();
+  const contentBottom = pdfH - margin - PDF_FOOTER_H;
 
+  // Seitenbuchhaltung: jede Seite bekommt am Ende ihre Fußzeile mit der
+  // endgültigen Gesamtzahl (die steht erst fest, wenn alles gezeichnet ist).
+  let firstPage = true;
+  /** Neue Seite beginnen (die erste Seite existiert bereits) + Kopfzeile.
+   *  @returns {number} Oberkante des freien Inhaltsbereichs (mm) */
+  const startPage = (opts = {}) => {
+    if (!firstPage) doc.addPage();
+    firstPage = false;
+    return pdfDrawHeader(ctx, opts);
+  };
+
+  // ── Planseiten ──────────────────────────────────────────────────────────
   if (!plan.pages.length) {
-    drawHeader('', '');
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(90, 90, 90);
-    doc.text('Keine Gerüstfelder erfasst.', margin, planTop + 10);
+    const top = startPage({ kicker: 'Gerüst-Aufmaß' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+    doc.setTextColor(...theme.inkSoft);
+    doc.text('Keine Gerüstfelder erfasst.', margin, top + 10);
   } else {
     const scaleTxt = 'Maßstab ca. 1:' + Math.round(10 / plan.scale);
 
-    // Bei mehrseitigem Plan zuerst eine Übersichtsseite mit Seiteneinteilung –
-    // sie zeigt, welcher Ausschnitt auf welcher Seite steht.
+    // Bei mehrseitigem Plan zuerst eine Übersichtsseite mit der Blatteinteilung –
+    // sie zeigt, welcher Ausschnitt auf welchem Blatt steht.
     if (plan.tiled) {
-      const oTop = drawHeader(`Übersicht · Plan auf ${plan.pages.length} Seiten`, '');
-      const oArea = { x: margin, y: oTop, w: availW, h: planAvailH };
-      const oScale = Math.min(oArea.w / plan.bounds.w, oArea.h / plan.bounds.h);
-      const oWin  = { minX: plan.bounds.minX, minY: plan.bounds.minY, w: plan.bounds.w, h: plan.bounds.h };
-      pdfDrawPlan(doc, oWin, oArea, oScale, layout.filter(e => e.type === 'bay'), layout, true);
+      const oTop  = startPage({ kicker: 'Blattübersicht',
+                                sheet: `Plan auf ${plan.pages.length} Blättern` });
+      const legendH = 6;   // Platz für die Erläuterungszeile unten
+      const oArea = { x: margin, y: oTop + 2, w: availW,
+                      h: contentBottom - oTop - 4 - legendH };
+      // Maßstab der Übersicht aus der Hülle ALLER Blattfenster ableiten (nicht
+      // nur aus dem Inhalt) – sonst ragen die Blattrahmen über den Rand.
+      const oWin = plan.pages.reduce((acc, pg) => ({
+        minX: Math.min(acc.minX, pg.win.minX), minY: Math.min(acc.minY, pg.win.minY),
+        maxX: Math.max(acc.maxX, pg.win.minX + pg.win.w),
+        maxY: Math.max(acc.maxY, pg.win.minY + pg.win.h)
+      }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+      oWin.w = oWin.maxX - oWin.minX; oWin.h = oWin.maxY - oWin.minY;
+      const oScale = Math.min(oArea.w / oWin.w, oArea.h / oWin.h);
+      pdfDrawPlan(doc, oWin, oArea, oScale, plan.pages.flatMap(p => p.els), layout, true, { theme });
 
       const ox = oArea.x + (oArea.w - oWin.w * oScale) / 2 - oWin.minX * oScale;
       const oy = oArea.y + (oArea.h - oWin.h * oScale) / 2 - oWin.minY * oScale;
-      doc.setDrawColor(0, 122, 255); doc.setLineWidth(0.45);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-      plan.pages.forEach((pg, i) => {
+      doc.setDrawColor(...theme.accent); doc.setLineWidth(0.3);
+      doc.setLineDashPattern([1.2, 1.0], 0);
+      plan.pages.forEach(pg => {
         doc.rect(ox + pg.win.minX * oScale, oy + pg.win.minY * oScale,
                  pg.win.w * oScale, pg.win.h * oScale, 'S');
-        doc.setFillColor(0, 122, 255);
-        doc.circle(ox + (pg.win.minX + 3) * oScale, oy + (pg.win.minY + 3) * oScale, 2.6, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.text(String(i + 1), ox + (pg.win.minX + 3) * oScale, oy + (pg.win.minY + 3) * oScale,
-                 { align: 'center', baseline: 'middle' });
       });
-      doc.setTextColor(0, 0, 0);
+      doc.setLineDashPattern([], 0);
+      // Blattnummer dorthin, wo auf dem Blatt tatsächlich Felder stehen –
+      // die Blattfenster überlappen sich, die Inhalte nicht.
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      plan.pages.forEach((pg, i) => {
+        const bx = ox + (pg.cbox.minX + pg.cbox.w / 2) * oScale;
+        const by = oy + (pg.cbox.minY + pg.cbox.h / 2) * oScale;
+        doc.setFillColor(...theme.accent);
+        doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.4);
+        doc.circle(bx, by, 3.1, 'FD');
+        doc.setTextColor(255, 255, 255);
+        doc.text('B' + (i + 1), bx, by, { align: 'center', baseline: 'middle' });
+      });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+      doc.setTextColor(...theme.inkSoft);
+      doc.text(`${plan.pages.length} Planblätter   ·   ${scaleTxt} auf allen Blättern   ·   `
+             + `gestrichelt: Blattgrenzen   ·   Anschlussfelder der Nachbarblätter sind auf den `
+             + `Planblättern blassgrau dargestellt`,
+               margin, contentBottom - 1.5);
     }
 
     plan.pages.forEach((pg, i) => {
-      if (plan.tiled || i > 0) doc.addPage();
-      const labels = pg.els.map(el => bayLabel(state.sections[el.si], el.bi));
-      const sub = plan.tiled
-        ? `Ausschnitt ${i + 1} von ${plan.pages.length} · ${labels[0]} – ${labels[labels.length - 1]}`
-        : '';
-      const top  = drawHeader(sub, scaleTxt);
-      const area = { x: margin, y: top, w: availW, h: pdfH - top - margin };
-      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout);
+      const sheet = plan.tiled
+        ? `Planblatt B${i + 1} von ${plan.pages.length}   ·   ${scaleTxt}`
+        : scaleTxt;
+      let top = startPage({ kicker: 'Grundriss', sheet });
+      top = pdfDrawLegend(ctx, top, legend);
+
+      const area = { x: margin, y: top, w: availW, h: contentBottom - top - PLAN_GAP };
+      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout, false,
+                  { theme, ghosts: pg.ghosts });
 
       // Mini-Orientierungskarte rechts unten
       if (plan.tiled) {
-        const lw = Math.min(52, availW * 0.28), lh = lw * 0.62;
-        pdfDrawLocator(doc, plan.bounds, pg.win,
-                       { x: pdfW - margin - lw, y: pdfH - margin - lh, w: lw, h: lh });
+        const lw = Math.min(58, availW * 0.30), lh = lw * 0.62;
+        const box = pdfPickLocatorBox(area, pg.win, plan.scale, pg.els, lw, lh);
+        pdfDrawLocator(doc, plan.bounds, pg.win, box, theme,
+                       `LAGE IM GESAMTPLAN · BLATT B${i + 1}`);
       }
     });
   }
 
-  // ── Aufmaß nach Gerüstseite ───────────────────────────────────────────
-  // Je Gebäudeseite (Oben/Rechts/Unten/Links) eine Tabelle, am Ende eine
-  // Gesamt-Tabelle über alle Seiten – Material-/Bestellgrundlage.
-  const allBays = state.sections.flatMap(s => s.bays);
-  const anyPos  = allBays.some(b => (b.positions || []).length);
+  // ── Aufmaß-Tabellen ─────────────────────────────────────────────────────
+  // Gegliedert nach ABSCHNITT, sobald welche angelegt sind – das ist die vom
+  // Nutzer selbst gewählte Struktur. Ohne Abschnitte bleibt es bei der
+  // automatischen Einteilung nach Gebäudeseite.
+  const anyPos = allBays.some(b => (b.positions || []).length);
 
   if (anyPos) {
-    const groups = fieldsBySide();
-    const sideBlocks = SIDE_ORDER
-      .map(side => ({ side, bays: groups[side] }))
-      .filter(b => b.bays.some(bay => (bay.positions || []).length));
+    const useAbschnitte = abschnitteList().length > 0;
+    const blocks = useAbschnitte
+      ? baysByAbschnitt().map(g => ({
+          title: g.abschnitt ? g.abschnitt.name : 'Ohne Abschnitt',
+          color: g.abschnitt ? pdfHex(g.abschnitt.color) : null,
+          bays: g.bays
+        }))
+      : SIDE_ORDER.map(side => ({ title: SIDE_LABEL[side], color: null, bays: fieldsBySide()[side] }));
+    const sideBlocks = blocks.filter(b => b.bays.some(bay => (bay.positions || []).length));
 
     const tableW = availW;
     const cols = [
@@ -4803,98 +5305,125 @@ async function buildPdf() {
     cols.forEach(c => { colX.push(acc); acc += c.w * tableW; });
     const colMid   = i => colX[i] + cols[i].w * tableW / 2;
     const colRight = i => colX[i] + cols[i].w * tableW - 2.5;
-    const rowH = 7, headH = 7, sideHdrH = 8.5;
+    const rowH = 7, headH = 7.5, blockHdrH = 9;
 
-    doc.addPage();
-    let py = margin + 4;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-    doc.text('Aufmaß nach Gerüstseite', margin, py);
-    py += 9;
+    let py = startPage({ kicker: 'Aufmaß',
+                         sheet: useAbschnitte ? 'nach Abschnitt' : 'nach Gerüstseite' }) + 3;
 
     const drawColHeader = () => {
-      doc.setFillColor(236, 239, 243);
+      doc.setFillColor(...theme.tableHead);
       doc.rect(margin, py, tableW, headH, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(70, 70, 70);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.2);
+      doc.setTextColor(...theme.tableHeadText);
       cols.forEach((c, i) => {
         const tx = c.align === 'right' ? colRight(i) : c.align === 'center' ? colMid(i) : colX[i] + (i === 0 ? 8 : 2);
-        doc.text(c.title, tx, py + headH - 2.2, { align: c.align });
+        doc.text(c.title, tx, py + headH - 2.5, { align: c.align });
       });
       py += headH;
     };
 
     const drawRow = (a, shade) => {
-      if (shade) { doc.setFillColor(247, 249, 251); doc.rect(margin, py, tableW, rowH, 'F'); }
-      const [r, g2, b2] = pdfHex(a.color);
-      doc.setFillColor(r, g2, b2); doc.setDrawColor(130, 130, 130); doc.setLineWidth(0.2);
-      doc.rect(colX[0] + 1.5, py + rowH / 2 - 2, 4, 4, 'FD');
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(25, 25, 25);
+      if (shade) { doc.setFillColor(...theme.zebra); doc.rect(margin, py, tableW, rowH, 'F'); }
+      const swatch = pdfCol(theme, pdfHex(a.color));
+      doc.setFillColor(...swatch); doc.setDrawColor(...swatch); doc.setLineWidth(0.2);
+      doc.rect(colX[0] + 1.8, py + rowH / 2 - 1.9, 3.8, 3.8, 'FD');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.2);
+      doc.setTextColor(...theme.ink);
       doc.text(a.label, colX[0] + 8, py + rowH - 2.7);
       doc.text(a.n + '×', colMid(1), py + rowH - 2.7, { align: 'center' });
-      doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+      doc.setFontSize(8.8); doc.setTextColor(...theme.inkSoft);
       doc.text(aggQtyText(a), colX[2] + 2, py + rowH - 2.7);
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 25, 25);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.2);
+      doc.setTextColor(...theme.ink);
       doc.text(a.meters ? fmtQty(a.meters) + ' m' : '–', colRight(3), py + rowH - 2.7, { align: 'right' });
       py += rowH;
-      doc.setDrawColor(224, 227, 231); doc.setLineWidth(0.1);
+      doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
       doc.line(margin, py, margin + tableW, py);
     };
 
-    const drawTable = (ttl, subtitle, aggList) => {
-      // Passt die ganze Tabelle nicht mehr auf die Seite, aber auf eine leere
-      // Seite → komplett umbrechen, damit Tabellen nicht zerrissen werden.
-      const tableH = sideHdrH + headH + aggList.length * rowH;
-      if (py + tableH > pdfH - margin && tableH <= pdfH - 2 * margin - 6) { doc.addPage(); py = margin + 6; }
-      else if (py + sideHdrH + headH + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; }
-      doc.setFillColor(31, 78, 121);
-      doc.rect(margin, py, tableW, sideHdrH, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255);
-      doc.text(ttl, margin + 3, py + sideHdrH - 2.7);
-      if (subtitle) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-        doc.text(subtitle, margin + tableW - 3, py + sideHdrH - 2.7, { align: 'right' });
+    const drawTable = (ttl, subtitle, aggList, accentColor) => {
+      // Tabellen möglichst nicht zerreißen: passt der ganze Block nicht mehr
+      // aufs Blatt, aber auf ein leeres, wird komplett umgebrochen. Sonst
+      // bleibt mindestens Blockkopf + Spaltenkopf + eine Zeile zusammen.
+      const tableH = blockHdrH + headH + aggList.length * rowH;
+      const room   = contentBottom - py;
+      if ((tableH > room && tableH <= contentBottom - margin - 6) ||
+          (blockHdrH + headH + rowH > room)) {
+        py = startPage({ kicker: 'Aufmaß', sheet: 'Fortsetzung' }) + 3;
       }
-      py += sideHdrH;
+      doc.setFillColor(...(accentColor ? pdfCol(theme, accentColor) : theme.groupFill));
+      doc.rect(margin, py, tableW, blockHdrH, 'F');
+      const headText = accentColor ? [255, 255, 255] : theme.groupText;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+      doc.setTextColor(...headText);
+      doc.text(ttl, margin + 3, py + blockHdrH - 2.9);
+      if (subtitle) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6);
+        doc.text(subtitle, margin + tableW - 3, py + blockHdrH - 2.9, { align: 'right' });
+      }
+      py += blockHdrH;
       drawColHeader();
       aggList.forEach((a, i) => {
-        if (py + rowH > pdfH - margin) { doc.addPage(); py = margin + 6; drawColHeader(); }
+        if (py + rowH > contentBottom) {
+          py = startPage({ kicker: 'Aufmaß', sheet: 'Fortsetzung' }) + 3;
+          // Nach dem Umbruch Blockname wiederholen, damit die Zeilen
+          // zuordenbar bleiben.
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+          doc.setTextColor(...theme.inkSoft);
+          doc.text(ttl + ' (Fortsetzung)', margin, py + 3);
+          py += 6;
+          drawColHeader();
+        }
         drawRow(a, i % 2 === 1);
       });
-      py += 6;
+      py += 7;
     };
 
-    sideBlocks.forEach(({ side, bays }) => {
+    sideBlocks.forEach(({ title: ttl, color, bays }) => {
       const len  = bays.reduce((s, b) => s + b.len, 0);
       const flae = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
       const cnt  = bays.filter(bay => (bay.positions || []).length).length;
-      drawTable(SIDE_LABEL[side], `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`, aggregatePositions(bays));
+      drawTable(ttl, `${cnt} Felder · ${fmtQty(len)} m · ${fmtQty(flae)} m²`,
+                aggregatePositions(bays), color);
     });
 
     const totalLenAll = allBays.reduce((s, b) => s + b.len, 0);
-    drawTable('Gesamt · alle Seiten', `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`, aggregatePositions(allBays));
+    drawTable('Gesamt · alle Felder',
+              `${allBays.length} Felder · ${fmtQty(totalLenAll)} m · ${fmtQty(totalFlaeche)} m²`,
+              aggregatePositions(allBays), null);
   }
 
   // ── Notizen ────────────────────────────────────────────────────────────
   const notedFields = [];
   state.sections.forEach(sec => {
     sec.bays.forEach((bay, bi) => {
-      if ((bay.note || '').trim()) notedFields.push({ label: bayLabel(sec, bi), note: bay.note.trim() });
+      if ((bay.note || '').trim()) {
+        notedFields.push({
+          label: bayLabel(sec, bi),
+          abschnitt: abschnittName(bay.abschnittId),
+          note: bay.note.trim()
+        });
+      }
     });
   });
   if (notedFields.length) {
-    doc.addPage();
-    let ny = margin + 4;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-    doc.text('Notizen', margin, ny);
-    ny += 9;
-    notedFields.forEach(({ label, note }) => {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25, 25, 25);
-      const lines = doc.splitTextToSize(note, availW - 22);
-      const blockH = 6 + lines.length * 5 + 3;
-      if (ny + blockH > pdfH - margin) { doc.addPage(); ny = margin + 6; }
-      doc.text(label + ':', margin, ny);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
-      doc.text(lines, margin + 22, ny);
-      ny += Math.max(6, lines.length * 5) + 3;
+    let ny = startPage({ kicker: 'Notizen', sheet: `${notedFields.length} Eintr${notedFields.length === 1 ? 'ag' : 'äge'}` }) + 4;
+    notedFields.forEach(({ label, abschnitt, note }) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.2);
+      const lines = doc.splitTextToSize(note, availW - 30);
+      const blockH = Math.max(7, lines.length * 4.6) + 4;
+      if (ny + blockH > contentBottom) ny = startPage({ kicker: 'Notizen', sheet: 'Fortsetzung' }) + 4;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      doc.setTextColor(...theme.accent);
+      doc.text(label, margin, ny);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.4);
+      doc.setTextColor(...theme.inkSoft);
+      doc.text(abschnitt, margin, ny + 4);
+      doc.setFontSize(9.2); doc.setTextColor(...theme.ink);
+      doc.text(lines, margin + 30, ny);
+      ny += blockH;
+      doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
+      doc.line(margin, ny - 2, pdfW - margin, ny - 2);
     });
   }
 
@@ -4904,23 +5433,19 @@ async function buildPdf() {
   if (linkedProjectId) {
     const photos = (await listProjectPhotos(linkedProjectId)).filter(p => p.include !== false);
     photos.forEach((photo, i) => {
-      doc.addPage();
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
-      doc.text(`Foto ${i + 1} von ${photos.length}`, margin, margin + 5);
-      const photoAvailH = pdfH - margin - (margin + 10) - margin;
+      const top = startPage({ kicker: 'Fotos', sheet: `Foto ${i + 1} von ${photos.length}` });
+      const photoAvailH = contentBottom - top - 2;
       const ratio = Math.min(availW / photo.w, photoAvailH / photo.h);
       const pw = photo.w * ratio, ph = photo.h * ratio;
-      const px = margin + (availW - pw) / 2;
-      doc.addImage(photo.dataUrl, 'JPEG', px, margin + 10, pw, ph, undefined, 'FAST');
+      doc.addImage(photo.dataUrl, 'JPEG', margin + (availW - pw) / 2, top + 1, pw, ph, undefined, 'FAST');
     });
   }
 
-  // Seitenzahlen
+  // Fußzeile auf JEDER Seite – erst jetzt bekannt, wie viele es geworden sind.
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
-    doc.text(`Seite ${i} von ${pageCount}`, pdfW - margin, pdfH - 4, { align: 'right' });
+    pdfDrawFooter(ctx, i, pageCount);
   }
 
   doc.save(`${title.replace(/[\\/:*?"<>|\s]+/g, '_')}_2d.pdf`);

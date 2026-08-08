@@ -1,0 +1,2 @@
+# Testabhängigkeiten (Playwright, jsPDF, pdf.js) – nur lokal, siehe tests/README.md
+node_modules/
