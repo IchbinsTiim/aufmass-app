@@ -90,6 +90,11 @@ function netzArea(bay) {
   return flaeche > 0 ? +flaeche.toFixed(3) : null;
 }
 
+/** Gerüstfläche (m²) einer Feldmenge. */
+function sumFlaecheM2(bays) {
+  return +bays.reduce((s, b) => s + bayFlaecheM2(b), 0).toFixed(2);
+}
+
 /** Gesamtgerüstfläche (m²) über alle Felder der Zeichnung. */
 function computeTotalFlaeche() {
   let total = 0;
@@ -97,11 +102,18 @@ function computeTotalFlaeche() {
   return +total.toFixed(2);
 }
 
-/** Aktualisiert die Live-Anzeige der Gesamtfläche im Toolbar. */
+/** Aktualisiert die Live-Anzeige der Gesamtfläche im Toolbar. Gezeigt wird die
+ *  Fläche dessen, was gerade GEZEICHNET ist – ausgeblendete Abschnitte werden
+ *  getrennt ausgewiesen, damit klar bleibt, dass sie nur unsichtbar und nicht
+ *  gelöscht sind. */
 function updateAreaReadout() {
   const el = document.getElementById('areaReadout');
   if (!el) return;
-  el.textContent = 'Gesamtfläche: ' + computeTotalFlaeche().toFixed(2).replace('.', ',') + ' m²';
+  const sichtbar = sumFlaecheM2(visibleBaysFlat());
+  const gesamt   = computeTotalFlaeche();
+  const versteckt = +(gesamt - sichtbar).toFixed(2);
+  el.textContent = 'Gesamtfläche: ' + sichtbar.toFixed(2).replace('.', ',') + ' m²'
+    + (versteckt > 0 ? '  (+ ' + versteckt.toFixed(2).replace('.', ',') + ' m² ausgeblendet)' : '');
 }
 
 /** Effektive Menge einer Position. Bei Einheit 'm' ohne eigenen Wert gilt
@@ -270,7 +282,11 @@ function abschnitteList() {
 function mkAbschnitt(name) {
   const id = 'ab' + (++_aId);
   const used = abschnitteList().length;
-  return { id, name: name || `Abschnitt ${used + 1}`, color: ABSCHNITT_COLORS[used % ABSCHNITT_COLORS.length] };
+  return {
+    id, name: name || `Abschnitt ${used + 1}`,
+    color: ABSCHNITT_COLORS[used % ABSCHNITT_COLORS.length],
+    hidden: false
+  };
 }
 
 function abschnittById(id) {
@@ -294,6 +310,74 @@ function addAbschnitt(name) {
   const a = mkAbschnitt(name);
   abschnitteList().push(a);
   return a;
+}
+
+/* ── Sichtbarkeit von Abschnitten ────────────────────────────────────────────
+   Ein Abschnitt kann ausgeblendet werden: seine Felder verschwinden von der
+   Zeichenfläche, bleiben aber VOLLSTÄNDIG im Datenmodell (Länge, Höhen,
+   Positionen, Notiz, Zuordnung). Ausblenden ist also reine Ansichtssache und
+   nie Datenverlust – Einblenden stellt exakt denselben Stand wieder her.
+   Felder ohne Abschnitt lassen sich über denselben Weg ausblenden
+   (`state.hideUnassigned`).
+   Für den PDF-Export gilt standardmäßig „nur sichtbare Abschnitte"; im
+   PDF-Dialog lässt sich das je Export umschalten (siehe pdfIncludeHidden).  */
+
+// Solange gesetzt, gelten ALLE Abschnitte als sichtbar. Wird ausschließlich vom
+// PDF-Export benutzt, der ausgeblendete Abschnitte auf Wunsch mit ausgibt –
+// die Zeichenfläche selbst setzt das Flag nie.
+let ignoreHidden = false;
+
+/** Ist der Abschnitt (id === null → „Ohne Abschnitt") ausgeblendet? */
+function isAbschnittHidden(id) {
+  if (ignoreHidden) return false;
+  const a = abschnittById(id);
+  return a ? !!a.hidden : !!state.hideUnassigned;
+}
+
+/** Wird das Feld gerade gezeichnet? */
+function isBayVisible(bay) {
+  return !isAbschnittHidden(bay ? bay.abschnittId : null);
+}
+
+/** Alle sichtbaren Felder (Gegenstück zu allBaysFlat(), das IMMER alle liefert). */
+function visibleBaysFlat() {
+  return allBaysFlat().filter(isBayVisible);
+}
+
+/** Blendet einen Abschnitt (oder „Ohne Abschnitt" mit id === null) aus/ein. */
+function setAbschnittHidden(id, hidden) {
+  if (id) { const a = abschnittById(id); if (a) a.hidden = !!hidden; }
+  else state.hideUnassigned = !!hidden;
+  // Unsichtbare Felder dürfen weder ausgewählt noch angehakt bleiben – sonst
+  // veränderte eine Sammelaktion Felder, die gerade niemand sieht.
+  allBaysFlat().forEach(b => { if (!isBayVisible(b)) bulkSelected.delete(b.id); });
+  const selSec = selectedSi != null ? state.sections[selectedSi] : null;
+  const selBay = selSec && selSec.bays[selectedBi];
+  if (selBay && !isBayVisible(selBay)) { selectedSi = null; selectedBi = null; }
+  invalidateViewCaches();
+}
+
+/** Anzahl ausgeblendeter Gruppen (inkl. „Ohne Abschnitt"). */
+function hiddenGroupCount() {
+  let n = abschnitteList().filter(a => a.hidden).length;
+  if (state.hideUnassigned && allBaysFlat().some(b => !abschnittById(b.abschnittId))) n++;
+  return n;
+}
+
+/** Blendet alles wieder ein. */
+function showAllAbschnitte() {
+  abschnitteList().forEach(a => { a.hidden = false; });
+  state.hideUnassigned = false;
+  invalidateViewCaches();
+}
+
+/** Führt `fn()` so aus, als wäre nichts ausgeblendet (PDF-Export mit
+ *  ausgeblendeten Abschnitten). */
+function withHiddenShown(fn) {
+  const prev = ignoreHidden;
+  ignoreHidden = true; invalidateViewCaches();
+  try { return fn(); }
+  finally { ignoreHidden = prev; invalidateViewCaches(); }
 }
 
 function renameAbschnitt(id, name) {
@@ -346,7 +430,9 @@ function baysByAbschnitt() {
   const groups = abschnitteList().map(a => ({ abschnitt: a, bays: [] }));
   const byId = Object.fromEntries(groups.map(g => [g.abschnitt.id, g]));
   const rest = { abschnitt: null, bays: [] };
-  allBaysFlat().forEach(b => {
+  // Ausgeblendete Abschnitte tauchen in Auswertungen nur auf, wenn sie auch
+  // gezeichnet werden (PDF-Export „ausgeblendete mitexportieren").
+  visibleBaysFlat().forEach(b => {
     const g = byId[b.abschnittId];
     (g || rest).bays.push(b);
   });
@@ -375,7 +461,9 @@ let _sId = 0, _bId = 0;
 let state = {
   project:   '',
   depth:     0.73,
-  abschnitte: [],   // [{ id, name, color }] – frei benennbare Feld-Gruppen
+  abschnitte: [],   // [{ id, name, color, hidden }] – frei benennbare Feld-Gruppen
+  hideUnassigned: false,   // Felder ohne Abschnitt ausgeblendet?
+  aufmass:   null,  // Aufmaßregeln nach ATV DIN 18451 (siehe aufmassRules())
   sections:  []
   // section: { id, name, dir, bays:[{id,len,…,abschnittId}], x0, y0 }
 };
@@ -391,8 +479,12 @@ function normalizeState() {
     .map((a, i) => ({
       id: String(a.id),
       name: (a.name != null && String(a.name).trim()) || `Abschnitt ${i + 1}`,
-      color: a.color || ABSCHNITT_COLORS[i % ABSCHNITT_COLORS.length]
+      color: a.color || ABSCHNITT_COLORS[i % ABSCHNITT_COLORS.length],
+      // Zeichnungen aus der Zeit vor dem Ein-/Ausblenden kennen `hidden` nicht –
+      // sie starten (wie bisher) vollständig sichtbar.
+      hidden: !!a.hidden
     }));
+  state.hideUnassigned = !!state.hideUnassigned;
   // ID-Zähler hinter die höchste vergebene „abN"-Nummer setzen, damit neue
   // Abschnitte niemals eine bereits benutzte ID bekommen.
   state.abschnitte.forEach(a => {
@@ -448,6 +540,8 @@ const bulkSelected  = new Set();   // Set von bay.id
 let bulkKonsTyp     = KONSOLE_TYPES[0];
 let bulkKonsLagen   = '1';
 let bulkKonsBilling = 'lagen';
+// Meterwert für Konsolen „in Metern" – null = je Feld die eigene Feldlänge.
+let bulkKonsMeter   = null;
 // Höhen, die per "Übernehmen" auf alle ausgewählten Felder übertragen werden.
 let bulkHL          = null;
 let bulkHR          = null;
@@ -492,6 +586,8 @@ function loadFromLinkedProject() {
     // Zeichnungen, die vor der Abschnitts-Funktion gespeichert wurden, haben
     // schlicht keine Abschnitte – sie werden unverändert weiterverwendet.
     state.abschnitte = Array.isArray(z.abschnitte) ? z.abschnitte : [];
+    state.hideUnassigned = !!z.hideUnassigned;
+    state.aufmass    = z.aufmass || null;
     _sId = z._sId || state.sections.length;
     _bId = z._bId || state.sections.flatMap(s => s.bays).length;
     normalizeState();
@@ -512,7 +608,8 @@ function scheduleAutosave2d() {
     list[idx].name = state.project || list[idx].name || '';
     list[idx].zeichnung2d = {
       depth: state.depth, sections: state.sections,
-      abschnitte: abschnitteList(), _sId, _bId
+      abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
+      aufmass: aufmassRules(), _sId, _bId
     };
     list[idx].geaendert = new Date().toISOString().slice(0, 10);
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
@@ -636,7 +733,8 @@ function showToast(msg) {
 function serializeUndoState() {
   return JSON.stringify({
     project: state.project, depth: state.depth,
-    abschnitte: abschnitteList(), sections: state.sections
+    abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
+    aufmass: aufmassRules(), sections: state.sections
   });
 }
 
@@ -675,6 +773,8 @@ function applyUndoState(json) {
   state.project    = data.project;
   state.depth      = data.depth;
   state.abschnitte = Array.isArray(data.abschnitte) ? data.abschnitte : [];
+  state.hideUnassigned = !!data.hideUnassigned;
+  state.aufmass    = data.aufmass || null;
   state.sections   = data.sections;
   normalizeState();
   selectedSi = null; selectedBi = null;
@@ -762,25 +862,105 @@ function toggleShakeUndo() {
   }
 }
 
-/** Kopiert Höhen + alle Positionen (Konsolen, Innengeländer, Netze, Dachfang
- *  usw. inkl. ihrer Mengen/Zuschläge) eines Feldes in die Zwischenablage. */
+/* ── Umfang des Einfügens ────────────────────────────────────────────────────
+   Übertragen wird die AUSSTATTUNG eines Feldes, nicht sein Ort: Zusatzbauteile
+   (inkl. Typ, Menge, Einheit, Lagen), Höhen, Abschnitt und Notiz. Feldspezifisch
+   und deshalb NIE automatisch übernommen bleiben Position/Drehung/Reihenfolge in
+   der Zeichnung – die Feldlänge ist zuschaltbar, weil sie die Geometrie ändert.
+   Die Auswahl gilt gleichermaßen für „Einfügen" bei einem einzelnen Feld und
+   für „auf Auswahl anwenden" bei der Mehrfachauswahl, damit derselbe Knopf
+   überall dasselbe tut. Sie wird gemerkt.                                    */
+const PASTE_OPTS_KEY = 'av_2d_paste_opts_v1';
+const PASTE_FIELDS = [
+  ['positionen', 'Zusatzbauteile', 'Alle Positionen inkl. Typ, Menge, Einheit und Lagen'],
+  ['hoehen',     'Höhen',          'Höhe links und rechts'],
+  ['abschnitt',  'Abschnitt',      'Abschnitts-Zuordnung des kopierten Feldes'],
+  ['notiz',      'Notiz',          'Notiztext des kopierten Feldes'],
+  ['laenge',     'Feldlänge',      'Überschreibt die Länge – verändert die Zeichnung']
+];
+const PASTE_DEFAULTS = { positionen: true, hoehen: true, abschnitt: true, notiz: true, laenge: false };
+
+function loadPasteOpts() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PASTE_OPTS_KEY)) || {};
+    const out = { ...PASTE_DEFAULTS };
+    PASTE_FIELDS.forEach(([k]) => { if (typeof saved[k] === 'boolean') out[k] = saved[k]; });
+    return out;
+  } catch (_) { return { ...PASTE_DEFAULTS }; }
+}
+
+let pasteOpts = loadPasteOpts();
+
+function savePasteOpts() {
+  localStorage.setItem(PASTE_OPTS_KEY, JSON.stringify(pasteOpts));
+}
+
+/** Kurzbeschreibung des aktuellen Umfangs, z. B. „Zusatzbauteile · Höhen". */
+function pasteScopeText() {
+  const on = PASTE_FIELDS.filter(([k]) => pasteOpts[k]).map(([, label]) => label);
+  return on.length ? on.join(' · ') : 'nichts ausgewählt';
+}
+
+/** Kopiert Höhen, alle Positionen (Konsolen, Innengeländer, Netze, Dachfang
+ *  usw. inkl. Mengen/Lagen), Abschnitt, Notiz und Länge eines Feldes in die
+ *  Zwischenablage. Was davon eingefügt wird, entscheidet `pasteOpts`. */
 function copyBayPositions(bay) {
   copiedBayData = {
     hL: bay.hL,
     hR: bay.hR,
+    len: bay.len,
+    abschnittId: bay.abschnittId || null,
+    note: bay.note || '',
     positions: JSON.parse(JSON.stringify(bay.positions || []))
   };
-  showToast('Position kopiert – bei anderen Feldern „Einfügen" antippen');
-  renderSections();
+  const n = copiedBayData.positions.length;
+  showToast(`Feld kopiert (${n} Zusatzbauteil${n === 1 ? '' : 'e'}) – bei anderen Feldern „Einfügen" antippen`);
+  renderAll();
 }
 
-/** Überträgt die kopierte Positions-Konfiguration auf ein anderes Feld. */
+/** Überträgt die kopierte Konfiguration auf EIN Feld (Umfang: `pasteOpts`). */
 function pasteBayPositions(bay) {
-  if (!copiedBayData) return;
-  bay.hL = copiedBayData.hL;
-  bay.hR = copiedBayData.hR;
-  bay.positions = copiedBayData.positions.map(p => ({ ...p, id: ++_bId }));
-  showToast('Position eingefügt');
+  if (!copiedBayData || !bay) return false;
+  const d = copiedBayData;
+  if (pasteOpts.hoehen)     { bay.hL = d.hL; bay.hR = d.hR; }
+  if (pasteOpts.positionen) bay.positions = (d.positions || []).map(p => ({ ...p, id: ++_bId }));
+  if (pasteOpts.abschnitt)  bay.abschnittId = abschnittById(d.abschnittId) ? d.abschnittId : null;
+  if (pasteOpts.notiz)      bay.note = d.note || '';
+  if (pasteOpts.laenge && d.len) bay.len = d.len;
+  return true;
+}
+
+/** Überträgt die kopierte Konfiguration in einem Rutsch auf beliebig viele
+ *  Felder – der Kern von „kopiertes Feld auf Mehrfachauswahl anwenden". */
+function pasteBayPositionsToAll(bays) {
+  if (!copiedBayData || !bays.length) return 0;
+  bays.forEach(bay => { normalizeBay(bay); pasteBayPositions(bay); });
+  return bays.length;
+}
+
+/** Auswahl, WAS eingefügt wird – identisch im Bearbeiten-Sheet und in der
+ *  Mehrfachauswahl. */
+function buildPasteScopeRow(onChange) {
+  const row = document.createElement('div');
+  row.className = 'paste-scope-row';
+  PASTE_FIELDS.forEach(([key, label, desc]) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'paste-scope-chip' + (pasteOpts[key] ? ' active' : '');
+    chip.textContent = (pasteOpts[key] ? '✓ ' : '') + label;
+    chip.title = desc;
+    chip.setAttribute('aria-pressed', String(!!pasteOpts[key]));
+    chip.addEventListener('click', () => {
+      pasteOpts[key] = !pasteOpts[key];
+      savePasteOpts();
+      chip.classList.toggle('active', pasteOpts[key]);
+      chip.textContent = (pasteOpts[key] ? '✓ ' : '') + label;
+      chip.setAttribute('aria-pressed', String(!!pasteOpts[key]));
+      if (onChange) onChange();
+    });
+    row.appendChild(chip);
+  });
+  return row;
 }
 
 // ── Favoriten / Vorlagen ─────────────────────────────────────────────────────
@@ -869,12 +1049,17 @@ function contentBounds() {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   state.sections.forEach(sec => {
     if (!sec.bays.length) return;
-    sectionBayPolys(sec, sec.x0, sec.y0).forEach(poly => poly.forEach(p => {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    }));
+    // Ausgeblendete Abschnitte zählen nicht zum sichtbaren Inhalt – sonst
+    // zoomte „Alle Felder anzeigen" auf leeren Raum.
+    sectionBayPolys(sec, sec.x0, sec.y0).forEach((poly, bi) => {
+      if (!isBayVisible(sec.bays[bi])) return;
+      poly.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+    });
   });
   const box = isFinite(minX) ? { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY } : null;
   _boundsCache = { box };
@@ -1326,35 +1511,42 @@ function computeLayout() {
     const ang    = secAngle(sec);
     let x = sec.x0, y = sec.y0;
     const startX = x, startY = y;
+    // Ausgeblendete Abschnitte werden NICHT gezeichnet – ihre Felder gehen
+    // aber trotzdem in die Positionsrechnung ein, damit die sichtbaren
+    // Nachbarfelder an derselben Stelle bleiben wie zuvor.
+    const anyVisible = sec.bays.some(isBayVisible);
 
     // ── Start junction (tagged with si — only shown when section selected) ──
-    els.push({ type: 'junctionBtn', x, y, si });
+    if (anyVisible) els.push({ type: 'junctionBtn', x, y, si });
 
     // ── Bays ────────────────────────────────────────────────────────────
     sec.bays.forEach((bay, bi) => {
       const pxLen = bay.len * PX_PER_M;
-      const p0 = { x, y };
-      const p1 = { x: x + dir.dx * pxLen,   y: y + dir.dy * pxLen };
-      const p2 = { x: p1.x + out.dx * depth, y: p1.y + out.dy * depth };
-      const p3 = { x: p0.x + out.dx * depth, y: p0.y + out.dy * depth };
-      const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
-      const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
+      const visible = isBayVisible(bay);
+      if (visible) {
+        const p0 = { x, y };
+        const p1 = { x: x + dir.dx * pxLen,   y: y + dir.dy * pxLen };
+        const p2 = { x: p1.x + out.dx * depth, y: p1.y + out.dy * depth };
+        const p3 = { x: p0.x + out.dx * depth, y: p0.y + out.dy * depth };
+        const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
+        const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
 
-      els.push({
-        type: 'bay', pts: [p0, p1, p2, p3], cx, cy, len: bay.len,
-        si, bi, dir: sec.dir, ang,
-        handleX: (p1.x + p2.x) / 2,
-        handleY: (p1.y + p2.y) / 2
-      });
+        els.push({
+          type: 'bay', pts: [p0, p1, p2, p3], cx, cy, len: bay.len,
+          si, bi, dir: sec.dir, ang,
+          handleX: (p1.x + p2.x) / 2,
+          handleY: (p1.y + p2.y) / 2
+        });
+      }
 
       x += dir.dx * pxLen;
       y += dir.dy * pxLen;
 
-      els.push({ type: 'junctionBtn', x, y, si });
+      if (visible) els.push({ type: 'junctionBtn', x, y, si });
     });
 
     // ── Wall line ───────────────────────────────────────────────────────
-    if (sec.bays.length > 0) {
+    if (sec.bays.length > 0 && anyVisible) {
       els.push({ type: 'wallLine', x1: startX, y1: startY, x2: x, y2: y });
 
       // Move handle at wall-line midpoint. `secLen` wird mitgeführt, damit der
@@ -1399,6 +1591,7 @@ function computeLayout() {
   });
 
   state.sections.forEach((sec, si) => {
+    if (!sec.bays.some(isBayVisible)) return;
     const end = sectionEnd(sec);
     const out = outVec(secVec(sec), sec.flip);
     const bx  = Math.round(end.x / 2), by = Math.round(end.y / 2);
@@ -1409,6 +1602,7 @@ function computeLayout() {
         for (const ni of arr) {
           if (ni === si) continue;
           const next = state.sections[ni];
+          if (!next.bays.some(isBayVisible)) continue;
           if (Math.abs(next.x0 - end.x) >= 2 || Math.abs(next.y0 - end.y) >= 2) continue;
           const nOut  = outVec(secVec(next), next.flip);
           const cross = out.dx * nOut.dy - out.dy * nOut.dx;
@@ -1417,7 +1611,9 @@ function computeLayout() {
           const c1 = { x: end.x + out.dx * depth, y: end.y + out.dy * depth };
           const c2 = { x: c1.x + nOut.dx * depth, y: c1.y + nOut.dy * depth };
           const c3 = { x: end.x + nOut.dx * depth, y: end.y + nOut.dy * depth };
-          els.push({ type: 'corner', pts: [c0, c1, c2, c3] });
+          // `si`/`ni` = ein- und ausleitende Sektion der Außenecke – Grundlage
+          // für den Eckzuschlag nach ATV DIN 18451 (siehe computeAufmass()).
+          els.push({ type: 'corner', pts: [c0, c1, c2, c3], si, ni });
         }
       }
     }
@@ -1451,6 +1647,39 @@ function tintHex(hex, t) {
 
 // ── Main SVG render ────────────────────────────────────────────────────────
 
+/** Der leere Zeichenbereich sagt, WARUM er leer ist: gar keine Felder erfasst
+ *  – oder alle Abschnitte ausgeblendet. Im zweiten Fall führt ein Knopf direkt
+ *  zurück zur vollständigen Ansicht, damit niemand die Felder für verloren
+ *  hält. */
+function syncEmptyHint(allHidden) {
+  const icon  = document.querySelector('#emptyHint .empty-icon');
+  const title = document.querySelector('#emptyHint .empty-title');
+  const addBtn = document.getElementById('emptyAddBtn');
+  let showBtn = document.getElementById('emptyShowAllBtn');
+  if (!icon || !title || !addBtn) return;
+
+  if (allHidden) {
+    icon.textContent  = '🙈';
+    title.textContent = 'Alle Abschnitte ausgeblendet';
+    addBtn.classList.add('hidden');
+    if (!showBtn) {
+      showBtn = document.createElement('button');
+      showBtn.id = 'emptyShowAllBtn';
+      showBtn.type = 'button';
+      showBtn.className = 'empty-add-btn';
+      showBtn.textContent = 'Alle Abschnitte einblenden';
+      showBtn.addEventListener('click', () => { showAllAbschnitte(); renderAll(); });
+      addBtn.parentNode.appendChild(showBtn);
+    }
+    showBtn.classList.remove('hidden');
+  } else {
+    icon.textContent  = '📐';
+    title.textContent = 'Noch keine Felder erfasst';
+    addBtn.classList.remove('hidden');
+    if (showBtn) showBtn.classList.add('hidden');
+  }
+}
+
 function renderSvg() {
   const gLive = document.getElementById('planGroup');
   const svg   = document.getElementById('planSvg');
@@ -1466,8 +1695,10 @@ function renderSvg() {
   scheduleAutosave2d();
   scheduleUndoSnapshot();
 
-  const hasBays = state.sections.some(s => s.bays.length > 0);
-  if (!hasBays) {
+  const hasBays    = state.sections.some(s => s.bays.length > 0);
+  const hasVisible = state.sections.some(s => s.bays.some(isBayVisible));
+  syncEmptyHint(hasBays && !hasVisible);
+  if (!hasVisible) {
     autoFit = true;
     fitCameraToContent();
     applyCamera();
@@ -3048,13 +3279,14 @@ function openEditSheet(si, bi) {
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button'; copyBtn.className = 'sheet-copy';
   copyBtn.textContent = 'Position kopieren';
-  copyBtn.addEventListener('click', () => copyBayPositions(bay));
+  copyBtn.addEventListener('click', () => { copyBayPositions(bay); closeSheet(); });
 
   const pasteBtn = document.createElement('button');
   pasteBtn.type = 'button';
   pasteBtn.className = 'sheet-paste' + (copiedBayData ? ' active' : '');
   pasteBtn.textContent = '📋 Position einfügen';
   pasteBtn.disabled = !copiedBayData;
+  pasteBtn.title = copiedBayData ? 'Übernommen wird: ' + pasteScopeText() : '';
   pasteBtn.addEventListener('click', () => {
     pasteBayPositions(bay);
     requestRender();
@@ -3064,6 +3296,15 @@ function openEditSheet(si, bi) {
 
   copyPasteRow.appendChild(copyBtn);
   copyPasteRow.appendChild(pasteBtn);
+
+  // Welche Eigenschaften das Einfügen überträgt – gleiche Auswahl wie bei der
+  // Mehrfachauswahl, damit „Einfügen" überall dasselbe bedeutet.
+  const pasteScopeHint = document.createElement('div');
+  pasteScopeHint.className = 'sheet-subsection-label';
+  pasteScopeHint.textContent = 'Einfügen überträgt';
+  const pasteScope = buildPasteScopeRow(() => {
+    pasteBtn.title = copiedBayData ? 'Übernommen wird: ' + pasteScopeText() : '';
+  });
 
   // ── Wand spiegeln ────────────────────────────────────────────────────────
   // Dupliziert die gesamte Wand (alle direkt verbundenen Felder mit gleichem
@@ -3114,6 +3355,8 @@ function openEditSheet(si, bi) {
   sheet.appendChild(favWrap);
   sheet.appendChild(favSaveBtn);
   sheet.appendChild(copyPasteRow);
+  sheet.appendChild(pasteScopeHint);
+  sheet.appendChild(pasteScope);
   sheet.appendChild(mirrorLabel);
   sheet.appendChild(mirrorRow);
   sheet.appendChild(actRow);
@@ -3142,6 +3385,11 @@ function closeSheet() {
   document.getElementById('sheetOverlay')?.remove();
   const s = document.getElementById('bottomSheet');
   if (!s) return;
+  // Die ID sofort freigeben: das Sheet bleibt für die Schließ-Animation noch
+  // 230 ms im DOM. Wird in dieser Zeit ein neues geöffnet (Einfügen baut das
+  // Sheet z. B. direkt neu auf), fände getElementById sonst weiterhin das ALTE
+  // und Klicks landeten in dessen Handlern.
+  s.id = '';
   s.classList.remove('open');
   setTimeout(() => s.remove(), 230);
 }
@@ -3344,6 +3592,19 @@ function renderAbschnittBar() {
   head.appendChild(title); head.appendChild(addBtn);
   el.appendChild(head);
 
+  // Sammelknopf, sobald irgendetwas ausgeblendet ist – so ist der Weg zurück
+  // zur vollständigen Ansicht immer einen Klick entfernt.
+  const nHidden = hiddenGroupCount();
+  if (nHidden) {
+    const showAll = document.createElement('button');
+    showAll.type = 'button';
+    showAll.className = 'absch-showall-btn';
+    showAll.textContent = `👁 Alle einblenden (${nHidden} ausgeblendet)`;
+    showAll.title = 'Alle ausgeblendeten Abschnitte wieder anzeigen';
+    showAll.addEventListener('click', () => { showAllAbschnitte(); renderAll(); });
+    el.appendChild(showAll);
+  }
+
   const list = abschnitteList();
   if (!list.length) {
     const hint = document.createElement('p');
@@ -3358,9 +3619,30 @@ function renderAbschnittBar() {
   wrap.className = 'absch-list';
 
   const makeRow = (a, count) => {
+    const id     = a ? a.id : null;
+    const hidden = a ? !!a.hidden : !!state.hideUnassigned;
     const row = document.createElement('div');
-    row.className = 'absch-row';
+    row.className = 'absch-row' + (hidden ? ' absch-hidden' : '');
     row.style.setProperty('--absch-color', a ? a.color : '#8a97a5');
+
+    // Sichtbarkeit: blendet die Felder dieses Abschnitts auf der Zeichenfläche
+    // aus/ein. Die Felder selbst bleiben unverändert erhalten.
+    const eye = document.createElement('button');
+    eye.type = 'button';
+    eye.className = 'absch-eye-btn' + (hidden ? ' off' : '');
+    eye.textContent = hidden ? '🙈' : '👁';
+    eye.setAttribute('aria-pressed', String(!hidden));
+    eye.title = hidden
+      ? 'Abschnitt einblenden (Felder sind nur ausgeblendet, nicht gelöscht)'
+      : 'Abschnitt ausblenden (Felder bleiben erhalten)';
+    eye.addEventListener('click', () => {
+      setAbschnittHidden(id, !hidden);
+      showToast(hidden
+        ? `„${a ? a.name : 'Ohne Abschnitt'}" eingeblendet`
+        : `„${a ? a.name : 'Ohne Abschnitt'}" ausgeblendet · ${count} Feld${count === 1 ? '' : 'er'} bleiben erhalten`);
+      renderAll();
+    });
+    row.appendChild(eye);
 
     const dot = document.createElement('span');
     dot.className = 'absch-dot';
@@ -3380,6 +3662,9 @@ function renderAbschnittBar() {
     pick.title = 'Alle Felder dieses Abschnitts auswählen';
     pick.appendChild(dot); pick.appendChild(nameEl); pick.appendChild(cnt);
     pick.addEventListener('click', () => {
+      // Ein ausgeblendeter Abschnitt wird zuerst wieder eingeblendet – sonst
+      // markierte man Felder, die man nicht sieht.
+      if (hidden) setAbschnittHidden(id, false);
       bulkMode = true;
       bulkSelected.clear();
       allBaysFlat().forEach(b => {
@@ -3481,6 +3766,199 @@ function renderSelectionInfo() {
   }
 }
 
+/**
+ * Zusatzbauteil (Innengeländer, Netz, Dachfang, Tunnelrahmen …) für die GESAMTE
+ * Mehrfachauswahl einstellen und in einem Zug anwenden.
+ *
+ * Hintergrund: Über die Mehrfachauswahl hinzugefügte Zusatzbauteile wurden
+ * früher ohne jede Angabe angelegt – ohne Menge, ohne Lagen. Bei
+ * lagenbasierten Bauteilen (z. B. Innengeländer) fehlte damit die Lagenzahl,
+ * und weil sich die Länge erst aus „Lagen × Feldlänge" ergibt, blieb auch die
+ * Länge leer. Jedes Feld musste einzeln nachgearbeitet werden.
+ *
+ * Jetzt werden Menge/Einheit bzw. Lagen EINMAL für alle ausgewählten Felder
+ * abgefragt. Die Länge bleibt dabei bewusst feldspezifisch: Sie wird je Feld
+ * aus dessen eigener Feldlänge gerechnet (Lagen × Feldlänge bzw. bei Einheit
+ * „m"/„m²" die Feldlänge/-fläche als Vorgabewert), sodass unterschiedlich
+ * lange Felder automatisch richtig herauskommen.
+ */
+function openBulkPosSheet(catKey, bays) {
+  const p = POS_BY_KEY[catKey];
+  if (!p || !bays.length) return;
+  closeSheet();
+
+  // Vorbelegung aus einem bereits vorhandenen Exemplar der Auswahl.
+  const sample = bays.map(b => (b.positions || []).find(x => x.cat === catKey)).find(Boolean);
+  let unit = (sample && sample.unit) || defaultUnit(catKey);
+  let qty  = (sample && sample.qty != null) ? String(sample.qty) : '';
+  // Lagen-Bauteile starten mit 1 Lage: ohne Lagenzahl gäbe es weder Menge noch
+  // Länge – genau der Zustand, in dem früher jedes Feld nachgearbeitet werden
+  // musste.
+  if (unit === 'lagen' && qty === '') qty = '1';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = `${p.label} für ${bays.length} Feld${bays.length === 1 ? '' : 'er'}`;
+  sheet.appendChild(hdr);
+
+  const unitLabel = document.createElement('div');
+  unitLabel.className = 'sheet-section-label';
+  unitLabel.textContent = 'Abrechnungseinheit';
+  sheet.appendChild(unitLabel);
+
+  const unitRow = document.createElement('div');
+  unitRow.className = 'pos-unit-row bulk-pos-unit-row';
+  sheet.appendChild(unitRow);
+
+  const lagenLabelEl = document.createElement('div');
+  lagenLabelEl.className = 'sheet-section-label';
+  lagenLabelEl.textContent = 'Lagen (für alle ausgewählten Felder)';
+  sheet.appendChild(lagenLabelEl);
+
+  const lagenRow = document.createElement('div');
+  lagenRow.className = 'konsole-lagen-row';
+  sheet.appendChild(lagenRow);
+
+  const qtyLabelEl = document.createElement('div');
+  qtyLabelEl.className = 'sheet-section-label';
+  qtyLabelEl.textContent = 'Menge je Feld';
+  sheet.appendChild(qtyLabelEl);
+
+  const qtyRow = document.createElement('div');
+  qtyRow.className = 'bulk-pos-qty-row';
+  const qtyInp = document.createElement('input');
+  qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
+  qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
+  const qtyHint = document.createElement('span');
+  qtyHint.className = 'bulk-pos-qty-hint';
+  qtyRow.appendChild(qtyInp); qtyRow.appendChild(qtyHint);
+  sheet.appendChild(qtyRow);
+
+  const preview = document.createElement('div');
+  preview.className = 'bulk-pos-preview';
+  sheet.appendChild(preview);
+
+  /** Testposition mit dem aktuellen Formularstand (für die Vorschau). */
+  const draft = () => ({ cat: catKey, unit, qty: qty === '' ? null : parseFloat(qty) });
+
+  const sync = () => {
+    const isLagen = unit === 'lagen';
+    lagenLabelEl.style.display = isLagen ? '' : 'none';
+    lagenRow.style.display     = isLagen ? '' : 'none';
+    qtyLabelEl.style.display   = isLagen ? 'none' : '';
+    qtyRow.style.display       = isLagen ? 'none' : '';
+
+    unitRow.querySelectorAll('.punit-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.unit === unit));
+    lagenRow.querySelectorAll('.klagen-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.lagen === qty));
+    if (document.activeElement !== qtyInp) qtyInp.value = isLagen ? '' : qty;
+
+    // Vorgabewert je Einheit – ohne eigene Eingabe rechnet jedes Feld mit
+    // seiner eigenen Länge bzw. Fläche.
+    qtyHint.textContent = unit === 'm'
+      ? 'leer = je Feld die eigene Feldlänge'
+      : unit === 'm2'
+        ? 'leer = je Feld Länge × Höhe bzw. Länge × Gerüsttiefe'
+        : 'Anzahl je Feld';
+    qtyInp.placeholder = unit === 'm' || unit === 'm2' ? 'automatisch' : 'Anz.';
+
+    // Vorschau: was ergibt die Eingabe konkret – je Feld und in Summe?
+    const d = draft();
+    let meters = 0, mCount = 0, missing = 0;
+    bays.forEach(bay => {
+      const m = posMeters(d, bay);
+      if (m != null) { meters += m; mCount++; }
+      else if (effQty(d, bay) == null) missing++;
+    });
+    const first = bays[0];
+    const per = posMeters(d, first) != null
+      ? `je Feld z. B. ${fmtQty(posMeters(d, first))} m (${fmtQty(first.len)} m Feldlänge)`
+      : (effQty(d, first) != null ? `je Feld ${qtyLabel(d, first)}` : '');
+    preview.textContent = missing
+      ? `⚠ ${missing} Feld${missing === 1 ? '' : 'er'} ohne Menge – bitte Wert bzw. Lagen angeben.`
+      : (mCount ? `${per}  ·  gesamt ${fmtQty(meters)} m über ${bays.length} Felder`
+                : per || `wird auf ${bays.length} Felder angewendet`);
+    preview.classList.toggle('warn', !!missing);
+  };
+
+  UNIT_DEFS.forEach(([val, lbl]) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'punit-btn';
+    b.dataset.unit = val; b.textContent = lbl;
+    b.addEventListener('click', () => {
+      unit = val;
+      // Beim Wechsel auf/von Lagen ist der alte Wert bedeutungslos.
+      if (val === 'lagen' && !/^\d+$/.test(qty)) qty = '1';
+      sync();
+    });
+    unitRow.appendChild(b);
+  });
+
+  [['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen']]
+    .forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'klagen-btn';
+      b.dataset.lagen = val; b.textContent = lbl;
+      b.addEventListener('click', () => { qty = val; freeLagen.value = ''; sync(); });
+      lagenRow.appendChild(b);
+    });
+  const freeLagen = document.createElement('input');
+  freeLagen.type = 'number'; freeLagen.className = 'klagen-free';
+  freeLagen.min = '1'; freeLagen.step = '1'; freeLagen.inputMode = 'numeric';
+  freeLagen.placeholder = 'Anz.';
+  freeLagen.addEventListener('input', () => {
+    const v = parseInt(freeLagen.value, 10);
+    if (!isNaN(v) && v > 0) { qty = String(v); sync(); }
+  });
+  lagenRow.appendChild(freeLagen);
+
+  qtyInp.addEventListener('input', () => { qty = qtyInp.value; sync(); });
+
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'sheet-del';
+  cancel.textContent = 'Abbrechen';
+  cancel.addEventListener('click', closeSheet);
+
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'sheet-ok';
+  ok.textContent = `Auf ${bays.length} Feld${bays.length === 1 ? '' : 'er'} anwenden`;
+  ok.addEventListener('click', () => {
+    const value = qty === '' ? null : parseFloat(qty);
+    bays.forEach(bay => {
+      normalizeBay(bay);
+      let pos = bay.positions.find(x => x.cat === catKey);
+      if (!pos) { pos = { id: ++_bId, cat: catKey }; bay.positions.push(pos); }
+      pos.unit = unit;
+      pos.qty  = (value == null || isNaN(value)) ? null : value;
+    });
+    renderAll();
+    closeSheet();
+    showToast(`${p.label} auf ${bays.length} Feld${bays.length === 1 ? '' : 'er'} angewendet`);
+  });
+
+  actRow.appendChild(cancel); actRow.appendChild(ok);
+  sheet.appendChild(actRow);
+
+  sync();
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
 /** Leiste über der Feldliste: Mehrfachauswahl an/aus + Sammel-Aktionen.
  *  Erlaubt, EINE Position (Konsole, Netz, Tunnelrahmen …) auf beliebig viele,
  *  auch nicht benachbarte Felder anzuwenden, ohne deren Höhen oder sonstige
@@ -3503,18 +3981,24 @@ function renderBulkBar() {
   el.appendChild(toggleBtn);
   if (!bulkMode) return;
 
-  const bays = allBaysFlat();
+  // Sammelaktionen wirken ausschließlich auf SICHTBARE Felder – Felder eines
+  // ausgeblendeten Abschnitts sollen sich nicht unbemerkt mitverändern.
+  const bays = visibleBaysFlat();
   if (!bays.length) {
     const hint = document.createElement('p');
     hint.className = 'bulk-hint';
-    hint.textContent = 'Zuerst Felder anlegen.';
+    hint.textContent = allBaysFlat().length
+      ? 'Alle Abschnitte ausgeblendet – zuerst einen Abschnitt einblenden.'
+      : 'Zuerst Felder anlegen.';
     el.appendChild(hint);
     return;
   }
 
   const info = document.createElement('div');
   info.className = 'bulk-info';
-  info.textContent = `${bulkSelected.size} von ${bays.length} Feldern ausgewählt`;
+  const nHiddenBays = allBaysFlat().length - bays.length;
+  info.textContent = `${bulkSelected.size} von ${bays.length} Feldern ausgewählt`
+    + (nHiddenBays ? ` · ${nHiddenBays} ausgeblendet` : '');
   el.appendChild(info);
 
   // Abschnitts-Zuordnung der Auswahl – dieselbe Information wie in der Anzeige
@@ -3611,6 +4095,58 @@ function renderBulkBar() {
   });
   abschRow.appendChild(newAbschBtn);
   el.appendChild(abschRow);
+
+  /* Kopiertes Feld auf die gesamte Auswahl anwenden. Bisher musste das
+     kopierte Feld bei jedem Ziel einzeln über das Bearbeiten-Sheet eingefügt
+     werden – bei zwanzig gleichen Feldern zwanzig Mal. Hier genügt ein Klick;
+     WAS übertragen wird, legen die Chips darüber fest (Ausstattung, nicht
+     Ort: Position und Drehung bleiben immer feldspezifisch). */
+  const cpLabel = document.createElement('div');
+  cpLabel.className = 'bulk-section-label';
+  cpLabel.textContent = 'Kopiertes Feld auf Auswahl anwenden';
+  el.appendChild(cpLabel);
+
+  if (!copiedBayData) {
+    const cpHint = document.createElement('p');
+    cpHint.className = 'bulk-hint';
+    cpHint.textContent = 'Noch kein Feld kopiert – ein Feld antippen und dort '
+                       + '„Position kopieren" wählen.';
+    el.appendChild(cpHint);
+  } else {
+    const cpWrap = document.createElement('div');
+    cpWrap.className = 'bulk-paste-form';
+
+    const cpApply = document.createElement('button');
+    cpApply.type = 'button'; cpApply.className = 'bulk-paste-apply-btn';
+    const syncCpApply = () => {
+      const n = selectedBays.length;
+      const any = PASTE_FIELDS.some(([k]) => pasteOpts[k]);
+      cpApply.textContent = '📋 Auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' anwenden';
+      cpApply.disabled = !any;
+      cpApply.title = any ? 'Übernommen wird: ' + pasteScopeText()
+                          : 'Mindestens eine Eigenschaft auswählen';
+    };
+
+    cpWrap.appendChild(buildPasteScopeRow(syncCpApply));
+
+    const cpInfo = document.createElement('div');
+    cpInfo.className = 'bulk-paste-info';
+    const nPos = (copiedBayData.positions || []).length;
+    cpInfo.textContent = `Kopiert: ${nPos} Zusatzbauteil${nPos === 1 ? '' : 'e'}`
+      + `  ·  Höhen ${copiedBayData.hL != null ? fmtQty(copiedBayData.hL) : '–'}`
+      + ` / ${copiedBayData.hR != null ? fmtQty(copiedBayData.hR) : '–'} m`
+      + `  ·  Länge ${fmtQty(copiedBayData.len || 0)} m`;
+    cpWrap.appendChild(cpInfo);
+
+    syncCpApply();
+    cpApply.addEventListener('click', () => {
+      const n = pasteBayPositionsToAll(selectedBays);
+      renderAll();
+      showToast(`Auf ${n} Feld${n === 1 ? '' : 'er'} angewendet · ${pasteScopeText()}`);
+    });
+    cpWrap.appendChild(cpApply);
+    el.appendChild(cpWrap);
+  }
 
   // Vorlage auf die gesamte Auswahl anwenden: überschreibt Höhen + Positionen
   // aller markierten Felder mit einem Klick.
@@ -3729,16 +4265,27 @@ function renderBulkBar() {
     chip.className = 'bulk-pos-chip' + (allHave ? ' active' : '') + (someHave ? ' partial' : '');
     chip.textContent = p.label;
     chip.style.setProperty('--pos-color', p.color);
-    chip.title = someHave ? 'Bei einem Teil der Auswahl schon vorhanden' : '';
+    chip.title = allHave ? 'Bei allen ausgewählten Feldern entfernen'
+               : someHave ? 'Bei einem Teil der Auswahl schon vorhanden – antippen zum Einstellen'
+               : 'Menge/Lagen einstellen und auf alle ausgewählten Felder anwenden';
     chip.addEventListener('click', () => {
-      const turnOn = !allHave;   // an, außer alle ausgewählten haben sie schon → dann aus
-      selectedBays.forEach(bay => {
-        normalizeBay(bay);
-        const idx = bay.positions.findIndex(x => x.cat === p.key);
-        if (turnOn) { if (idx < 0) bay.positions.push({ id: ++_bId, cat: p.key, qty: null, unit: defaultUnit(p.key) }); }
-        else if (idx >= 0) bay.positions.splice(idx, 1);
-      });
-      renderAll();
+      // Haben ALLE das Bauteil schon → Klick entfernt es (wie bisher).
+      // Sonst öffnet sich der Einstell-Dialog, in dem Menge bzw. Lagen EINMAL
+      // für die gesamte Auswahl festgelegt werden. Früher wurde das Bauteil
+      // ohne jede Angabe angelegt: die Feldlänge floss nicht ein und die
+      // Lagen-Abfrage fehlte, sodass jedes Feld einzeln nachbearbeitet
+      // werden musste.
+      if (allHave) {
+        selectedBays.forEach(bay => {
+          normalizeBay(bay);
+          const idx = bay.positions.findIndex(x => x.cat === p.key);
+          if (idx >= 0) bay.positions.splice(idx, 1);
+        });
+        renderAll();
+        showToast(p.label + ' bei ' + selectedBays.length + ' Feldern entfernt');
+        return;
+      }
+      openBulkPosSheet(p.key, selectedBays);
     });
     chipRow.appendChild(chip);
   });
@@ -3780,11 +4327,31 @@ function renderBulkBar() {
     b.addEventListener('click', () => {
       bulkKonsBilling = val;
       billRow.querySelectorAll('.bulk-kbill-btn').forEach(x => x.classList.toggle('active', x === b));
-      lagenRow.style.display = val === 'meter' ? 'none' : '';
+      lagenRow.style.display  = val === 'meter' ? 'none' : '';
+      meterRow.style.display  = val === 'meter' ? '' : 'none';
     });
     billRow.appendChild(b);
   });
   konsForm.appendChild(billRow);
+
+  // Meter-Abrechnung: ohne eigenen Wert rechnet jedes Feld mit seiner eigenen
+  // Feldlänge – der Wert hier überschreibt das für alle ausgewählten Felder.
+  const meterRow = document.createElement('div');
+  meterRow.className = 'konsole-meter-row';
+  meterRow.style.display = bulkKonsBilling === 'meter' ? '' : 'none';
+  const meterInp = document.createElement('input');
+  meterInp.type = 'number'; meterInp.className = 'kmeter-inp';
+  meterInp.min = '0'; meterInp.step = 'any'; meterInp.inputMode = 'decimal';
+  meterInp.placeholder = 'je Feld die Feldlänge';
+  meterInp.value = bulkKonsMeter == null ? '' : String(bulkKonsMeter);
+  meterInp.addEventListener('input', () => {
+    const v = parseFloat(meterInp.value);
+    bulkKonsMeter = (meterInp.value === '' || isNaN(v) || v < 0) ? null : v;
+  });
+  const meterUnit = document.createElement('span');
+  meterUnit.className = 'kmeter-unit'; meterUnit.textContent = 'm';
+  meterRow.appendChild(meterInp); meterRow.appendChild(meterUnit);
+  konsForm.appendChild(meterRow);
 
   const lagenRow = document.createElement('div');
   lagenRow.className = 'bulk-kons-lagen-row';
@@ -3810,7 +4377,8 @@ function renderBulkBar() {
       normalizeBay(bay);
       bay.positions.push({
         id: ++_bId, cat: 'konsole', typ: bulkKonsTyp,
-        lagen: bulkKonsLagen, billing: bulkKonsBilling
+        lagen: bulkKonsLagen, billing: bulkKonsBilling,
+        meterValue: bulkKonsBilling === 'meter' ? bulkKonsMeter : null
       });
     });
     renderAll();
@@ -3903,10 +4471,12 @@ function renderSections() {
     baysDiv.className = 'bays-div';
     sec.bays.forEach((bay, bi) => {
       normalizeBay(bay);
+      const bayHidden = !isBayVisible(bay);
       const row = document.createElement('div');
       row.className = 'bay-row'
         + (bulkMode && bulkSelected.has(bay.id) ? ' bulk-selected' : '')
-        + (si === selectedSi && bi === selectedBi ? ' active-selected' : '');
+        + (si === selectedSi && bi === selectedBi ? ' active-selected' : '')
+        + (bayHidden ? ' bay-hidden' : '');
       row.style.borderLeft = '4px solid #2c6fa8';
 
       // Zeile 1: [Mehrfachauswahl] · Nummer · Längen-Eingabe · Löschen
@@ -3917,6 +4487,10 @@ function renderSections() {
         const chk = document.createElement('input');
         chk.type = 'checkbox'; chk.className = 'bulk-bay-check';
         chk.checked = bulkSelected.has(bay.id);
+        // Ausgeblendete Felder lassen sich nicht in die Mehrfachauswahl
+        // aufnehmen – Sammelaktionen sollen nur wirken, was auch sichtbar ist.
+        chk.disabled = bayHidden;
+        chk.title = bayHidden ? 'Feld ist ausgeblendet' : '';
         chk.addEventListener('change', () => {
           if (chk.checked) bulkSelected.add(bay.id); else bulkSelected.delete(bay.id);
           renderAll();
@@ -3938,6 +4512,16 @@ function renderSections() {
         tag.textContent = bayAbsch.name;
         tag.title = 'Abschnitt: ' + bayAbsch.name;
         top.appendChild(tag);
+      }
+
+      // Ausgeblendete Felder bleiben in der Liste sichtbar und bearbeitbar –
+      // nur so ist erkennbar, dass keine Daten verloren gegangen sind.
+      if (bayHidden) {
+        const eyeTag = document.createElement('span');
+        eyeTag.className = 'bay-hidden-tag';
+        eyeTag.textContent = '🙈 ausgeblendet';
+        eyeTag.title = 'Der Abschnitt dieses Feldes ist ausgeblendet – die Daten bleiben erhalten.';
+        top.appendChild(eyeTag);
       }
 
       if ((bay.note || '').trim()) {
@@ -4223,6 +4807,8 @@ function onLoadFile(e) {
       // v1/v2-Dateien kennen noch keine Abschnitte → leere Liste, alle Felder
       // gelten als „ohne Abschnitt" und bleiben vollständig erhalten.
       state.abschnitte = Array.isArray(s.abschnitte) ? s.abschnitte : [];
+      state.hideUnassigned = !!s.hideUnassigned;
+      state.aufmass  = s.aufmass || null;
       // Migrate v1 saves (no x0/y0): reconstruct chain positions
       let cx = 0, cy = 0;
       state.sections = (s.sections || []).map(sec => {
@@ -4271,9 +4857,11 @@ function collectFields() {
     let x = sec.x0, y = sec.y0;
     sec.bays.forEach(bay => {
       const pxLen = bay.len * PX_PER_M;
-      const cx = x + dir.dx * pxLen / 2 + o.dx * depth / 2;
-      const cy = y + dir.dy * pxLen / 2 + o.dy * depth / 2;
-      list.push({ bay, cx, cy, horiz: Math.abs(dir.dx) >= Math.abs(dir.dy) });
+      if (isBayVisible(bay)) {
+        const cx = x + dir.dx * pxLen / 2 + o.dx * depth / 2;
+        const cy = y + dir.dy * pxLen / 2 + o.dy * depth / 2;
+        list.push({ bay, cx, cy, horiz: Math.abs(dir.dx) >= Math.abs(dir.dy) });
+      }
       x += dir.dx * pxLen; y += dir.dy * pxLen;
     });
   });
@@ -4340,6 +4928,176 @@ function aggQtyText(a) {
   if (a.lagen) parts.push(a.lagen === 1 ? '1 Lage' : a.lagen + ' Lagen');
   UNIT_DEFS.forEach(([u, lbl]) => { if (a.qtyByUnit[u]) parts.push(fmtQty(a.qtyByUnit[u]) + ' ' + lbl); });
   return parts.join(' · ') || '–';
+}
+
+/* ── Aufmaßregeln nach ATV DIN 18451 ─────────────────────────────────────────
+   Die Norm rechnet nicht mit den Systemmaßen des verwendeten Gerüstsystems,
+   sondern ausschließlich mit den ACHSMASSEN der Gerüstkonstruktion – „Der
+   Ermittlung der Leistung … sind die technisch erforderlichen Maße an den
+   Außenseiten der Gerüstkonstruktion zugrunde zu legen" (5.1.1). Genau das
+   zeichnet und summiert die App ohnehin: jede Feldlänge ist ein Achsmaß.
+
+   Dazu kommen zwei Zuschläge, die sich aus der Konstruktion ergeben:
+
+   • AUSSENECKE (5.2.1.1): an einer Außenecke überlappen sich die beiden
+     angrenzenden Seiten. Die überlappende Ecklänge darf bei BEIDEN Seiten
+     mitgerechnet werden (La = L + L1) – die Ecke zählt also bewusst doppelt.
+     Der Zuschlag je Seite entspricht der Gerüsttiefe (Wandabstand +
+     Systembreite); er ist frei überschreibbar.
+   • FELDZUSCHLAG: fester Aufschlag von 0,80 m (bei kleineren Systembreiten
+     0,73 m). Ob er je Feld, je Wand oder nur bei einfeldrigen Gerüsten
+     anfällt, ist einstellbar.
+
+   Beides ist bewusst als KONFIGURIERBARER Parameter umgesetzt (Wert,
+   Wirkungsbereich, an/aus) statt hart kodiert: ändern sich die Aufmaßregeln,
+   genügt eine Änderung im Dialog „Aufmaßregeln" im PDF-Export.
+
+   Wichtig: die Regeln wirken ausschließlich auf die AUFMASS-Auswertung im
+   PDF. Die Zeichnung und die Live-Anzeige bleiben immer das reine Achsmaß –
+   sonst würde ein Zuschlag die maßstäbliche Darstellung verfälschen.        */
+
+// Wirkungsbereich des Feldzuschlags: [Schlüssel, Knopfbeschriftung, Erklärung]
+const AUFMASS_MODI = [
+  ['feld',       'je Feld',        'Jedes Gerüstfeld erhält den Aufschlag.'],
+  ['wand',       'je Wand',        'Einmal je zusammenhängender Wand (Feldkette).'],
+  ['einzelfeld', 'nur Einzelfeld', 'Nur Wände, die aus genau einem Feld bestehen.']
+];
+
+// Übliche Aufschläge in m – Schnellwahl im Dialog, freie Eingabe bleibt möglich.
+const AUFMASS_FELD_PRESETS = [0.80, 0.73];
+
+const AUFMASS_DEFAULTS = {
+  // Standard: keine Zuschläge. Sie werden bewusst vom Nutzer zugeschaltet,
+  // damit sich bestehende Aufmaße nicht unbemerkt ändern.
+  eckzuschlag:  { aktiv: false, wert: null },          // wert null → Gerüsttiefe
+  feldzuschlag: { aktiv: false, wert: 0.80, modus: 'wand' }
+};
+
+/** Aufmaßregeln der Zeichnung – ergänzt fehlende/ungültige Werte AN ORT UND
+ *  STELLE in `state.aufmass` (damit sie mitgespeichert werden) und liefert
+ *  immer dasselbe Objekt zurück. Die stabile Identität ist wichtig: die
+ *  Eingabefelder im Dialog schreiben direkt in dieses Objekt. */
+function aufmassRules() {
+  const d = AUFMASS_DEFAULTS;
+  const num = (v, fb) => {
+    const n = parseFloat(v);
+    return (v != null && v !== '' && !isNaN(n) && n >= 0) ? n : fb;
+  };
+  if (!state.aufmass || typeof state.aufmass !== 'object') state.aufmass = {};
+  const r = state.aufmass;
+  if (!r.eckzuschlag  || typeof r.eckzuschlag  !== 'object') r.eckzuschlag  = {};
+  if (!r.feldzuschlag || typeof r.feldzuschlag !== 'object') r.feldzuschlag = {};
+
+  r.eckzuschlag.aktiv  = !!r.eckzuschlag.aktiv;
+  r.eckzuschlag.wert   = (r.eckzuschlag.wert == null || r.eckzuschlag.wert === '')
+                         ? null : num(r.eckzuschlag.wert, null);
+  r.feldzuschlag.aktiv = !!r.feldzuschlag.aktiv;
+  r.feldzuschlag.wert  = num(r.feldzuschlag.wert, d.feldzuschlag.wert);
+  r.feldzuschlag.modus = AUFMASS_MODI.some(m => m[0] === r.feldzuschlag.modus)
+                         ? r.feldzuschlag.modus : d.feldzuschlag.modus;
+  return r;
+}
+
+/** Zuschlag je Außenecke und Seite in m – ohne eigenen Wert die Gerüsttiefe. */
+function eckZuschlagWert() {
+  const r = aufmassRules();
+  return r.eckzuschlag.wert != null ? r.eckzuschlag.wert : state.depth;
+}
+
+/** Ist mindestens ein Zuschlag eingeschaltet? */
+function aufmassAktiv() {
+  const r = aufmassRules();
+  return r.eckzuschlag.aktiv || r.feldzuschlag.aktiv;
+}
+
+/** Kurzbeschreibung der aktiven Regeln (Dialog, PDF-Fußnote). */
+function aufmassRuleText() {
+  const r = aufmassRules();
+  const parts = ['Achsmaße der Gerüstkonstruktion (DIN 18451, 5.1.1)'];
+  if (r.eckzuschlag.aktiv) {
+    parts.push(`Außenecke beidseitig + ${fmtQty(eckZuschlagWert())} m (La = L + L1)`);
+  }
+  if (r.feldzuschlag.aktiv) {
+    const m = AUFMASS_MODI.find(x => x[0] === r.feldzuschlag.modus);
+    parts.push(`Aufschlag ${fmtQty(r.feldzuschlag.wert)} m ${m ? m[1] : ''}`.trim());
+  }
+  return parts.join('   ·   ');
+}
+
+/** Wände als Listen von Sektionsindizes: Ketten direkt aneinanderhängender
+ *  Felder gleichen Winkels. Grundlage für den Feldzuschlag „je Wand". */
+function wallChains() {
+  const seen = new Set(), chains = [];
+  state.sections.forEach((sec, si) => {
+    if (seen.has(si) || !sec.bays.some(isBayVisible)) return;
+    const chain = findWallChain(si);
+    chain.forEach(i => seen.add(i));
+    const visible = chain.filter(i => state.sections[i].bays.some(isBayVisible));
+    if (visible.length) chains.push(visible);
+  });
+  return chains;
+}
+
+/**
+ * Aufmaß einer Feldmenge nach den eingestellten Regeln.
+ * Grundlage ist immer das Achsmaß; Zuschläge kommen nur dazu, wenn sie
+ * eingeschaltet sind.
+ *
+ * @param {Array} bays  Felder (z. B. ein Abschnitt oder alle Felder)
+ * @returns {{achse:number, ecken:number, eckLaenge:number, felder:number,
+ *            feldLaenge:number, laenge:number, achsFlaeche:number,
+ *            flaeche:number, hoehe:number|null}}
+ */
+function computeAufmass(bays) {
+  const r   = aufmassRules();
+  const ids = new Set(bays.map(b => b.id));
+  const achse       = bays.reduce((s, b) => s + b.len, 0);
+  const achsFlaeche = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
+
+  // Außenecken: Jede Ecke bringt den Zuschlag für JEDE angrenzende Seite ein,
+  // die zu dieser Feldmenge gehört – so wird die Ecke wie vorgesehen bei
+  // beiden Seiten mitgerechnet.
+  let ecken = 0;
+  if (r.eckzuschlag.aktiv) {
+    computeLayout().forEach(c => {
+      if (c.type !== 'corner') return;
+      [c.si, c.ni].forEach(i => {
+        const sec = state.sections[i];
+        if (sec && sec.bays.some(b => ids.has(b.id))) ecken++;
+      });
+    });
+  }
+  const eckLaenge = ecken * eckZuschlagWert();
+
+  // Feldzuschlag – je nach eingestelltem Wirkungsbereich.
+  let felder = 0;
+  if (r.feldzuschlag.aktiv) {
+    if (r.feldzuschlag.modus === 'feld') {
+      felder = bays.length;
+    } else {
+      wallChains().forEach(chain => {
+        const chainBays = chain.flatMap(i => state.sections[i].bays.filter(isBayVisible));
+        if (!chainBays.some(b => ids.has(b.id))) return;
+        if (r.feldzuschlag.modus === 'einzelfeld' && chainBays.length !== 1) return;
+        felder++;
+      });
+    }
+  }
+  const feldLaenge = felder * r.feldzuschlag.wert;
+
+  const laenge = achse + eckLaenge + feldLaenge;
+  // Die Zuschlagslängen werden mit der längengewichteten mittleren Gerüsthöhe
+  // in Fläche umgerechnet – dieselbe Höhe, mit der auch das Achsmaß rechnet.
+  const hoehe = achse > 0 ? achsFlaeche / achse : null;
+  const flaeche = hoehe != null ? laenge * hoehe : achsFlaeche;
+
+  const r2 = n => +n.toFixed(2);
+  return {
+    achse: r2(achse), ecken, eckLaenge: r2(eckLaenge),
+    felder, feldLaenge: r2(feldLaenge), laenge: r2(laenge),
+    achsFlaeche: r2(achsFlaeche), flaeche: r2(flaeche),
+    hoehe: hoehe != null ? r2(hoehe) : null
+  };
 }
 
 /* ── PDF-Export (Vektor) ─────────────────────────────────────────────────────
@@ -4443,11 +5201,18 @@ const PDF_THEMES = {
 };
 
 const PDF_THEME_KEY = 'av_2d_pdf_theme';
+const PDF_HIDDEN_KEY = 'av_2d_pdf_include_hidden';
 
 function pdfThemeName() {
   const n = localStorage.getItem(PDF_THEME_KEY);
   return PDF_THEMES[n] ? n : 'technisch';
 }
+
+/* Standardregel für ausgeblendete Abschnitte: NICHT mitexportieren. Das PDF
+   zeigt damit genau das, was auch auf dem Bildschirm zu sehen ist – gerade bei
+   Bauabschnitten, die getrennt abgerechnet werden, ist das die Erwartung.
+   Umschaltbar im PDF-Dialog; die Wahl wird gemerkt.                         */
+let pdfIncludeHidden = localStorage.getItem(PDF_HIDDEN_KEY) === '1';
 
 /** Farbe im gewählten Layout: in „monochrom" wird jede Farbe in einen
  *  Grauwert gleicher Helligkeit übersetzt, damit auch Schwarz-Weiß-Ausdrucke
@@ -4616,7 +5381,8 @@ function pdfDrawLegend(ctx, top, entries) {
 function pdfLegendEntries() {
   const entries = [];
   const seen = new Set();
-  allBaysFlat().forEach(bay => (bay.positions || []).forEach(pos => {
+  const bays = visibleBaysFlat();
+  bays.forEach(bay => (bay.positions || []).forEach(pos => {
     const p = POS_BY_KEY[pos.cat];
     if (!p || seen.has(p.key)) return;
     seen.add(p.key);
@@ -4624,7 +5390,7 @@ function pdfLegendEntries() {
   }));
   entries.sort((a, b) => a.label.localeCompare(b.label));
   abschnitteList().forEach(a => {
-    if (allBaysFlat().some(b => b.abschnittId === a.id)) {
+    if (bays.some(b => b.abschnittId === a.id)) {
       entries.push({ label: a.name, color: pdfHex(a.color), shape: 'line' });
     }
   });
@@ -4686,12 +5452,47 @@ function pdfPlanOrigin(win, area, s) {
   };
 }
 
+/* ── Kollisionsfreies Blattlayout ────────────────────────────────────────────
+   Feldflächen werden am Rand des Ausschnitts abgeschnitten, ihre BESCHRIFTUNGEN
+   (Feldlänge, Feldbezeichnung, Höhen- und Positions-Pillen) aber nicht: die
+   sitzen neben dem Feld und ragten deshalb bei randnahen Feldern in die
+   Legende, die Kopf-/Fußzeile oder über die Übersichtskarte.
+   Deshalb werden alle Beschriftungen erst GEPLANT (Position + tatsächliche
+   Ausdehnung auf dem Papier), dann gegen feste Sperrzonen geprüft und erst
+   danach gezeichnet.                                                        */
+
+/** Überlappen sich zwei Rechtecke {x,y,w,h}? */
+function rectHits(a, b) {
+  return !!b && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/**
+ * Schiebt eine Beschriftung so weit, dass ihr Rechteck vollständig im
+ * erlaubten Bereich liegt. Passt sie selbst verschoben nicht hinein (breiter
+ * als der Bereich), liefert die Funktion null – sie entfällt dann lieber, als
+ * die Legende zu überdecken.
+ */
+function clampLabelInto(label, area) {
+  const r = label.rect;
+  if (r.w > area.w || r.h > area.h) return null;
+  let dx = 0, dy = 0;
+  if (r.x < area.x)                   dx = area.x - r.x;
+  else if (r.x + r.w > area.x + area.w) dx = (area.x + area.w) - (r.x + r.w);
+  if (r.y < area.y)                   dy = area.y - r.y;
+  else if (r.y + r.h > area.y + area.h) dy = (area.y + area.h) - (r.y + r.h);
+  if (!dx && !dy) return label;
+  return { ...label, cx: label.cx + dx, cy: label.cy + dy,
+           rect: { ...r, x: r.x + dx, y: r.y + dy } };
+}
+
 /**
  * Sucht die Ecke des Zeichenbereichs, in der die Übersichtskarte am wenigsten
- * vom Plan verdeckt. Sonst landete sie stur unten rechts – und damit bei
- * L-förmigen Gerüsten mitten auf der abgehenden Wand.
+ * verdeckt. Sonst landete sie stur unten rechts – und damit bei L-förmigen
+ * Gerüsten mitten auf der abgehenden Wand. Bewertet werden Feldflächen UND
+ * Beschriftungen; Beschriftungen zählen dabei schwerer, weil eine verdeckte
+ * Maßangabe das Blatt unbrauchbar macht.
  */
-function pdfPickLocatorBox(area, win, s, bayEls, lw, lh) {
+function pdfPickLocatorBox(area, win, s, bayEls, lw, lh, labels = []) {
   const o = pdfPlanOrigin(win, area, s);
   const boxes = [
     { x: area.x + area.w - lw, y: area.y + area.h - lh },   // unten rechts (bevorzugt)
@@ -4702,14 +5503,14 @@ function pdfPickLocatorBox(area, win, s, bayEls, lw, lh) {
 
   const rects = bayEls.map(el => {
     const b = elBBox(el);
-    return { x1: o.x + b.minX * s, x2: o.x + b.maxX * s,
-             y1: o.y + b.minY * s, y2: o.y + b.maxY * s };
+    return { x: o.x + b.minX * s, y: o.y + b.minY * s,
+             w: (b.maxX - b.minX) * s, h: (b.maxY - b.minY) * s };
   });
   let best = boxes[0], bestScore = Infinity;
   boxes.forEach(box => {
-    const hits = rects.filter(r =>
-      r.x2 > box.x && r.x1 < box.x + box.w && r.y2 > box.y && r.y1 < box.y + box.h).length;
-    if (hits < bestScore) { bestScore = hits; best = box; }
+    const score = rects.filter(r => rectHits(r, box)).length
+                + labels.filter(l => rectHits(l.rect, box)).length * 3;
+    if (score < bestScore) { bestScore = score; best = box; }
   });
   return best;
 }
@@ -4797,11 +5598,60 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
   //    klein, Text würde sich nur überlagern.
   if (shapesOnly) { doc.setTextColor(0, 0, 0); return; }
 
-  // Die Gerüsttiefe ist im Grundriss nur ~0,7 m breit. Damit auf Papier nichts
-  // ineinanderläuft, sitzt im Feld selbst NUR die Feldlänge; Feldbezeichnung
-  // liegt an der Wandseite, Höhen und Positionen gestapelt an der offenen
-  // Seite – jeweils längs zum Feld gedreht und auf die Feldlänge eingepasst.
+  const labels = pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth);
+
+  /* Sperrzonen: Der Zeichenbereich `area` endet exakt unter der Legende und
+     über der Fußzeile – was dort nicht hineinpasst, wird hineingeschoben oder
+     weggelassen. Zusätzlich bleibt die Übersichtskarte frei. Sie wird ERST
+     platziert, wenn die Beschriftungen bekannt sind, und danach gezeichnet. */
+  const locBox = opts.locator
+    ? pdfPickLocatorBox(area, win, s, bayEls, opts.locator.w, opts.locator.h, labels)
+    : null;
+
+  labels.forEach(raw => {
+    const ln = clampLabelInto(raw, area);
+    if (!ln || rectHits(ln.rect, locBox)) return;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(ln.fs);
+    if (ln.plain) {
+      doc.setTextColor(...ln.col);
+      pdfText(doc, ln.text, ln.cx, ln.cy, ln.rot);
+    } else {
+      pdfPill(doc, ln.text, ln.cx, ln.cy, ln.rot, ln.fill, ln.stroke, ln.col);
+    }
+  });
+
+  if (locBox) {
+    pdfDrawLocator(doc, opts.locator.bounds, win, locBox, theme, opts.locator.caption);
+  }
+
+  doc.setTextColor(0, 0, 0);
+}
+
+/**
+ * Plant alle Feldbeschriftungen eines Blattes, OHNE sie zu zeichnen.
+ *
+ * Die Gerüsttiefe ist im Grundriss nur ~0,7 m breit. Damit auf Papier nichts
+ * ineinanderläuft, sitzt im Feld selbst NUR die Feldlänge; die Feldbezeichnung
+ * liegt an der Wandseite, Höhen und Positionen gestapelt an der offenen Seite –
+ * jeweils längs zum Feld gedreht und auf die Feldlänge eingepasst.
+ *
+ * @returns {Array<{text,cx,cy,rot,fs,fill,stroke,col,plain,rect}>}
+ *          `rect` ist die achsparallele Hüllbox in mm – Grundlage für die
+ *          Kollisionsprüfung gegen Legende, Fußzeile und Übersichtskarte.
+ */
+function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
+  const out = [];
   const depthMM = depth * s;
+
+  /** Hüllbox einer gedrehten Pille bzw. eines gedrehten Textes (mm). */
+  const mkRect = (cx, cy, w, h, deg) => {
+    const th = (deg || 0) * Math.PI / 180;
+    const ca = Math.abs(Math.cos(th)), sa = Math.abs(Math.sin(th));
+    const bw = w * ca + h * sa, bh = w * sa + h * ca;
+    return { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh };
+  };
+
   bayEls.forEach(el => {
     const bay = state.sections[el.si].bays[el.bi];
     const rot = uprightDeg(el.ang);
@@ -4816,10 +5666,13 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     const lenMM  = el.len * PX_PER_M * s;
     const maxTxt = lenMM * 0.92;
 
-    // Feldlänge mittig im Feld
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(...theme.ink);
-    pdfFitFont(doc, el.len.toFixed(2).replace('.', ','), maxTxt, PDF_FS_LEN, 5.5);
-    pdfText(doc, el.len.toFixed(2).replace('.', ','), c.x, c.y, rot);
+    // Feldlänge mittig im Feld (ohne Pille – die Fläche ist ihr Hintergrund)
+    const lenTxt = el.len.toFixed(2).replace('.', ',');
+    doc.setFont('helvetica', 'bold');
+    const lenFs = pdfFitFont(doc, lenTxt, maxTxt, PDF_FS_LEN, 5.5);
+    const lenW  = doc.getTextWidth(lenTxt), lenH = lenFs * 0.352778;
+    out.push({ text: lenTxt, cx: c.x, cy: c.y, rot, fs: lenFs, plain: true,
+               col: theme.ink, rect: mkRect(c.x, c.y, lenW, lenH, rot) });
 
     // Feldbezeichnung an der Wandseite – in der Abschnittsfarbe, sodass sich
     // die Abschnitte auch im Ausdruck auf einen Blick unterscheiden.
@@ -4828,9 +5681,13 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     const label = bayLabel(state.sections[el.si], el.bi);
     doc.setFont('helvetica', 'bold');
     const lblFs = pdfFitFont(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
-    const lblD  = depthMM / 2 + lblFs * 0.352778 * 1.0;
-    pdfPill(doc, label, c.x - ox * lblD, c.y - oy * lblD, rot,
-            lblBg, lblBg, [255, 255, 255]);
+    const lblFsMM = lblFs * 0.352778;
+    const lblD  = depthMM / 2 + lblFsMM;
+    const lblCx = c.x - ox * lblD, lblCy = c.y - oy * lblD;
+    out.push({ text: label, cx: lblCx, cy: lblCy, rot, fs: lblFs,
+               fill: lblBg, stroke: lblBg, col: [255, 255, 255],
+               rect: mkRect(lblCx, lblCy,
+                            doc.getTextWidth(label) + lblFsMM * 0.8, lblFsMM * 1.5, rot) });
 
     // Offene Seite: Höhen, darunter je Position eine Zeile
     const lines = [];
@@ -4853,14 +5710,17 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     lines.forEach(ln => {
       doc.setFont('helvetica', 'bold');
       const fs = pdfFitFont(doc, ln.text, maxTxt, ln.fs, 5.5);
-      const h  = fs * 0.352778 * 1.5;
+      const fsMM = fs * 0.352778;
+      const h  = fsMM * 1.5;
       dist += h * 0.62;
-      pdfPill(doc, ln.text, c.x + ox * dist, c.y + oy * dist, rot, ln.fill, ln.stroke, ln.col);
+      const cx = c.x + ox * dist, cy = c.y + oy * dist;
+      out.push({ text: ln.text, cx, cy, rot, fs, fill: ln.fill, stroke: ln.stroke, col: ln.col,
+                 rect: mkRect(cx, cy, doc.getTextWidth(ln.text) + fsMM * 0.8, h, rot) });
       dist += h * 0.48;
     });
   });
 
-  doc.setTextColor(0, 0, 0);
+  return out;
 }
 
 /** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt farbig
@@ -5029,6 +5889,168 @@ function exportPdf() {
   openPdfSheet();
 }
 
+/**
+ * Einstellblock für die Aufmaßregeln nach ATV DIN 18451. Bewusst im
+ * PDF-Dialog: die Regeln wirken ausschließlich auf die Aufmaß-Auswertung im
+ * Dokument, nicht auf die Zeichnung. Alle Werte sind frei änderbar – so lassen
+ * sich künftige Anpassungen der Aufmaßregeln ohne Codeänderung einpflegen.
+ */
+function buildAufmassSettings() {
+  const wrap = document.createElement('div');
+  wrap.className = 'aufmass-settings';
+
+  const lbl = document.createElement('div');
+  lbl.className = 'sheet-section-label';
+  lbl.textContent = 'Aufmaßregeln (ATV DIN 18451)';
+  wrap.appendChild(lbl);
+
+  const base = document.createElement('p');
+  base.className = 'pdf-sheet-note';
+  base.textContent = 'Grundlage sind immer die Achsmaße der Gerüstkonstruktion – '
+                   + 'unabhängig vom Gerüstsystem (5.1.1). Zuschläge werden im PDF '
+                   + 'getrennt ausgewiesen; die Zeichnung bleibt maßstäblich.';
+  wrap.appendChild(base);
+
+  const r = aufmassRules();
+  const summary = document.createElement('div');
+  summary.className = 'aufmass-summary';
+  const syncSummary = () => {
+    // Vorschau über GENAU die Felder, die auch im PDF landen – sonst zeigte der
+    // Dialog eine andere Zahl als das Dokument.
+    const calc = () => computeAufmass(visibleBaysFlat());
+    const m = pdfIncludeHidden ? withHiddenShown(calc) : calc();
+    summary.textContent = `Achsmaß ${fmtQty(m.achse)} m`
+      + (m.ecken ? `  +  ${m.ecken} × ${fmtQty(eckZuschlagWert())} m Ecke` : '')
+      + (m.felder ? `  +  ${m.felder} × ${fmtQty(aufmassRules().feldzuschlag.wert)} m Feld` : '')
+      + `  =  Aufmaß ${fmtQty(m.laenge)} m`
+      + (m.flaeche ? `  ·  ${fmtQty(m.flaeche)} m²` : '');
+  };
+  // Der Schalter „ausgeblendete mitexportieren" liegt weiter oben im Dialog und
+  // zieht die Vorschau hierüber nach.
+  wrap._syncSummary = syncSummary;
+
+  // ── Außenecke ───────────────────────────────────────────────────────────
+  const eckRow = document.createElement('label');
+  eckRow.className = 'pdf-opt-row';
+  const eckChk = document.createElement('input');
+  eckChk.type = 'checkbox'; eckChk.checked = r.eckzuschlag.aktiv;
+  const eckTxt = document.createElement('span');
+  eckTxt.innerHTML = '<strong>Außenecken beidseitig mitrechnen</strong>'
+                   + '<br><span class="pdf-opt-hint">La = L + L1: die überlappende '
+                   + 'Ecklänge zählt bei beiden angrenzenden Seiten.</span>';
+  eckRow.appendChild(eckChk); eckRow.appendChild(eckTxt);
+  wrap.appendChild(eckRow);
+
+  const eckCfg = document.createElement('div');
+  eckCfg.className = 'aufmass-cfg-row';
+  const eckLab = document.createElement('span');
+  eckLab.className = 'aufmass-cfg-label';
+  eckLab.textContent = 'Ecklänge je Seite (m)';
+  const eckInp = document.createElement('input');
+  eckInp.type = 'number'; eckInp.className = 'aufmass-cfg-inp';
+  eckInp.min = '0'; eckInp.step = '0.01'; eckInp.inputMode = 'decimal';
+  eckInp.placeholder = state.depth.toFixed(2);
+  eckInp.title = 'Leer lassen = Gerüsttiefe (' + state.depth.toFixed(2).replace('.', ',') + ' m)';
+  eckInp.value = r.eckzuschlag.wert != null ? r.eckzuschlag.wert.toFixed(2) : '';
+  eckInp.addEventListener('input', () => {
+    const v = parseFloat(eckInp.value);
+    state.aufmass.eckzuschlag.wert = (eckInp.value === '' || isNaN(v) || v < 0) ? null : +v.toFixed(2);
+    syncSummary(); scheduleAutosave2d();
+  });
+  eckCfg.appendChild(eckLab); eckCfg.appendChild(eckInp);
+  wrap.appendChild(eckCfg);
+
+  const syncEck = () => { eckCfg.style.display = eckChk.checked ? '' : 'none'; };
+  eckChk.addEventListener('change', () => {
+    state.aufmass.eckzuschlag.aktiv = eckChk.checked;
+    syncEck(); syncSummary(); scheduleAutosave2d();
+  });
+  syncEck();
+
+  // ── Feldzuschlag ────────────────────────────────────────────────────────
+  const feldRow = document.createElement('label');
+  feldRow.className = 'pdf-opt-row';
+  const feldChk = document.createElement('input');
+  feldChk.type = 'checkbox'; feldChk.checked = r.feldzuschlag.aktiv;
+  const feldTxt = document.createElement('span');
+  feldTxt.innerHTML = '<strong>Festen Aufschlag berücksichtigen</strong>'
+                    + '<br><span class="pdf-opt-hint">0,80 m je Gerüstfeld, bei kleineren '
+                    + 'Systembreiten 0,73 m. Wert und Wirkungsbereich frei wählbar.</span>';
+  feldRow.appendChild(feldChk); feldRow.appendChild(feldTxt);
+  wrap.appendChild(feldRow);
+
+  const feldCfg = document.createElement('div');
+  feldCfg.className = 'aufmass-cfg-block';
+
+  const valRow = document.createElement('div');
+  valRow.className = 'aufmass-cfg-row';
+  const valLab = document.createElement('span');
+  valLab.className = 'aufmass-cfg-label';
+  valLab.textContent = 'Aufschlag (m)';
+  const valInp = document.createElement('input');
+  valInp.type = 'number'; valInp.className = 'aufmass-cfg-inp';
+  valInp.min = '0'; valInp.step = '0.01'; valInp.inputMode = 'decimal';
+  valInp.value = r.feldzuschlag.wert.toFixed(2);
+  valInp.addEventListener('input', () => {
+    const v = parseFloat(valInp.value);
+    if (!isNaN(v) && v >= 0) {
+      state.aufmass.feldzuschlag.wert = +v.toFixed(2);
+      presetRow.querySelectorAll('.aufmass-preset').forEach(b =>
+        b.classList.toggle('active', Math.abs(parseFloat(b.dataset.v) - v) < 0.005));
+      syncSummary(); scheduleAutosave2d();
+    }
+  });
+  valRow.appendChild(valLab); valRow.appendChild(valInp);
+  feldCfg.appendChild(valRow);
+
+  const presetRow = document.createElement('div');
+  presetRow.className = 'aufmass-preset-row';
+  AUFMASS_FELD_PRESETS.forEach(v => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'aufmass-preset' + (Math.abs(r.feldzuschlag.wert - v) < 0.005 ? ' active' : '');
+    b.dataset.v = String(v);
+    b.textContent = v.toFixed(2).replace('.', ',') + ' m';
+    b.addEventListener('click', () => {
+      state.aufmass.feldzuschlag.wert = v;
+      valInp.value = v.toFixed(2);
+      presetRow.querySelectorAll('.aufmass-preset').forEach(x => x.classList.toggle('active', x === b));
+      syncSummary(); scheduleAutosave2d();
+    });
+    presetRow.appendChild(b);
+  });
+  feldCfg.appendChild(presetRow);
+
+  const modeRow = document.createElement('div');
+  modeRow.className = 'aufmass-preset-row';
+  AUFMASS_MODI.forEach(([key, label, desc]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'aufmass-preset' + (r.feldzuschlag.modus === key ? ' active' : '');
+    b.textContent = label;
+    b.title = desc;
+    b.addEventListener('click', () => {
+      state.aufmass.feldzuschlag.modus = key;
+      modeRow.querySelectorAll('.aufmass-preset').forEach(x => x.classList.toggle('active', x === b));
+      syncSummary(); scheduleAutosave2d();
+    });
+    modeRow.appendChild(b);
+  });
+  feldCfg.appendChild(modeRow);
+  wrap.appendChild(feldCfg);
+
+  const syncFeld = () => { feldCfg.style.display = feldChk.checked ? '' : 'none'; };
+  feldChk.addEventListener('change', () => {
+    state.aufmass.feldzuschlag.aktiv = feldChk.checked;
+    syncFeld(); syncSummary(); scheduleAutosave2d();
+  });
+  syncFeld();
+
+  syncSummary();
+  wrap.appendChild(summary);
+  return wrap;
+}
+
 /** Auswahl des PDF-Layouts. Die zuletzt gewählte Variante ist vorausgewählt,
  *  ein Tipp auf „PDF erstellen" genügt also im Alltag. */
 function openPdfSheet() {
@@ -5094,6 +6116,38 @@ function openPdfSheet() {
                    + 'wiederholter Kopfzeile und Legende auf jeder Seite.';
   sheet.appendChild(note);
 
+  // ── Ausgeblendete Abschnitte ────────────────────────────────────────────
+  const nHiddenGroups = hiddenGroupCount();
+  if (nHiddenGroups) {
+    const hLbl = document.createElement('div');
+    hLbl.className = 'sheet-section-label';
+    hLbl.textContent = 'Ausgeblendete Abschnitte';
+    sheet.appendChild(hLbl);
+
+    const hRow = document.createElement('label');
+    hRow.className = 'pdf-opt-row';
+    const hChk = document.createElement('input');
+    hChk.type = 'checkbox';
+    hChk.checked = pdfIncludeHidden;
+    hChk.addEventListener('change', () => {
+      pdfIncludeHidden = hChk.checked;
+      localStorage.setItem(PDF_HIDDEN_KEY, pdfIncludeHidden ? '1' : '0');
+      // Die Aufmaß-Vorschau rechnet über den Export-Umfang → mitziehen.
+      const box = sheet.querySelector('.aufmass-settings');
+      if (box && box._syncSummary) box._syncSummary();
+    });
+    const hTxt = document.createElement('span');
+    hTxt.innerHTML = `<strong>Ausgeblendete Abschnitte mitexportieren</strong>`
+                   + `<br><span class="pdf-opt-hint">${nHiddenGroups} Abschnitt`
+                   + `${nHiddenGroups === 1 ? '' : 'e'} ausgeblendet. Standard: nur sichtbare `
+                   + `Abschnitte kommen in Plan und Tabellen.</span>`;
+    hRow.appendChild(hChk); hRow.appendChild(hTxt);
+    sheet.appendChild(hRow);
+  }
+
+  // ── Aufmaßregeln (ATV DIN 18451) ────────────────────────────────────────
+  sheet.appendChild(buildAufmassSettings());
+
   const actRow = document.createElement('div');
   actRow.className = 'sheet-actions';
 
@@ -5143,7 +6197,26 @@ async function runPdfExport(themeName) {
     if (btn) { btn.disabled = false; btn.textContent = prevText; }
   }
 }
-async function buildPdf(themeName) {
+/**
+ * PDF erzeugen. Standardregel: Es werden NUR SICHTBARE Abschnitte exportiert –
+ * was auf der Zeichenfläche ausgeblendet ist, steht auch nicht im Plan und in
+ * den Tabellen. Über den Schalter im PDF-Dialog (`pdfIncludeHidden`) lässt sich
+ * das je Export umstellen, ohne die Ansicht anzufassen.
+ */
+async function buildPdf(themeName, opts = {}) {
+  const includeHidden = opts.includeHidden != null ? opts.includeHidden : pdfIncludeHidden;
+  const prevIgnore = ignoreHidden;
+  ignoreHidden = !!includeHidden;
+  invalidateViewCaches();
+  try {
+    return await buildPdfDocument(themeName);
+  } finally {
+    ignoreHidden = prevIgnore;
+    invalidateViewCaches();
+  }
+}
+
+async function buildPdfDocument(themeName) {
   const { jsPDF } = window.jspdf;
   const theme  = PDF_THEMES[themeName] || PDF_THEMES[pdfThemeName()];
   const layout = computeLayout();
@@ -5170,9 +6243,13 @@ async function buildPdf(themeName) {
   const doc    = new jsPDF({ orientation: orient, unit: 'mm', format: 'a4', compress: true });
   const availW = pdfW - 2 * margin;
 
-  const totalLen     = state.sections.reduce((a, s) => a + s.bays.reduce((b, x) => b + x.len, 0), 0);
-  const totalFlaeche = computeTotalFlaeche();
-  const allBays      = allBaysFlat();
+  // Exportiert wird die Feldmenge, die auch gezeichnet wird (siehe buildPdf:
+  // ausgeblendete Abschnitte sind je nach Schalter enthalten oder nicht).
+  const allBays      = visibleBaysFlat();
+  const totalLen     = allBays.reduce((a, b) => a + b.len, 0);
+  const totalFlaeche = sumFlaecheM2(allBays);
+  const aufmassAll   = computeAufmass(allBays);
+  const nHiddenBays  = allBaysFlat().length - allBays.length;
   const dateStr      = new Date().toLocaleDateString('de-DE');
   const title        = state.project || 'Gerüst 2D-Ansicht';
 
@@ -5180,8 +6257,10 @@ async function buildPdf(themeName) {
   const ctx = {
     doc, theme, pdfW, pdfH, margin, title, dateStr,
     subtitle: `${allBays.length} Feld${allBays.length === 1 ? '' : 'er'}   ·   `
-            + `Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`,
-    metaLine: `Gesamtlänge ${fmtQty(totalLen)} m   ·   Gerüstfläche ${fmtQty(totalFlaeche)} m²`
+            + `Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`
+            + (nHiddenBays ? `   ·   ${nHiddenBays} Feld${nHiddenBays === 1 ? '' : 'er'} ausgeblendet (nicht enthalten)` : ''),
+    metaLine: `Achsmaß ${fmtQty(totalLen)} m   ·   Gerüstfläche ${fmtQty(totalFlaeche)} m²`
+            + (aufmassAktiv() ? `   ·   Aufmaß ${fmtQty(aufmassAll.laenge)} m / ${fmtQty(aufmassAll.flaeche)} m²` : '')
             + `   ·   Gerüsttiefe ${state.depth.toFixed(2).replace('.', ',')} m`
   };
 
@@ -5213,7 +6292,14 @@ async function buildPdf(themeName) {
     if (plan.tiled) {
       const oTop  = startPage({ kicker: 'Blattübersicht',
                                 sheet: `Plan auf ${plan.pages.length} Blättern` });
-      const legendH = 6;   // Platz für die Erläuterungszeile unten
+      // Platz für die Erläuterungszeile unten – aus der TATSÄCHLICHEN Zeilenzahl
+      // abgeleitet, damit die Übersicht sie nie überdeckt.
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+      const oCaption = doc.splitTextToSize(
+        `${plan.pages.length} Planblätter   ·   ${scaleTxt} auf allen Blättern   ·   `
+        + `gestrichelt: Blattgrenzen   ·   Anschlussfelder der Nachbarblätter sind auf den `
+        + `Planblättern blassgrau dargestellt`, availW);
+      const legendH = 3 + oCaption.length * 3.4;
       const oArea = { x: margin, y: oTop + 2, w: availW,
                       h: contentBottom - oTop - 4 - legendH };
       // Maßstab der Übersicht aus der Hülle ALLER Blattfenster ableiten (nicht
@@ -5248,12 +6334,13 @@ async function buildPdf(themeName) {
         doc.setTextColor(255, 255, 255);
         doc.text('B' + (i + 1), bx, by, { align: 'center', baseline: 'middle' });
       });
+      // Erläuterungszeile (oben bereits umbrochen) – sie wächst nach OBEN,
+      // damit sie die Fußzeile nie berührt.
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
       doc.setTextColor(...theme.inkSoft);
-      doc.text(`${plan.pages.length} Planblätter   ·   ${scaleTxt} auf allen Blättern   ·   `
-             + `gestrichelt: Blattgrenzen   ·   Anschlussfelder der Nachbarblätter sind auf den `
-             + `Planblättern blassgrau dargestellt`,
-               margin, contentBottom - 1.5);
+      oCaption.forEach((line, li) => {
+        doc.text(line, margin, contentBottom - 1.5 - (oCaption.length - 1 - li) * 3.4);
+      });
     }
 
     plan.pages.forEach((pg, i) => {
@@ -5264,17 +6351,121 @@ async function buildPdf(themeName) {
       top = pdfDrawLegend(ctx, top, legend);
 
       const area = { x: margin, y: top, w: availW, h: contentBottom - top - PLAN_GAP };
-      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout, false,
-                  { theme, ghosts: pg.ghosts });
-
-      // Mini-Orientierungskarte rechts unten
-      if (plan.tiled) {
-        const lw = Math.min(58, availW * 0.30), lh = lw * 0.62;
-        const box = pdfPickLocatorBox(area, pg.win, plan.scale, pg.els, lw, lh);
-        pdfDrawLocator(doc, plan.bounds, pg.win, box, theme,
-                       `LAGE IM GESAMTPLAN · BLATT B${i + 1}`);
-      }
+      // Die Mini-Orientierungskarte ist eine Sperrzone: pdfDrawPlan platziert
+      // sie selbst (dort sind die Beschriftungen bekannt), hält sie frei und
+      // zeichnet sie zum Schluss darüber.
+      const lw = Math.min(58, availW * 0.30);
+      pdfDrawPlan(doc, pg.win, area, plan.scale, pg.els, layout, false, {
+        theme, ghosts: pg.ghosts,
+        locator: plan.tiled
+          ? { w: lw, h: lw * 0.62, bounds: plan.bounds,
+              caption: `LAGE IM GESAMTPLAN · BLATT B${i + 1}` }
+          : null
+      });
     });
+  }
+
+  /* ── Aufmaß nach ATV DIN 18451 ──────────────────────────────────────────
+     Rechenweg statt Ergebnis: je Abschnitt wird das Achsmaß, der Eckzuschlag
+     und der Feldzuschlag getrennt ausgewiesen, damit die Aufmaßlänge im
+     Streitfall Zeile für Zeile nachvollziehbar ist. Welche Zuschläge gelten,
+     stellt der Nutzer im PDF-Dialog ein (siehe aufmassRules()).           */
+  if (allBays.length) {
+    const groups = abschnitteList().length
+      ? baysByAbschnitt().map(g => ({
+          title: g.abschnitt ? g.abschnitt.name : 'Ohne Abschnitt',
+          color: g.abschnitt ? pdfHex(g.abschnitt.color) : null,
+          bays: g.bays
+        }))
+      : SIDE_ORDER.map(side => ({ title: SIDE_LABEL[side], color: null, bays: fieldsBySide()[side] }))
+                  .filter(b => b.bays.length);
+
+    const aCols = [
+      { t: 'Abschnitt',      w: 0.25, a: 'left'   },
+      { t: 'Felder',         w: 0.09, a: 'center' },
+      { t: 'Achsmaß',        w: 0.13, a: 'right'  },
+      { t: 'Eckzuschlag',    w: 0.14, a: 'right'  },
+      { t: 'Feldzuschlag',   w: 0.14, a: 'right'  },
+      { t: 'Aufmaßlänge',    w: 0.13, a: 'right'  },
+      { t: 'Aufmaßfläche',   w: 0.12, a: 'right'  }
+    ];
+    const aW = availW;
+    const aX = []; let aAcc = margin;
+    aCols.forEach(c => { aX.push(aAcc); aAcc += c.w * aW; });
+    const aCell = (i, txt, bold) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      const c = aCols[i];
+      const x = c.a === 'right' ? aX[i] + c.w * aW - 2.5
+              : c.a === 'center' ? aX[i] + c.w * aW / 2
+              : aX[i] + 2.5;
+      doc.text(txt, x, ay + 5, { align: c.a });
+    };
+    const aRowH = 7.2, aHeadH = 7.5;
+
+    let ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'nach ATV DIN 18451' }) + 3;
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.4);
+    doc.setTextColor(...theme.inkSoft);
+    doc.splitTextToSize('Grundlage: ' + aufmassRuleText(), aW).forEach(line => {
+      doc.text(line, margin, ay + 3);
+      ay += 4.4;
+    });
+    ay += 2.5;
+
+    const aDrawHead = () => {
+      doc.setFillColor(...theme.tableHead);
+      doc.rect(margin, ay, aW, aHeadH, 'F');
+      doc.setFontSize(7.8); doc.setTextColor(...theme.tableHeadText);
+      aCols.forEach((c, i) => aCell(i, c.t, true));
+      ay += aHeadH;
+    };
+    aDrawHead();
+
+    const aDrawRow = (label, color, m, shade, bold) => {
+      if (ay + aRowH > contentBottom) {
+        ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'Fortsetzung' }) + 3;
+        aDrawHead();
+      }
+      if (shade) { doc.setFillColor(...theme.zebra); doc.rect(margin, ay, aW, aRowH, 'F'); }
+      if (bold)  { doc.setFillColor(...theme.tableHead); doc.rect(margin, ay, aW, aRowH, 'F'); }
+      if (color) {
+        const sw = pdfCol(theme, color);
+        doc.setFillColor(...sw); doc.setDrawColor(...sw); doc.setLineWidth(0.2);
+        doc.rect(aX[0] + 1.6, ay + aRowH / 2 - 1.8, 3.6, 3.6, 'FD');
+      }
+      doc.setFontSize(8.6); doc.setTextColor(...theme.ink);
+      const labelX = color ? 6.6 : 2.5;
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.text(label, aX[0] + labelX, ay + 5);
+      aCell(1, String(m.count), bold);
+      aCell(2, fmtQty(m.achse) + ' m', bold);
+      aCell(3, m.ecken ? `${m.ecken} × ${fmtQty(eckZuschlagWert())} = ${fmtQty(m.eckLaenge)} m` : '–', bold);
+      aCell(4, m.felder ? `${m.felder} × ${fmtQty(aufmassRules().feldzuschlag.wert)} = ${fmtQty(m.feldLaenge)} m` : '–', bold);
+      doc.setFont('helvetica', 'bold');
+      doc.text(fmtQty(m.laenge) + ' m', aX[5] + aCols[5].w * aW - 2.5, ay + 5, { align: 'right' });
+      doc.text(m.flaeche ? fmtQty(m.flaeche) + ' m²' : '–',
+               aX[6] + aCols[6].w * aW - 2.5, ay + 5, { align: 'right' });
+      ay += aRowH;
+      doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
+      doc.line(margin, ay, margin + aW, ay);
+    };
+
+    groups.forEach((g, i) => {
+      const m = computeAufmass(g.bays);
+      aDrawRow(g.title, g.color, { ...m, count: g.bays.length }, i % 2 === 1, false);
+    });
+    aDrawRow('Gesamt', null, { ...aufmassAll, count: allBays.length }, false, true);
+
+    // Bei Abschnitts-Gliederung: Hinweis, dass eine Ecke bei BEIDEN
+    // angrenzenden Abschnitten zählt – sonst wirkt die Summe fehlerhaft.
+    if (aufmassRules().eckzuschlag.aktiv) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.4);
+      doc.setTextColor(...theme.inkSoft);
+      doc.splitTextToSize(
+        'Außenecken werden nach DIN 18451 bei beiden angrenzenden Seiten mitgerechnet '
+        + '(La = L + L1); eine Ecke erscheint daher in zwei Zeilen.', aW)
+        .forEach((line, i) => doc.text(line, margin, ay + 5 + i * 4));
+    }
   }
 
   // ── Aufmaß-Tabellen ─────────────────────────────────────────────────────
@@ -5397,7 +6588,7 @@ async function buildPdf(themeName) {
   const notedFields = [];
   state.sections.forEach(sec => {
     sec.bays.forEach((bay, bi) => {
-      if ((bay.note || '').trim()) {
+      if (isBayVisible(bay) && (bay.note || '').trim()) {
         notedFields.push({
           label: bayLabel(sec, bi),
           abschnitt: abschnittName(bay.abschnittId),

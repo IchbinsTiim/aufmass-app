@@ -26,4 +26,13 @@ node tests/fitcheck.mjs         # geometrischer Nachweis: kein Blattinhalt ragt 
 node tests/e2e.mjs              # durchgängiger Ablauf über die Oberfläche (Vorlage → Abschnitt → Drehen → PDF)
 ```
 
+Runde 2:
+
+```bash
+node tests/r2-t1-sichtbarkeit.mjs   # Abschnitte ein-/ausblenden ohne Datenverlust, PDF-Umfang
+node tests/r2-t2-mehrfach.mjs       # kopiertes Feld auf Mehrfachauswahl; Zusatzbauteile mit Länge + Lagen
+node tests/r2-t4-pdf-overlap.mjs    # keine Beschriftung in Legende/Fußzeile oder auf der Übersichtskarte
+node tests/r2-t6-aufmass.mjs        # Aufmaßregeln nach ATV DIN 18451 (Achsmaß, Außenecke, Feldaufschlag)
+```
+
 Jede Datei bricht beim ersten fehlgeschlagenen Test mit `ASSERT FAILED` ab.
