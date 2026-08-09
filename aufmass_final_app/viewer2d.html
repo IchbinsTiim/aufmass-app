@@ -7,8 +7,8 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Gerüst 2D-Ansicht</title>
-  <link rel="stylesheet" href="style.css?v=20260809" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260809" />
+  <link rel="stylesheet" href="style.css?v=20260810" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260810" />
 </head>
 <body>
 
@@ -47,11 +47,13 @@
       <button id="savePlanBtn" class="secondary">Speichern</button>
       <button id="loadPlanBtn" class="secondary">Laden</button>
       <button id="photosBtn" class="secondary" title="Projekt-Fotos ansehen/hinzufügen">📷 Fotos</button>
+      <button id="grundrissBtn" class="secondary" title="Grundriss als Hintergrund einblenden und ausrichten">🗺️ Grundriss</button>
       <button id="exportPdfBtn" class="primary">PDF</button>
       <button id="deviceToggleBtn" class="secondary" title="Gerät wechseln">📱</button>
     </div>
     <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
     <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none" />
+    <input type="file" id="grundrissFileInput" accept="image/*" style="display:none" />
   </div>
 
   <div id="appLayout">
@@ -97,6 +99,6 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js?v=20260809"></script>
+  <script src="viewer2d.js?v=20260810"></script>
 </body>
 </html>

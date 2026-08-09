@@ -2170,3 +2170,55 @@ select,
   color: #1a4a7a;
   font-variant-numeric: tabular-nums;
 }
+.aufmass-warn {
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: #fdf3e7;
+  border-left: 4px solid #c2691b;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #8a4a10;
+}
+
+/* ── Ecken-Dialog: Zuordnung an der Innenecke ─────────────────────────────── */
+.eck-choice-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0 0.35rem;
+}
+.eck-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border: 1.5px solid #d6dbe0;
+  border-radius: 10px;
+  background: #fff;
+  color: #33414d;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.eck-choice.active {
+  border-color: #2c6fa8;
+  background: #eaf3fb;
+  color: #1a4a7a;
+}
+.eck-choice-sub {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #6b7885;
+  font-variant-numeric: tabular-nums;
+}
+.eck-choice.active .eck-choice-sub { color: #2c6fa8; }
+
+/* ── Grundriss-Dialog ─────────────────────────────────────────────────────── */
+.grundriss-slider {
+  flex: 1 1 auto;
+  min-width: 6rem;
+  accent-color: #2c6fa8;
+}

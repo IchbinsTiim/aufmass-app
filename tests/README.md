@@ -35,4 +35,15 @@ node tests/r2-t4-pdf-overlap.mjs    # keine Beschriftung in Legende/Fußzeile od
 node tests/r2-t6-aufmass.mjs        # Aufmaßregeln nach ATV DIN 18451 (Achsmaß, Außenecke, Feldaufschlag)
 ```
 
+Runde 3:
+
+```bash
+node tests/r3-t1-innenecken.mjs     # Innenecken: durchlaufende Achse −0,73 m, ausfüllende +0,73 m
+node tests/r3-t2-grundriss.mjs      # Grundriss als Hintergrundebene; Eckentyp aus dem Bild ableiten
+```
+
+`r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
+Innenecke ergeben 2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse
+2,57 + 0,73 = 3,30 m, eine unbeteiligte Achse unverändert 3 × 2,57 = 7,71 m.
+
 Jede Datei bricht beim ersten fehlgeschlagenen Test mit `ASSERT FAILED` ab.
