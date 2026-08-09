@@ -464,6 +464,8 @@ let state = {
   abschnitte: [],   // [{ id, name, color, hidden }] – frei benennbare Feld-Gruppen
   hideUnassigned: false,   // Felder ohne Abschnitt ausgeblendet?
   aufmass:   null,  // Aufmaßregeln nach ATV DIN 18451 (siehe aufmassRules())
+  ecken:     {},    // Eck-Entscheidungen des Nutzers (siehe eckWahl())
+  grundriss: null,  // Grundriss-Hintergrundebene (siehe grundrissLayer())
   sections:  []
   // section: { id, name, dir, bays:[{id,len,…,abschnittId}], x0, y0 }
 };
@@ -485,6 +487,7 @@ function normalizeState() {
       hidden: !!a.hidden
     }));
   state.hideUnassigned = !!state.hideUnassigned;
+  if (!state.ecken || typeof state.ecken !== 'object') state.ecken = {};
   // ID-Zähler hinter die höchste vergebene „abN"-Nummer setzen, damit neue
   // Abschnitte niemals eine bereits benutzte ID bekommen.
   state.abschnitte.forEach(a => {
@@ -588,6 +591,8 @@ function loadFromLinkedProject() {
     state.abschnitte = Array.isArray(z.abschnitte) ? z.abschnitte : [];
     state.hideUnassigned = !!z.hideUnassigned;
     state.aufmass    = z.aufmass || null;
+    state.ecken      = z.ecken || {};
+    state.grundriss  = z.grundriss || null;
     _sId = z._sId || state.sections.length;
     _bId = z._bId || state.sections.flatMap(s => s.bays).length;
     normalizeState();
@@ -609,7 +614,8 @@ function scheduleAutosave2d() {
     list[idx].zeichnung2d = {
       depth: state.depth, sections: state.sections,
       abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
-      aufmass: aufmassRules(), _sId, _bId
+      aufmass: aufmassRules(), ecken: state.ecken || {},
+      grundriss: state.grundriss || null, _sId, _bId
     };
     list[idx].geaendert = new Date().toISOString().slice(0, 10);
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
@@ -734,7 +740,8 @@ function serializeUndoState() {
   return JSON.stringify({
     project: state.project, depth: state.depth,
     abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
-    aufmass: aufmassRules(), sections: state.sections
+    aufmass: aufmassRules(), ecken: state.ecken || {},
+    grundriss: state.grundriss || null, sections: state.sections
   });
 }
 
@@ -775,6 +782,8 @@ function applyUndoState(json) {
   state.abschnitte = Array.isArray(data.abschnitte) ? data.abschnitte : [];
   state.hideUnassigned = !!data.hideUnassigned;
   state.aufmass    = data.aufmass || null;
+  state.ecken      = data.ecken || {};
+  state.grundriss  = data.grundriss || null;
   state.sections   = data.sections;
   normalizeState();
   selectedSi = null; selectedBi = null;
@@ -1061,6 +1070,22 @@ function contentBounds() {
       });
     });
   });
+  // Die Grundriss-Ebene gehört mit zum Inhalt – sonst zoomte „Alle Felder
+  // anzeigen" an einem frisch eingefügten Grundriss vorbei, und vor dem ersten
+  // Feld gäbe es überhaupt nichts, worauf sich die Kamera einstellen könnte.
+  const gr = grundrissLayer();
+  if (gr && gr.visible) {
+    const w = gr.w * gr.scale / 2, h = gr.h * gr.scale / 2;
+    const r = gr.rot * Math.PI / 180;
+    [[-w, -h], [w, -h], [w, h], [-w, h]].forEach(([ex, ey]) => {
+      const px = gr.x + ex * Math.cos(r) - ey * Math.sin(r);
+      const py = gr.y + ex * Math.sin(r) + ey * Math.cos(r);
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    });
+  }
   const box = isFinite(minX) ? { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY } : null;
   _boundsCache = { box };
   return box;
@@ -1196,6 +1221,41 @@ function bayLabel(sec, bi) {
  *  auf die falsche (Gebäude-Innen-)Seite zeigen, siehe mirrorSections(). */
 function outVec(dir, flip) {
   return flip ? { dx: -dir.dy, dy: dir.dx } : { dx: dir.dy, dy: -dir.dx };
+}
+
+/* Art einer Ecke allein aus der Geometrie – 'aussen', 'innen' oder null
+   (gerade Fortsetzung, also gar keine Ecke).
+
+   Maßgeblich ist, wohin die AUSSENNORMALE der ausleitenden Wand relativ zur
+   LAUFRICHTUNG der einlaufenden zeigt:
+
+     • Außenecke  – das Gerüst wickelt sich um eine vorspringende Gebäudeecke.
+                    Die Normale der Folgewand zeigt nach vorn (dot > 0); beide
+                    Gerüstbahnen lassen eine Lücke, die das Eckstück füllt.
+     • Innenecke  – das Gerüst läuft in einen Rücksprung. Die Normale der
+                    Folgewand zeigt zurück (dot < 0); beide Bahnen ÜBERLAPPEN
+                    sich um Gerüsttiefe × Gerüsttiefe.
+
+   Früher wurde stattdessen das Kreuzprodukt der beiden AUSSENNORMALEN geprüft.
+   Das hat zwei Fehler: Innenecken fielen ersatzlos heraus (cross < 0 wurde
+   verworfen), und weil eine gemeinsame Drehung beider Normalen ihr
+   Kreuzprodukt nicht ändert, war das Ergebnis blind gegenüber sec.flip –
+   gespiegelte Wände bekamen die Ecke schlicht nicht (oder verkehrt herum).
+   Die Laufrichtung mitzunehmen behebt beides. */
+function eckArtGeometrisch(dirIn, outNext) {
+  const dot = dirIn.dx * outNext.dx + dirIn.dy * outNext.dy;
+  if (Math.abs(dot) < 1e-6) return null;
+  return dot > 0 ? 'aussen' : 'innen';
+}
+
+/** Tatsächlich geltende Art einer Ecke aus computeLayout(): eine gespeicherte
+ *  Entscheidung des Nutzers geht der Geometrie vor (z. B. wenn die Zeichnung
+ *  die Gebäudeseite nicht sauber abbildet). */
+function eckArtEffektiv(cornerEl) {
+  const a = state.sections[cornerEl.si], b = state.sections[cornerEl.ni];
+  if (!a || !b) return cornerEl.kind;
+  const w = eckWahl(eckKey(a, b));
+  return (w.typ === 'aussen' || w.typ === 'innen') ? w.typ : cornerEl.kind;
 }
 
 // ── Section rotation ─────────────────────────────────────────────────────────
@@ -1575,7 +1635,7 @@ function computeLayout() {
     }
   });
 
-  // ── Corner pieces between connected sections ────────────────────────────
+  // ── Ecken zwischen verbundenen Sektionen ────────────────────────────────
   // Früher wurde jede Sektion gegen JEDE andere geprüft (quadratischer
   // Aufwand: bei 150 Feldern über 22 000 Vergleiche je Neuzeichnung – und
   // neu gezeichnet wird bei jeder Mausbewegung). Jetzt liegen die
@@ -1593,7 +1653,8 @@ function computeLayout() {
   state.sections.forEach((sec, si) => {
     if (!sec.bays.some(isBayVisible)) return;
     const end = sectionEnd(sec);
-    const out = outVec(secVec(sec), sec.flip);
+    const dir = secVec(sec);
+    const out = outVec(dir, sec.flip);
     const bx  = Math.round(end.x / 2), by = Math.round(end.y / 2);
     for (let ox = -1; ox <= 1; ox++) {
       for (let oy = -1; oy <= 1; oy++) {
@@ -1604,16 +1665,19 @@ function computeLayout() {
           const next = state.sections[ni];
           if (!next.bays.some(isBayVisible)) continue;
           if (Math.abs(next.x0 - end.x) >= 2 || Math.abs(next.y0 - end.y) >= 2) continue;
-          const nOut  = outVec(secVec(next), next.flip);
-          const cross = out.dx * nOut.dy - out.dy * nOut.dx;
-          if (cross <= 0) continue;
+          const nOut = outVec(secVec(next), next.flip);
+          const kind = eckArtGeometrisch(dir, nOut);
+          if (!kind) continue;                       // gerade Fortsetzung: keine Ecke
           const c0 = { x: end.x, y: end.y };
           const c1 = { x: end.x + out.dx * depth, y: end.y + out.dy * depth };
           const c2 = { x: c1.x + nOut.dx * depth, y: c1.y + nOut.dy * depth };
           const c3 = { x: end.x + nOut.dx * depth, y: end.y + nOut.dy * depth };
-          // `si`/`ni` = ein- und ausleitende Sektion der Außenecke – Grundlage
-          // für den Eckzuschlag nach ATV DIN 18451 (siehe computeAufmass()).
-          els.push({ type: 'corner', pts: [c0, c1, c2, c3], si, ni });
+          // `si`/`ni` = ein- und ausleitende Sektion der Ecke. Das Viereck ist
+          // bei der AUSSENECKE das Eckstück, das die Lücke zwischen beiden
+          // Gerüstbahnen schließt – bei der INNENECKE dieselbe Fläche als
+          // ÜBERLAPPUNG beider Bahnen. Grundlage für das Aufmaß, siehe
+          // eckenListe() und computeAufmass().
+          els.push({ type: 'corner', pts: [c0, c1, c2, c3], si, ni, kind });
         }
       }
     }
@@ -1702,7 +1766,11 @@ function renderSvg() {
     autoFit = true;
     fitCameraToContent();
     applyCamera();
-    hint.classList.remove('hidden');
+    // Der Grundriss wird AUCH ohne Felder gezeichnet – genau dann zeichnet man
+    // ja die ersten Achsen darüber ab.
+    renderGrundriss(g, px => px / camera.scale);
+    gLive.appendChild(g);
+    hint.classList.toggle('hidden', !!grundrissLayer() && !hasBays);
     return;
   }
   hint.classList.add('hidden');
@@ -1723,8 +1791,19 @@ function renderSvg() {
   // sie bei 50 Feldern (weit herausgezoomt) genauso gut treffbar wie bei 5.
   const hs = px => px / camera.scale;
 
-  // 1. Corner pieces
-  els.filter(e => e.type === 'corner').forEach(el =>
+  // 0. Grundriss-Hintergrundebene – ganz unten, damit alles Gezeichnete
+  //    darüberliegt.
+  renderGrundriss(g, hs);
+
+  // 1. Eckstücke – NUR an Außenecken. Dort lassen die beiden Gerüstbahnen eine
+  //    Lücke, die das Eckstück schließt; es ist echtes Bauteil und wird
+  //    deshalb wie ein Feld gefüllt gezeichnet (und vor den Feldern, damit
+  //    deren Konturen darüberliegen).
+  //    An einer INNENECKE beschreibt dasselbe Viereck dagegen die ÜBERLAPPUNG
+  //    zweier Bahnen – dort steht kein zusätzliches Gerüst. Als Fläche gefüllt
+  //    wäre das schlicht falsch; die Innenecke bekommt weiter unten eine
+  //    eigene, antippbare Markierung (Schritt 6).
+  els.filter(e => e.type === 'corner' && eckArtEffektiv(e) === 'aussen').forEach(el =>
     g.appendChild(svgEl('polygon', {
       points: ptsStr(el.pts), fill: '#b5d4f0',
       stroke: '#2c6fa8', 'stroke-width': 2
@@ -1925,6 +2004,97 @@ function renderSvg() {
     }))
   );
 
+  // 4. Innenecken – antippbare Markierung statt gefüllter Fläche.
+  //    Das Viereck ist hier die ÜBERLAPPUNG zweier Gerüstbahnen; gezeichnet
+  //    wird es schraffiert (nicht gefüllt), damit sofort klar ist: hier steht
+  //    kein zusätzliches Gerüst, hier wird umverteilt. Die Plakette in der
+  //    Mitte öffnet die Entscheidung „welche Achse läuft durch?" – solange
+  //    der Nutzer nicht entschieden hat, zeigt sie „?" in Warnfarbe.
+  {
+    const innen = els.filter(e => e.type === 'corner' && eckArtEffektiv(e) === 'innen');
+    if (innen.length) {
+      const ecken = eckenListe();
+      const byKey = new Map(ecken.map(e => [e.key, e]));
+      innen.forEach(el => {
+        const secA = state.sections[el.si], secB = state.sections[el.ni];
+        if (!secA || !secB) return;
+        const key  = eckKey(secA, secB);
+        const info = byKey.get(key);
+        if (!info) return;
+        const offen = !info.bestaetigt;
+        const farbe = offen ? '#c2691b' : '#4a5b6b';
+
+        // Schraffur: zwei Diagonalen im Viereck – bewusst sparsam, damit die
+        // darunterliegenden Feldbeschriftungen lesbar bleiben.
+        const [q0, q1, q2, q3] = el.pts;
+        g.appendChild(svgEl('path', {
+          d: `M${q0.x},${q0.y}L${q1.x},${q1.y}L${q2.x},${q2.y}L${q3.x},${q3.y}Z`,
+          fill: 'none', stroke: farbe, 'stroke-width': 1.6,
+          'stroke-dasharray': `${hs(5)},${hs(4)}`, 'pointer-events': 'none'
+        }));
+        g.appendChild(svgEl('line', {
+          x1: q0.x, y1: q0.y, x2: q2.x, y2: q2.y,
+          stroke: farbe, 'stroke-width': 1.1, 'stroke-opacity': 0.55,
+          'pointer-events': 'none'
+        }));
+
+        const cx = (q0.x + q1.x + q2.x + q3.x) / 4;
+        const cy = (q0.y + q1.y + q2.y + q3.y) / 4;
+        const R  = Math.min(hs(HANDLE_R * 0.95), depth * 0.42);
+
+        const hit = svgEl('circle', {
+          cx, cy, r: R * 1.5, fill: 'rgba(0,0,0,0.001)', style: 'cursor:pointer'
+        });
+        const tt = svgEl('title', {});
+        tt.textContent = offen
+          ? 'Innenecke – Zuordnung noch nicht bestätigt. Tippen zum Festlegen.'
+          : `Innenecke: ${state.sections[info.durchSi].name} läuft durch, `
+            + `${state.sections[info.fuellSi].name} füllt aus. Tippen zum Ändern.`;
+        hit.appendChild(tt);
+        hit.addEventListener('click', ev => { ev.stopPropagation(); openEckSheet(key); });
+        g.appendChild(hit);
+
+        g.appendChild(svgEl('circle', {
+          cx, cy, r: R, fill: farbe, stroke: '#fff',
+          'stroke-width': hs(2), 'pointer-events': 'none'
+        }));
+        const sym = svgEl('text', {
+          x: cx, y: cy, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+          'font-size': R * 1.15, 'font-family': 'system-ui, sans-serif',
+          fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+        });
+        sym.textContent = offen ? '?' : '⇱';
+        g.appendChild(sym);
+
+        // Wirkung direkt am Feld anschreiben („−0,73" / „+0,73"), sobald die
+        // Ecke groß genug dargestellt ist, um das lesbar unterzubringen.
+        if (aufmassRules().innenecke.aktiv && depth * camera.scale > 46) {
+          const wert = innenEckWert();
+          [[info.durchSi, -wert], [info.fuellSi, +wert]].forEach(([si, d]) => {
+            const sec = state.sections[si];
+            if (!sec) return;
+            const v = secVec(sec), o = outVec(v, sec.flip);
+            // Vom Eckpunkt aus in die Achse hinein: die einlaufende Sektion
+            // liegt entgegen ihrer Laufrichtung, die ausleitende in Richtung.
+            const sgn = si === el.si ? -1 : 1;
+            const px = q0.x + v.dx * sgn * depth * 0.95 + o.dx * depth * 0.5;
+            const py = q0.y + v.dy * sgn * depth * 0.95 + o.dy * depth * 0.5;
+            const t = svgEl('text', {
+              x: px, y: py, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+              'font-size': Math.max(depth * 0.26, 8),
+              'font-family': 'system-ui, sans-serif',
+              fill: d < 0 ? '#b3402a' : '#1d7a4c', 'font-weight': '700',
+              'pointer-events': 'none',
+              transform: `rotate(${uprightDeg(secAngle(sec)).toFixed(1)},${px},${py})`
+            });
+            t.textContent = (d < 0 ? '−' : '+') + fmtQty(Math.abs(d));
+            g.appendChild(t);
+          });
+        }
+      });
+    }
+  }
+
   // 5b. Move handles (orange ✥)
   {
     // Der Verschiebe-Griff darf nie größer sein als das Feld, zu dem er
@@ -2097,6 +2267,133 @@ function renderSvg() {
   gLive.appendChild(g);   // fertiges Fragment in einem Rutsch einhängen
 }
 
+/* ── Grundriss zeichnen & ausrichten ─────────────────────────────────────── */
+
+// Referenzstrecke: erster angetippter Punkt, solange der Messmodus läuft.
+let grundrissMessPunkt = null;
+let grundrissMessen    = false;
+
+/** Zeichnet die Grundriss-Ebene samt Verschiebe-Griff und Messstrecke. */
+function renderGrundriss(g, hs) {
+  const gr = grundrissLayer();
+  if (!gr || !gr.visible) return;
+
+  const w = gr.w * gr.scale, h = gr.h * gr.scale;
+  const wrap = svgEl('g', {
+    transform: `translate(${gr.x},${gr.y}) rotate(${gr.rot})`,
+    'pointer-events': 'none'
+  });
+  const img = svgEl('image', {
+    x: -w / 2, y: -h / 2, width: w, height: h,
+    opacity: gr.opacity, preserveAspectRatio: 'none'
+  });
+  img.setAttribute('href', gr.dataUrl);
+  img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', gr.dataUrl);
+  wrap.appendChild(img);
+  // Rahmen: ohne ihn ist bei blassen Plänen nicht erkennbar, wie weit die
+  // Ebene reicht – und damit auch nicht, was man gerade verschiebt.
+  wrap.appendChild(svgEl('rect', {
+    x: -w / 2, y: -h / 2, width: w, height: h,
+    fill: 'none', stroke: '#8e9aa6', 'stroke-width': 1,
+    'stroke-dasharray': '6,5', 'stroke-opacity': 0.7
+  }));
+  g.appendChild(wrap);
+
+  // Verschiebe-Griff nur, solange die Ebene nicht gesperrt ist.
+  if (!gr.locked) {
+    const R = hs(HANDLE_R * 0.9);
+    const hit = svgEl('circle', {
+      cx: gr.x, cy: gr.y, r: R * 1.5,
+      fill: 'rgba(0,0,0,0.001)', style: 'cursor:move', 'data-grundriss': 'move'
+    });
+    const tt = svgEl('title', {});
+    tt.textContent = 'Grundriss verschieben (im Grundriss-Dialog sperrbar)';
+    hit.appendChild(tt);
+    hit.addEventListener('pointerdown', onGrundrissHandleDown);
+    g.appendChild(hit);
+    g.appendChild(svgEl('circle', {
+      cx: gr.x, cy: gr.y, r: R, fill: '#5a6b7a',
+      stroke: '#fff', 'stroke-width': hs(2), 'pointer-events': 'none'
+    }));
+    const sym = svgEl('text', {
+      x: gr.x, y: gr.y, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': R * 1.2, 'font-family': 'system-ui, sans-serif',
+      fill: '#fff', 'font-weight': '700', 'pointer-events': 'none'
+    });
+    sym.textContent = '🗺';
+    g.appendChild(sym);
+  }
+
+  // Erster Punkt der Referenzstrecke
+  if (grundrissMessen && grundrissMessPunkt) {
+    g.appendChild(svgEl('circle', {
+      cx: grundrissMessPunkt.x, cy: grundrissMessPunkt.y, r: hs(6),
+      fill: '#c2691b', stroke: '#fff', 'stroke-width': hs(2), 'pointer-events': 'none'
+    }));
+  }
+}
+
+function onGrundrissHandleDown(e) {
+  const gr = grundrissLayer();
+  if (!gr || gr.locked) return;
+  e.preventDefault(); e.stopPropagation();
+  canvasJustMoved = false;
+  document.getElementById('planSvg').setPointerCapture(e.pointerId);
+  drag = {
+    type: 'grundriss',
+    startX: gr.x, startY: gr.y,
+    startPt: screenToSvg(e.clientX, e.clientY),
+    moved: false
+  };
+}
+
+/** Messmodus: zwei Punkte antippen, dann die wahre Länge eingeben. */
+function starteGrundrissMessung() {
+  if (!grundrissLayer()) return;
+  grundrissMessen = true;
+  grundrissMessPunkt = null;
+  closeSheet();
+  showToast('Referenzstrecke: ersten Punkt auf dem Grundriss antippen');
+  renderAll();
+}
+
+function brichGrundrissMessungAb() {
+  grundrissMessen = false;
+  grundrissMessPunkt = null;
+  renderAll();
+}
+
+/** Klick auf die Zeichenfläche während des Messmodus. */
+function grundrissMessKlick(pt) {
+  if (!grundrissMessPunkt) {
+    grundrissMessPunkt = pt;
+    showToast('Jetzt den zweiten Punkt antippen');
+    renderAll();
+    return;
+  }
+  const distWelt = Math.hypot(pt.x - grundrissMessPunkt.x, pt.y - grundrissMessPunkt.y);
+  if (distWelt < 4) { showToast('Die beiden Punkte liegen zu dicht beieinander'); return; }
+
+  const gr = grundrissLayer();
+  const istM = distWelt / PX_PER_M;
+  const eingabe = window.prompt(
+    'Wie lang ist diese Strecke in Wirklichkeit? (m)\n'
+    + `Aktuell entspricht sie ${fmtQty(istM)} m.`,
+    fmtQty(istM).replace(',', '.'));
+  grundrissMessen = false;
+  grundrissMessPunkt = null;
+  const sollM = parseFloat(String(eingabe || '').replace(',', '.'));
+  if (!eingabe || isNaN(sollM) || sollM <= 0) { renderAll(); return; }
+
+  // Der Faktor wirkt auf die Bildskalierung; die Bildmitte bleibt, wo sie ist.
+  // Die Maske bleibt gültig: sie liegt in Bildpixeln, und nur die Abbildung
+  // Welt → Bild ändert sich.
+  gr.scale = Math.max(0.001, gr.scale * (sollM / istM));
+  showToast(`Maßstab gesetzt: Referenzstrecke = ${fmtQty(sollM)} m`);
+  renderAll();
+  scheduleAutosave2d();
+}
+
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
 function drawMovePreview(g) {
   if (!movePreview) return;
@@ -2266,6 +2563,17 @@ function onSvgPointerMove(e) {
   if (!drag) return;
   const pt = screenToSvg(e.clientX, e.clientY);
 
+  if (drag.type === 'grundriss') {
+    const gr = grundrissLayer();
+    if (!gr) { drag = null; return; }
+    const dx = pt.x - drag.startPt.x, dy = pt.y - drag.startPt.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+    gr.x = drag.startX + dx;
+    gr.y = drag.startY + dy;
+    requestRender();
+    return;
+  }
+
   if (drag.type === 'rotate') {
     // Erst ab einer echten Zieh-Bewegung frei drehen. Ohne diese Schwelle
     // würde schon das minimale Wackeln beim Antippen als Drehung gelten – der
@@ -2334,6 +2642,11 @@ function onSvgPointerUp(e) {
   // verwerfen. Zeitstempel statt Flag, damit nichts hängen bleiben kann,
   // falls der Klick einmal ausbleibt.
   handleReleasedAt = Date.now();
+  if (d.type === 'grundriss') {
+    if (d.moved) { renderAll(); scheduleAutosave2d(); }
+    else openGrundrissSheet();
+    return;
+  }
   if (d.type === 'rotate') {
     // Kurzer Tipp auf den Drehgriff (ohne Ziehen) = eine Vierteldrehung.
     // Damit ist „Feld drehen" eine einzige, sofort wirksame Berührung; das
@@ -3361,6 +3674,416 @@ function openEditSheet(si, bi) {
   sheet.appendChild(mirrorRow);
   sheet.appendChild(actRow);
 
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/* ── Grundriss-Dialog ────────────────────────────────────────────────────────
+   Bild wählen, ausrichten, Maßstab setzen – und daraus Eckentypen vorschlagen
+   lassen. Bewusst ein eigener Dialog statt Werkzeugleiste: die Ausrichtung ist
+   eine kurze, in sich geschlossene Tätigkeit vor dem eigentlichen Zeichnen. */
+
+async function onGrundrissFileSelected(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result); fr.onerror = rej;
+      fr.readAsDataURL(file);
+    });
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i); i.onerror = rej;
+      i.src = dataUrl;
+    });
+
+    // Startmaßstab: den Grundriss etwa so breit legen wie das bereits
+    // gezeichnete Gerüst (oder 30 m, wenn noch nichts da ist). Näher als das
+    // kommt keine Automatik heran – der genaue Maßstab kommt über die
+    // Referenzstrecke.
+    const box = contentBounds();
+    const zielBreite = box && box.w > 0 ? box.w * 1.4 : 30 * PX_PER_M;
+    const mitte = box
+      ? { x: box.minX + box.w / 2, y: box.minY + box.h / 2 }
+      : { x: 0, y: 0 };
+
+    state.grundriss = {
+      ...GRUNDRISS_DEFAULTS,
+      dataUrl, w: img.naturalWidth, h: img.naturalHeight,
+      x: mitte.x, y: mitte.y,
+      scale: zielBreite / img.naturalWidth
+    };
+    _grMaskeSrc = null; _grMaske = null;
+    autoFit = true;
+    renderAll();
+    scheduleAutosave2d();
+    showToast('Grundriss eingefügt – jetzt ausrichten und Maßstab setzen');
+    openGrundrissSheet();
+  } catch (_) {
+    showToast('Das Bild konnte nicht gelesen werden');
+  }
+}
+
+function openGrundrissSheet() {
+  closeSheet();
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', () => { renderAll(); closeSheet(); });
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', ev => ev.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = 'Grundriss als Hintergrund';
+  sheet.appendChild(hdr);
+
+  const gr = grundrissLayer();
+
+  if (!gr) {
+    const p = document.createElement('p');
+    p.className = 'pdf-sheet-note';
+    p.textContent = 'Legen Sie einen Grundriss (Foto, Scan oder Screenshot) unter '
+                  + 'die Zeichnung. Sie können die Gerüstachsen dann direkt darüber '
+                  + 'abgreifen – und aus dem Grundriss ableiten lassen, ob eine Ecke '
+                  + 'innen oder außen liegt.';
+    sheet.appendChild(p);
+    const add = document.createElement('button');
+    add.type = 'button'; add.className = 'sheet-ok';
+    add.textContent = 'Bild auswählen';
+    add.addEventListener('click', () => document.getElementById('grundrissFileInput').click());
+    const row = document.createElement('div');
+    row.className = 'sheet-actions';
+    row.appendChild(add);
+    sheet.appendChild(row);
+    document.body.appendChild(overlay);
+    document.body.appendChild(sheet);
+    requestAnimationFrame(() => sheet.classList.add('open'));
+    return;
+  }
+
+  const note = document.createElement('p');
+  note.className = 'pdf-sheet-note';
+  note.textContent = 'Ziehen Sie den 🗺-Griff, um den Grundriss zu verschieben. '
+                   + 'Den Maßstab setzen Sie am zuverlässigsten über eine bekannte '
+                   + 'Strecke im Plan (Maßkette, Gebäudekante).';
+  sheet.appendChild(note);
+
+  /** Zahlenregler-Zeile. */
+  const regler = (label, wert, min, max, step, onInput, format) => {
+    const row = document.createElement('div');
+    row.className = 'aufmass-cfg-row';
+    const lab = document.createElement('span');
+    lab.className = 'aufmass-cfg-label';
+    lab.textContent = label;
+    const inp = document.createElement('input');
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step;
+    inp.value = wert; inp.className = 'grundriss-slider';
+    const out = document.createElement('span');
+    out.className = 'aufmass-cfg-label';
+    out.textContent = format(wert);
+    inp.addEventListener('input', () => {
+      const v = parseFloat(inp.value);
+      out.textContent = format(v);
+      onInput(v);
+      requestRender();
+      scheduleAutosave2d();
+    });
+    row.appendChild(lab); row.appendChild(inp); row.appendChild(out);
+    sheet.appendChild(row);
+    return inp;
+  };
+
+  regler('Deckkraft', gr.opacity, 0.05, 1, 0.05,
+    v => { gr.opacity = v; }, v => Math.round(v * 100) + ' %');
+  regler('Drehung', gr.rot, 0, 359, 1,
+    v => { gr.rot = v; }, v => Math.round(v) + '°');
+  // Größe als Faktor auf den aktuellen Maßstab: absolute Bildpixel sagen dem
+  // Nutzer nichts, die relative Feinkorrektur nach der Referenzstrecke schon.
+  const basisScale = gr.scale;
+  regler('Größe', 1, 0.25, 4, 0.01,
+    v => { gr.scale = basisScale * v; }, v => Math.round(v * 100) + ' %');
+
+  const massBtn = document.createElement('button');
+  massBtn.type = 'button'; massBtn.className = 'sheet-copy';
+  massBtn.textContent = '📏 Maßstab über Referenzstrecke setzen';
+  massBtn.addEventListener('click', starteGrundrissMessung);
+  const massRow = document.createElement('div');
+  massRow.className = 'sheet-actions';
+  massRow.appendChild(massBtn);
+  sheet.appendChild(massRow);
+
+  // ── Sichtbarkeit / Sperre ───────────────────────────────────────────────
+  [['Grundriss einblenden', 'visible'], ['Gegen Verschieben sperren', 'locked']]
+    .forEach(([txt, feld]) => {
+      const row = document.createElement('label');
+      row.className = 'pdf-opt-row';
+      const chk = document.createElement('input');
+      chk.type = 'checkbox'; chk.checked = !!gr[feld];
+      const span = document.createElement('span');
+      span.innerHTML = `<strong>${txt}</strong>`;
+      chk.addEventListener('change', () => {
+        gr[feld] = chk.checked; renderAll(); scheduleAutosave2d();
+      });
+      row.appendChild(chk); row.appendChild(span);
+      sheet.appendChild(row);
+    });
+
+  // ── Ecken aus dem Grundriss ableiten ────────────────────────────────────
+  const eckLabel = document.createElement('div');
+  eckLabel.className = 'sheet-section-label';
+  eckLabel.textContent = 'Ecken aus dem Grundriss bestimmen';
+  sheet.appendChild(eckLabel);
+
+  const eckNote = document.createElement('p');
+  eckNote.className = 'pdf-sheet-note';
+  eckNote.textContent = 'Prüft für jeden Achsknoten, wie viel Gebäude ringsum '
+                      + 'liegt: viel Gebäude = Innenecke, wenig = Außenecke. '
+                      + 'Setzt voraus, dass der Grundriss maßstäblich unter den '
+                      + 'Achsen liegt.';
+  sheet.appendChild(eckNote);
+
+  const erg = document.createElement('div');
+  erg.className = 'aufmass-summary';
+  erg.style.display = 'none';
+  sheet.appendChild(erg);
+
+  const analyseBtn = document.createElement('button');
+  analyseBtn.type = 'button'; analyseBtn.className = 'sheet-copy';
+  analyseBtn.textContent = '🔍 Ecken auswerten';
+  analyseBtn.addEventListener('click', async () => {
+    analyseBtn.disabled = true;
+    analyseBtn.textContent = 'Wird ausgewertet …';
+    const res = await grundrissEckVorschlaege();
+    analyseBtn.disabled = false;
+    analyseBtn.textContent = '🔍 Ecken auswerten';
+    erg.style.display = '';
+    if (res.fehler) { erg.textContent = res.fehler; return; }
+    if (!res.ecken.length) { erg.textContent = 'Es sind noch keine Ecken gezeichnet.'; return; }
+
+    // Nur eindeutige Ergebnisse übernehmen. Ein knapper Ringanteil bedeutet,
+    // dass der Knoten im Plan nicht sauber freisteht – dann ist ein falscher
+    // Automatikwert schlimmer als gar keiner.
+    let gesetzt = 0, unklar = 0;
+    res.ecken.forEach(v => {
+      if (!v.art || v.sicherheit < 0.35) { unklar++; return; }
+      setEckWahl(v.key, { typ: v.art });
+      gesetzt++;
+    });
+    renderAll(); scheduleAutosave2d();
+    erg.textContent = `${gesetzt} von ${res.ecken.length} Ecken aus dem Grundriss gesetzt`
+      + (unklar ? `, ${unklar} nicht eindeutig (bitte in der Zeichnung antippen).` : '.')
+      + ' Welche Achse an einer Innenecke durchläuft, legen Sie weiterhin selbst fest.';
+  });
+  const analyseRow = document.createElement('div');
+  analyseRow.className = 'sheet-actions';
+  analyseRow.appendChild(analyseBtn);
+  sheet.appendChild(analyseRow);
+
+  // ── Aktionen ────────────────────────────────────────────────────────────
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button'; delBtn.className = 'sheet-delete';
+  delBtn.textContent = 'Entfernen';
+  delBtn.addEventListener('click', () => {
+    state.grundriss = null;
+    _grMaskeSrc = null; _grMaske = null;
+    renderAll(); scheduleAutosave2d(); closeSheet();
+  });
+  const swapBtn = document.createElement('button');
+  swapBtn.type = 'button'; swapBtn.className = 'sheet-copy';
+  swapBtn.textContent = 'Anderes Bild';
+  swapBtn.addEventListener('click', () => document.getElementById('grundrissFileInput').click());
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button'; okBtn.className = 'sheet-ok';
+  okBtn.textContent = 'Fertig';
+  okBtn.addEventListener('click', () => { renderAll(); closeSheet(); });
+  actRow.appendChild(delBtn); actRow.appendChild(swapBtn); actRow.appendChild(okBtn);
+  sheet.appendChild(actRow);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/* ── Ecken-Dialog ────────────────────────────────────────────────────────────
+   Öffnet sich beim Tippen auf eine Eck-Markierung in der Zeichnung. Hier
+   entscheidet der Nutzer zweierlei:
+
+     1. Ist es eine Außen- oder eine Innenecke? Vorgabe ist die geometrische
+        Erkennung (die stimmt, solange die Gerüsttiefe in der Zeichnung auf der
+        Gebäude-Außenseite liegt) – überschreibbar bleibt sie trotzdem.
+     2. Bei einer Innenecke: WELCHE Achse läuft durch (−) und welche füllt die
+        Ecke aus (+)? Das ist eine Planungsentscheidung, keine Geometriefrage,
+        deshalb trifft sie der Nutzer. Beide Knöpfe zeigen sofort die
+        resultierende Aufmaßlänge beider Achsen, damit die Wirkung der Wahl
+        ohne Umweg über den PDF-Export sichtbar ist.                          */
+
+function openEckSheet(key) {
+  const finde = () => eckenListe().find(e => e.key === key);
+  if (!finde()) return;
+  closeSheet();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', () => { renderAll(); closeSheet(); });
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  sheet.appendChild(hdr);
+
+  const note = document.createElement('p');
+  note.className = 'pdf-sheet-note';
+  sheet.appendChild(note);
+
+  // ── Eckenart ────────────────────────────────────────────────────────────
+  const artLabel = document.createElement('div');
+  artLabel.className = 'sheet-section-label';
+  artLabel.textContent = 'Art der Ecke';
+  sheet.appendChild(artLabel);
+
+  const artRow = document.createElement('div');
+  artRow.className = 'aufmass-preset-row';
+  sheet.appendChild(artRow);
+
+  // Nur sinnvoll, wenn ein Grundriss hinterlegt ist – sonst gibt es nichts
+  // auszuwerten. Der Knopf blendet sich in sync() entsprechend aus.
+  const grBtn = document.createElement('button');
+  grBtn.type = 'button'; grBtn.className = 'sheet-copy';
+  grBtn.textContent = '🗺️ Aus Grundriss bestimmen';
+  grBtn.addEventListener('click', async () => {
+    grBtn.disabled = true;
+    const res = await grundrissEckVorschlaege();
+    grBtn.disabled = false;
+    const v = res.ecken.find(x => x.key === key);
+    if (res.fehler)                   { showToast(res.fehler); return; }
+    if (!v || !v.art)                 { showToast('Diese Ecke liegt nicht im Grundriss'); return; }
+    if (v.sicherheit < 0.35)          { showToast('Der Grundriss ist hier nicht eindeutig'); return; }
+    setEckWahl(key, { typ: v.art });
+    showToast(`Grundriss: ${v.art === 'innen' ? 'Innenecke' : 'Außenecke'} `
+            + `(${Math.round(v.anteil * 100)} % Gebäude ringsum)`);
+    renderAll(); sync(); scheduleAutosave2d();
+  });
+  const grRow = document.createElement('div');
+  grRow.className = 'sheet-actions';
+  grRow.appendChild(grBtn);
+  sheet.appendChild(grRow);
+
+  // ── Zuordnung bei Innenecke ─────────────────────────────────────────────
+  const zuLabel = document.createElement('div');
+  zuLabel.className = 'sheet-section-label';
+  zuLabel.textContent = 'Welche Achse läuft durch?';
+  sheet.appendChild(zuLabel);
+
+  const zuHint = document.createElement('p');
+  zuHint.className = 'pdf-sheet-note';
+  sheet.appendChild(zuHint);
+
+  const zuRow = document.createElement('div');
+  zuRow.className = 'eck-choice-row';
+  sheet.appendChild(zuRow);
+
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button'; okBtn.className = 'sheet-ok';
+  okBtn.textContent = 'Fertig';
+  okBtn.addEventListener('click', () => { renderAll(); closeSheet(); });
+  actRow.appendChild(okBtn);
+  sheet.appendChild(actRow);
+
+  /** Baut den Inhalt aus dem aktuellen Zustand neu auf. */
+  const sync = () => {
+    const e = finde();
+    if (!e) { closeSheet(); return; }
+    const secDurch = state.sections[e.durchSi], secFuell = state.sections[e.fuellSi];
+    const nameSi = state.sections[e.si].name, nameNi = state.sections[e.ni].name;
+
+    hdr.textContent = `Ecke ${nameSi} / ${nameNi}`;
+    note.textContent = e.art === 'innen'
+      ? 'Innenecke: die beiden Gerüstbahnen überlappen sich. Die Ecklänge wird '
+        + 'einmal abgezogen und einmal zugeschlagen – in der Summe neutral.'
+      : 'Außenecke: zwischen den Bahnen bleibt eine Lücke, die das Eckstück '
+        + 'schließt. Nach DIN 18451 zählt sie bei beiden Seiten (La = L + L1).';
+
+    grBtn.style.display = grundrissLayer() ? '' : 'none';
+
+    artRow.replaceChildren();
+    [['auto', `Automatik (${e.artAuto === 'innen' ? 'Innenecke' : 'Außenecke'})`],
+     ['aussen', 'Außenecke'], ['innen', 'Innenecke']].forEach(([wert, txt]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'aufmass-preset';
+      b.textContent = txt;
+      const aktiv = wert === 'auto' ? !e.typBestaetigt : (e.typBestaetigt && e.art === wert);
+      b.classList.toggle('active', aktiv);
+      b.addEventListener('click', () => {
+        setEckWahl(key, { typ: wert === 'auto' ? null : wert });
+        renderAll(); sync();
+      });
+      artRow.appendChild(b);
+    });
+
+    const istInnen = e.art === 'innen';
+    zuLabel.style.display = istInnen ? '' : 'none';
+    zuHint.style.display  = istInnen ? '' : 'none';
+    zuRow.style.display   = istInnen ? '' : 'none';
+    if (!istInnen) return;
+
+    zuHint.textContent = e.bestaetigt
+      ? 'Ihre Festlegung. Antippen, um sie zu ändern.'
+      : 'Noch nicht festgelegt – bis dahin gilt der Vorschlag (die längere '
+        + 'Achse läuft durch). Bitte bestätigen oder ändern.';
+
+    // Beide Möglichkeiten mit ihrem jeweiligen Ergebnis anbieten. Dafür wird
+    // die Wahl kurz probeweise gesetzt und danach wiederhergestellt – so
+    // stimmen die angezeigten Längen mit dem PDF garantiert überein.
+    const vorher = { ...eckWahl(key) };
+    const varianten = [e.si, e.ni].map(si => {
+      setEckWahl(key, { durch: state.sections[si].id });
+      const achsen = aufmassAchsen();
+      const zeile = idx => {
+        const a = achsen.find(x => x.chain.includes(idx));
+        return a ? `${a.name}: ${fmtQty(a.m.laenge)} m` : '–';
+      };
+      return { si, durch: zeile(si), fuell: zeile(si === e.si ? e.ni : e.si) };
+    });
+    state.ecken[key] = vorher;
+    if (!Object.keys(vorher).length) delete state.ecken[key];
+
+    zuRow.replaceChildren();
+    varianten.forEach(v => {
+      const sec = state.sections[v.si];
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'eck-choice';
+      b.classList.toggle('active', v.si === e.durchSi);
+      const t1 = document.createElement('strong');
+      t1.textContent = `${sec.name} läuft durch`;
+      const t2 = document.createElement('span');
+      t2.className = 'eck-choice-sub';
+      t2.textContent = `${v.durch}  ·  ${v.fuell}`;
+      b.appendChild(t1); b.appendChild(t2);
+      b.addEventListener('click', () => {
+        setEckWahl(key, { durch: sec.id });
+        renderAll(); sync();
+      });
+      zuRow.appendChild(b);
+    });
+  };
+
+  sync();
   document.body.appendChild(overlay);
   document.body.appendChild(sheet);
   requestAnimationFrame(() => sheet.classList.add('open'));
@@ -4809,6 +5532,8 @@ function onLoadFile(e) {
       state.abschnitte = Array.isArray(s.abschnitte) ? s.abschnitte : [];
       state.hideUnassigned = !!s.hideUnassigned;
       state.aufmass  = s.aufmass || null;
+      state.ecken    = s.ecken || {};
+      state.grundriss = s.grundriss || null;
       // Migrate v1 saves (no x0/y0): reconstruct chain positions
       let cx = 0, cy = 0;
       state.sections = (s.sections || []).map(sec => {
@@ -4930,6 +5655,194 @@ function aggQtyText(a) {
   return parts.join(' · ') || '–';
 }
 
+/* ── Grundriss als Hintergrundebene ──────────────────────────────────────────
+   Der Nutzer legt einen Gebäudegrundriss (Foto, Scan, Screenshot) unter die
+   Zeichnung, richtet ihn aus und zeichnet die Gerüstachsen darüber. Zwei
+   Zwecke:
+
+     1. TRACING – die Achsen lassen sich am tatsächlichen Grundriss abgreifen
+        statt nach Gedächtnis.
+     2. ECKEN-VORSCHLAG – aus dem Bild lässt sich ableiten, ob an einem
+        Achsknoten Gebäude oder Freiraum liegt, und damit Innen- oder
+        Außenecke vorschlagen.
+
+   Ausrichtung: der Nutzer verschiebt die Ebene mit einem Griff, dreht sie über
+   ein Zahlenfeld und setzt den Maßstab über eine REFERENZSTRECKE – zwei Punkte
+   auf dem Grundriss antippen und die wahre Länge eintragen. Das ist der
+   verlässlichste Weg: Grundrisse tragen selten verwertbare DPI-Angaben, aber
+   fast immer eine bekannte Strecke (Maßkette, Türbreite, Gebäudekante).
+
+   Wie der Eckentyp aus dem Bild gelesen wird, steht bei grundrissMaske(). */
+
+// Position/Skalierung werden auf die MITTE der Ebene bezogen – so dreht sich
+// die Ebene um ihren Mittelpunkt und „wandert" beim Drehen nicht davon.
+const GRUNDRISS_DEFAULTS = {
+  x: 0, y: 0,            // Weltkoordinaten der Bildmitte
+  scale: 1,              // Welt-Pixel je Bildpixel
+  rot: 0,                // Grad
+  opacity: 0.45,
+  locked: false,
+  visible: true
+};
+
+/** Normalisierte Grundriss-Ebene oder null, wenn keine hinterlegt ist. */
+function grundrissLayer() {
+  const g = state.grundriss;
+  if (!g || !g.dataUrl || !g.w || !g.h) return null;
+  const num = (v, fb) => { const n = parseFloat(v); return isNaN(n) ? fb : n; };
+  g.x       = num(g.x, GRUNDRISS_DEFAULTS.x);
+  g.y       = num(g.y, GRUNDRISS_DEFAULTS.y);
+  g.scale   = Math.max(0.001, num(g.scale, GRUNDRISS_DEFAULTS.scale));
+  g.rot     = normDeg(num(g.rot, 0));
+  g.opacity = Math.min(1, Math.max(0.05, num(g.opacity, GRUNDRISS_DEFAULTS.opacity)));
+  g.locked  = !!g.locked;
+  g.visible = g.visible !== false;
+  return g;
+}
+
+/** Weltkoordinate → Bildpixel (Umkehrung der Ebenen-Transformation). */
+function weltZuGrundriss(g, wx, wy) {
+  const r = -g.rot * Math.PI / 180;
+  const dx = wx - g.x, dy = wy - g.y;
+  const rx = dx * Math.cos(r) - dy * Math.sin(r);
+  const ry = dx * Math.sin(r) + dy * Math.cos(r);
+  return { x: rx / g.scale + g.w / 2, y: ry / g.scale + g.h / 2 };
+}
+
+/* ── Auswertung des Grundriss-Bildes ─────────────────────────────────────────
+   Ziel: für einen Punkt neben einer Wand beantworten „liegt hier Gebäude oder
+   Freiraum?". Naheliegend wäre, auf dunkle Pixel zu prüfen – das scheitert
+   aber daran, dass Grundrisse INNEN überwiegend weiß sind (Räume) und nur die
+   Wände dunkel. Dunkel ≠ Gebäude.
+
+   Deshalb wird der FREIRAUM bestimmt statt des Gebäudes: Vom Bildrand aus wird
+   der helle Bereich geflutet (Flood-Fill über den Hintergrund). Alles, was der
+   Fluss nicht erreicht, liegt hinter einer Wand – also im Gebäude. Räume im
+   Inneren sind vom Rand aus nicht erreichbar und zählen damit korrekt zum
+   Gebäude.
+
+   Ausgewertet wird dann ein RING um den Eckpunkt: an einer Außenecke liegt
+   etwa ein Viertel des Rings im Gebäude, an einer Innenecke etwa drei Viertel.
+   Das ist robust gegen Strichstärken, Möblierung und Bemaßung im Plan.
+
+   Grenzen (bewusst offengelegt statt kaschiert): ein umlaufender Rahmen um den
+   Plan blockiert den Fluss vom Bildrand. Wird dabei fast nichts als Freiraum
+   erkannt, liefert die Auswertung KEINEN Vorschlag statt eines falschen.     */
+
+let _grMaskeSrc = null;    // dataUrl, zu der die Maske gehört
+let _grMaske    = null;    // { w, h, aussen: Uint8Array }
+
+/** Verkleinerte Freiraum-Maske des Grundrisses (asynchron, einmal je Bild). */
+async function grundrissMaske() {
+  const g = grundrissLayer();
+  if (!g) return null;
+  if (_grMaskeSrc === g.dataUrl && _grMaske) return _grMaske;
+
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = rej;
+    i.src = g.dataUrl;
+  }).catch(() => null);
+  if (!img) return null;
+
+  // Auf höchstens 900 px lange Kante herunterrechnen: die Maske muss nur
+  // Räume trennen, nicht Details auflösen – und der Flood-Fill bleibt schnell.
+  const MAX = 900;
+  const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * k));
+  const h = Math.max(1, Math.round(img.naturalHeight * k));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h);   // Transparenz = Freiraum
+  cx.drawImage(img, 0, 0, w, h);
+  let data;
+  try { data = cx.getImageData(0, 0, w, h).data; } catch (_) { return null; }
+
+  // Hintergrund = hell. Der Schwellwert ist bewusst hoch: lieber eine graue
+  // Rasterfläche noch als Wand werten, als eine dünne Wandlinie zu verlieren –
+  // eine Lücke in der Wand ließe den Fluss ins Gebäude durchbrechen.
+  const hell = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < hell.length; i++, p += 4) {
+    hell[i] = (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) > 205 ? 1 : 0;
+  }
+
+  const aussen = new Uint8Array(w * h);
+  const stack = [];
+  const push = (x, y) => {
+    const i = y * w + x;
+    if (hell[i] && !aussen[i]) { aussen[i] = 1; stack.push(i); }
+  };
+  for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1); }
+  for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y); }
+  while (stack.length) {
+    const i = stack.pop();
+    const x = i % w, y = (i - x) / w;
+    if (x > 0)     push(x - 1, y);
+    if (x < w - 1) push(x + 1, y);
+    if (y > 0)     push(x, y - 1);
+    if (y < h - 1) push(x, y + 1);
+  }
+
+  let frei = 0;
+  for (let i = 0; i < aussen.length; i++) frei += aussen[i];
+  _grMaskeSrc = g.dataUrl;
+  _grMaske = { w, h, aussen, anteilFrei: frei / aussen.length };
+  return _grMaske;
+}
+
+/** Liegt die Weltkoordinate im Gebäude? (null = außerhalb des Bildes) */
+function imGebaeude(maske, g, wx, wy) {
+  const p = weltZuGrundriss(g, wx, wy);
+  const px = Math.round(p.x * maske.w / g.w);
+  const py = Math.round(p.y * maske.h / g.h);
+  if (px < 0 || py < 0 || px >= maske.w || py >= maske.h) return null;
+  return !maske.aussen[py * maske.w + px];
+}
+
+/**
+ * Eckentyp-Vorschläge aus dem Grundriss – je Ecke `{ key, art, sicherheit }`.
+ *
+ * Gemessen wird der Anteil des Gebäudes auf einem Ring um den Eckpunkt:
+ * ≈ 25 % → Außenecke, ≈ 75 % → Innenecke. Die Sicherheit ist der Abstand von
+ * der 50-%-Grenze; bei zu wenig Aussage (Bildrand, Rahmen, unklarer Plan)
+ * entfällt der Vorschlag.
+ */
+async function grundrissEckVorschlaege() {
+  const g = grundrissLayer();
+  if (!g) return { fehler: 'Kein Grundriss hinterlegt.', ecken: [] };
+  const maske = await grundrissMaske();
+  if (!maske) return { fehler: 'Der Grundriss konnte nicht ausgewertet werden.', ecken: [] };
+  if (maske.anteilFrei < 0.03) {
+    return { fehler: 'Im Grundriss ist kein zusammenhängender Freiraum erkennbar '
+                   + '(z. B. wegen eines Rahmens um den Plan). Der Eckentyp lässt '
+                   + 'sich daraus nicht ableiten.', ecken: [] };
+  }
+
+  const R = Math.max(state.depth * PX_PER_M * 1.6, 40);   // Ringradius in Welt-px
+  const N = 96;
+  const ecken = eckenListe().map(e => {
+    // Eckpunkt = der gemeinsame Knoten beider Achsen (erster Punkt des Vierecks).
+    const p = e.pts[0];
+    let drin = 0, gueltig = 0;
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * 2 * Math.PI;
+      const t = imGebaeude(maske, g, p.x + Math.cos(a) * R, p.y + Math.sin(a) * R);
+      if (t === null) continue;
+      gueltig++; if (t) drin++;
+    }
+    if (gueltig < N * 0.75) return { key: e.key, art: null, sicherheit: 0 };
+    const anteil = drin / gueltig;
+    return {
+      key: e.key,
+      art: anteil > 0.5 ? 'innen' : 'aussen',
+      anteil,
+      sicherheit: Math.min(1, Math.abs(anteil - 0.5) * 4)
+    };
+  });
+  return { fehler: null, ecken };
+}
+
 /* ── Aufmaßregeln nach ATV DIN 18451 ─────────────────────────────────────────
    Die Norm rechnet nicht mit den Systemmaßen des verwendeten Gerüstsystems,
    sondern ausschließlich mit den ACHSMASSEN der Gerüstkonstruktion – „Der
@@ -4947,8 +5860,30 @@ function aggQtyText(a) {
    • FELDZUSCHLAG: fester Aufschlag von 0,80 m (bei kleineren Systembreiten
      0,73 m). Ob er je Feld, je Wand oder nur bei einfeldrigen Gerüsten
      anfällt, ist einstellbar.
+   • INNENECKE: läuft das Gerüst in einen Rücksprung, ÜBERLAPPEN sich die
+     beiden Bahnen um Gerüsttiefe × Gerüsttiefe. Anders als bei der Außenecke
+     darf diese Fläche NICHT doppelt zählen. Gerechnet wird sie einer der
+     beiden Achsen zugeschlagen:
+       – die DURCHLAUFENDE Achse (läuft in die Ecke hinein): ihr letztes Feld
+         vor der Ecke wird um die Ecklänge REDUZIERT,
+       – die AUSFÜLLENDE Achse (senkrecht dazu, füllt die Ecke): ihr Feld an
+         der Ecke wird um dieselbe Länge ERHÖHT.
+     Beispiel bei 0,73 m: Achse 1 mit 3 × 2,57 m ergibt
+     2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse 2 mit einem
+     Feld 2,57 + 0,73 = 3,30 m. In der Summe ist die Innenecke damit neutral
+     (−0,73 + 0,73 = 0) – sie verschiebt die Länge nur von einer Achse auf die
+     andere. Genau das ist für abschnitts- oder achsweise Abrechnung
+     entscheidend.
 
-   Beides ist bewusst als KONFIGURIERBARER Parameter umgesetzt (Wert,
+   WELCHE Achse durchläuft, ist am Bau eine Planungsentscheidung und keine
+   reine Geometriefrage. Deshalb entscheidet der NUTZER: jede Innenecke ist in
+   der Zeichnung antippbar und umschaltbar (siehe openEckSheet()). Bis zur
+   Bestätigung gilt ein Vorschlag – die längere Achse läuft durch – und die
+   Ecke wird als „noch nicht bestätigt" markiert (Warnfarbe, „?"-Kennzeichen,
+   Hinweis im PDF-Dialog), damit keine Zahl unbemerkt aus einer Annahme
+   entsteht.
+
+   Alles ist bewusst als KONFIGURIERBARER Parameter umgesetzt (Wert,
    Wirkungsbereich, an/aus) statt hart kodiert: ändern sich die Aufmaßregeln,
    genügt eine Änderung im Dialog „Aufmaßregeln" im PDF-Export.
 
@@ -4967,10 +5902,16 @@ const AUFMASS_MODI = [
 const AUFMASS_FELD_PRESETS = [0.80, 0.73];
 
 const AUFMASS_DEFAULTS = {
-  // Standard: keine Zuschläge. Sie werden bewusst vom Nutzer zugeschaltet,
+  // Standard: keine ZUSCHLÄGE. Sie werden bewusst vom Nutzer zugeschaltet,
   // damit sich bestehende Aufmaße nicht unbemerkt ändern.
   eckzuschlag:  { aktiv: false, wert: null },          // wert null → Gerüsttiefe
-  feldzuschlag: { aktiv: false, wert: 0.80, modus: 'wand' }
+  feldzuschlag: { aktiv: false, wert: 0.80, modus: 'wand' },
+  // Die Innenecken-Regel ist dagegen standardmäßig AN: sie ist kein Zuschlag,
+  // sondern eine Korrektur. Ohne sie zählt die Überlappung an einer Innenecke
+  // bei beiden Achsen mit – das ist schlicht falsch. Für die Gesamtsumme ist
+  // sie neutral (−x bei der einen, +x bei der anderen Achse), sie ändert also
+  // keine bestehende Gesamtlänge, sondern nur deren Aufteilung.
+  innenecke:    { aktiv: true, wert: null }            // wert null → Gerüsttiefe
 };
 
 /** Aufmaßregeln der Zeichnung – ergänzt fehlende/ungültige Werte AN ORT UND
@@ -4987,6 +5928,11 @@ function aufmassRules() {
   const r = state.aufmass;
   if (!r.eckzuschlag  || typeof r.eckzuschlag  !== 'object') r.eckzuschlag  = {};
   if (!r.feldzuschlag || typeof r.feldzuschlag !== 'object') r.feldzuschlag = {};
+  // Zeichnungen von vor der Innenecken-Regel haben den Block nicht – sie
+  // bekommen die Vorgabe (aktiv), weil er nur eine Fehlrechnung korrigiert.
+  if (!r.innenecke    || typeof r.innenecke    !== 'object') {
+    r.innenecke = { ...d.innenecke };
+  }
 
   r.eckzuschlag.aktiv  = !!r.eckzuschlag.aktiv;
   r.eckzuschlag.wert   = (r.eckzuschlag.wert == null || r.eckzuschlag.wert === '')
@@ -4995,6 +5941,9 @@ function aufmassRules() {
   r.feldzuschlag.wert  = num(r.feldzuschlag.wert, d.feldzuschlag.wert);
   r.feldzuschlag.modus = AUFMASS_MODI.some(m => m[0] === r.feldzuschlag.modus)
                          ? r.feldzuschlag.modus : d.feldzuschlag.modus;
+  r.innenecke.aktiv    = !!r.innenecke.aktiv;
+  r.innenecke.wert     = (r.innenecke.wert == null || r.innenecke.wert === '')
+                         ? null : num(r.innenecke.wert, null);
   return r;
 }
 
@@ -5002,6 +5951,14 @@ function aufmassRules() {
 function eckZuschlagWert() {
   const r = aufmassRules();
   return r.eckzuschlag.wert != null ? r.eckzuschlag.wert : state.depth;
+}
+
+/** Ecklänge einer Innenecke in m: um so viel wird die durchlaufende Achse
+ *  gekürzt und die ausfüllende verlängert. Ohne eigenen Wert die Gerüsttiefe –
+ *  das ist genau die Kantenlänge der Überlappung (0,73 m im Standardsystem). */
+function innenEckWert() {
+  const r = aufmassRules();
+  return r.innenecke.wert != null ? r.innenecke.wert : state.depth;
 }
 
 /** Ist mindestens ein Zuschlag eingeschaltet? */
@@ -5021,6 +5978,10 @@ function aufmassRuleText() {
     const m = AUFMASS_MODI.find(x => x[0] === r.feldzuschlag.modus);
     parts.push(`Aufschlag ${fmtQty(r.feldzuschlag.wert)} m ${m ? m[1] : ''}`.trim());
   }
+  if (r.innenecke.aktiv) {
+    parts.push(`Innenecke ± ${fmtQty(innenEckWert())} m `
+             + '(durchlaufende Achse −, ausfüllende Achse +)');
+  }
   return parts.join('   ·   ');
 }
 
@@ -5038,13 +5999,215 @@ function wallChains() {
   return chains;
 }
 
+/* ── Achsen ─────────────────────────────────────────────────────────────────
+   Eine ACHSE im Aufmaß-Sinn ist genau eine Wand: eine Kette direkt
+   aneinanderhängender Felder gleicher Laufrichtung. Genau darauf bezieht sich
+   die Innenecken-Regel („das letzte Feld VOR der Ecke"), deshalb braucht das
+   Aufmaß diese Gliederung – die frühere flache Summe über alle Felder konnte
+   sie gar nicht ausdrücken.                                                */
+
+/** Alle Achsen der Zeichnung: Sektionsindizes, Felder und ein Anzeigename. */
+function achsenListe() {
+  return wallChains().map((chain, i) => {
+    const secs  = chain.map(si => state.sections[si]);
+    const bays  = chain.flatMap(si => state.sections[si].bays.filter(isBayVisible));
+    // Name: bei einer einzelnen Sektion deren (frei benennbarer) Name, sonst
+    // „erste–letzte", damit die Achse im PDF wiederfindbar bleibt.
+    const first = secs[0], last = secs[secs.length - 1];
+    const name  = secs.length === 1
+      ? (first.name || `Achse ${i + 1}`)
+      : `${first.name || 'Achse'} – ${last.name || ''}`.trim();
+    return { idx: i, chain, secs, bays, name };
+  });
+}
+
+/** Achse (Index in achsenListe()) zu einem Sektionsindex – oder -1. */
+function achseVonSektion(achsen, si) {
+  return achsen.findIndex(a => a.chain.includes(si));
+}
+
+/* ── Ecken: Erkennung + Entscheidung des Nutzers ───────────────────────────── */
+
+/** Stabiler Schlüssel einer Ecke: das ungeordnete Paar der Sektions-IDs.
+ *  Bewusst NICHT die Position – die ändert sich beim Verschieben – und
+ *  bewusst ungeordnet, damit die Entscheidung erhalten bleibt, wenn dieselbe
+ *  Ecke einmal von der anderen Seite her gefunden wird. */
+function eckKey(secA, secB) {
+  const a = secA.id, b = secB.id;
+  return a < b ? `E${a}-${b}` : `E${b}-${a}`;
+}
+
+/** Gespeicherte Entscheidung zu einer Ecke (oder ein leeres Objekt). */
+function eckWahl(key) {
+  if (!state.ecken || typeof state.ecken !== 'object') state.ecken = {};
+  return state.ecken[key] || {};
+}
+
+/** Entscheidung setzen. `typ`: 'auto' | 'aussen' | 'innen';
+ *  `durch`: Sektions-ID der durchlaufenden Achse oder null (= Vorschlag). */
+function setEckWahl(key, patch) {
+  if (!state.ecken || typeof state.ecken !== 'object') state.ecken = {};
+  const cur = { ...eckWahl(key), ...patch };
+  if (cur.typ === 'auto' || cur.typ == null) delete cur.typ;
+  if (cur.durch == null) delete cur.durch;
+  if (Object.keys(cur).length) state.ecken[key] = cur;
+  else delete state.ecken[key];
+}
+
+/**
+ * Alle Ecken der Zeichnung, angereichert um die Aufmaß-Bedeutung.
+ *
+ * Für jede Ecke wird geliefert:
+ *   key        stabiler Schlüssel (siehe eckKey)
+ *   si, ni     ein- und ausleitende Sektion (Index)
+ *   art        'aussen' | 'innen' – nach Nutzerentscheidung, sonst Geometrie
+ *   artAuto    was die Geometrie allein sagt
+ *   pts        Viereck (Eckstück bzw. Überlappung) für die Zeichnung
+ *   durchSi    Sektionsindex der DURCHLAUFENDEN Achse   (nur bei 'innen')
+ *   fuellSi    Sektionsindex der AUSFÜLLENDEN Achse     (nur bei 'innen')
+ *   bestaetigt hat der Nutzer die Zuordnung selbst gesetzt?
+ *
+ * Solange der Nutzer nicht entschieden hat, gilt ein VORSCHLAG: die Achse mit
+ * der größeren Gesamtlänge läuft durch, die kürzere füllt die Ecke. Das ist
+ * der übliche Fall (ein Rücksprung wird von einem kurzen Feld ausgefüllt) –
+ * aber eben nur ein Vorschlag, siehe `bestaetigt`.
+ */
+function eckenListe() {
+  const sig = eckenSignatur();
+  if (_eckenSig === sig && _eckenCache) return _eckenCache;
+  _eckenCache = eckenListeBerechnen();
+  _eckenSig   = sig;
+  return _eckenCache;
+}
+
+/* Merker für eckenListe(). Die Liste wird pro Achse und pro Abschnitt
+   gebraucht (computeAufmass → innenEckKorrekturen), ihre Ermittlung ist aber
+   vergleichsweise teuer: computeLayout() plus wallChains(). Ohne Merker
+   kostete ein Aufmaß über 160 Achsen rund 0,6 s – spürbar beim PDF-Export.
+
+   Statt an Änderungen „gemeldet" zu werden (was leicht eine Stelle übersieht
+   und dann veraltete Zahlen liefert), prüft der Merker eine Signatur über
+   ALLES, wovon die Liste abhängt: Geometrie, Sichtbarkeit, Gerüsttiefe und
+   die Eck-Entscheidungen. Aufstellen der Signatur ist linear zur Feldanzahl,
+   die Berechnung selbst quadratisch – der Merker lohnt sich also auch dann,
+   wenn er nur innerhalb eines Durchlaufs greift. */
+let _eckenCache = null;
+let _eckenSig   = null;
+
+function eckenSignatur() {
+  const p = [state.depth];
+  state.sections.forEach(s => {
+    p.push(s.id, s.x0, s.y0, secAngle(s), s.flip ? 1 : 0);
+    s.bays.forEach(b => p.push(b.id, b.len, isBayVisible(b) ? 1 : 0));
+  });
+  p.push(JSON.stringify(state.ecken || {}));
+  return p.join('|');
+}
+
+function eckenListeBerechnen() {
+  const achsen = achsenListe();
+  const laengeVon = si => {
+    const a = achsen[achseVonSektion(achsen, si)];
+    return a ? a.bays.reduce((s, b) => s + b.len, 0) : 0;
+  };
+
+  return computeLayout().filter(e => e.type === 'corner').map(c => {
+    const secA = state.sections[c.si], secB = state.sections[c.ni];
+    const key  = eckKey(secA, secB);
+    const w    = eckWahl(key);
+    const art  = (w.typ === 'aussen' || w.typ === 'innen') ? w.typ : c.kind;
+
+    // Vorschlag: die längere Achse läuft durch. Bei Gleichstand entscheidet
+    // die Zeichenrichtung (die in der Ecke endende Achse „läuft hinein").
+    const lenA = laengeVon(c.si), lenB = laengeVon(c.ni);
+    const vorschlagDurch = lenB > lenA ? c.ni : c.si;
+
+    // Die gespeicherte Wahl zählt nur, wenn sie eine der beiden Achsen
+    // benennt – nach Umbauten kann sie ins Leere zeigen.
+    const gewaehlt = w.durch != null
+      ? [c.si, c.ni].find(i => state.sections[i] && state.sections[i].id === w.durch)
+      : undefined;
+    const durchSi = gewaehlt != null ? gewaehlt : vorschlagDurch;
+
+    return {
+      key, si: c.si, ni: c.ni, pts: c.pts,
+      art, artAuto: c.kind,
+      typBestaetigt: w.typ === 'aussen' || w.typ === 'innen',
+      durchSi,
+      fuellSi: durchSi === c.si ? c.ni : c.si,
+      bestaetigt: gewaehlt != null
+    };
+  });
+}
+
+/** Innenecken, deren Zuordnung noch auf dem Vorschlag beruht. */
+function offeneInnenecken() {
+  return eckenListe().filter(e => e.art === 'innen' && !e.bestaetigt);
+}
+
+/**
+ * Das Feld einer Sektion, das AN der Ecke liegt: endet die Sektion dort, ist
+ * es ihr letztes Feld, beginnt sie dort, ihr erstes.
+ */
+function eckFeldVon(si, endetAnDerEcke) {
+  const sec = state.sections[si];
+  if (!sec || !sec.bays.length) return null;
+  const sichtbar = sec.bays.filter(isBayVisible);
+  const liste = sichtbar.length ? sichtbar : sec.bays;
+  return endetAnDerEcke ? liste[liste.length - 1] : liste[0];
+}
+
+/**
+ * Innenecken-Korrektur je Feld: `bay.id → { delta, ecken:[…] }`.
+ *
+ * Pro Innenecke wird das Feld an der Ecke der DURCHLAUFENDEN Achse um die
+ * Ecklänge gekürzt und das Feld an der Ecke der AUSFÜLLENDEN Achse um
+ * dieselbe Länge verlängert. Die Korrektur hängt am einzelnen Feld (nicht an
+ * der Achse), damit der Rechenweg im PDF feldgenau dargestellt werden kann –
+ * „2,57 + 2,57 + (2,57 − 0,73)" statt einer anonymen Summenkorrektur.
+ *
+ * Liegen beide Felder in derselben Auswertung (z. B. Gesamtsumme), heben sich
+ * −x und +x exakt auf: die Innenecke ist in der Summe neutral.
+ */
+function innenEckKorrekturen() {
+  const map = new Map();
+  const r = aufmassRules();
+  if (!r.innenecke.aktiv) return map;
+  const wert = innenEckWert();
+  if (!(wert > 0)) return map;
+
+  const merke = (bay, delta, info) => {
+    if (!bay) return;
+    const cur = map.get(bay.id) || { delta: 0, ecken: [] };
+    cur.delta += delta;
+    cur.ecken.push(info);
+    map.set(bay.id, cur);
+  };
+
+  eckenListe().forEach(e => {
+    if (e.art !== 'innen') return;
+    merke(eckFeldVon(e.durchSi, e.durchSi === e.si), -wert,
+          { key: e.key, rolle: 'durchlaufend', wert: -wert });
+    merke(eckFeldVon(e.fuellSi, e.fuellSi === e.si), +wert,
+          { key: e.key, rolle: 'ausfuellend', wert: +wert });
+  });
+  return map;
+}
+
+/** Aufmaßlänge eines einzelnen Feldes inkl. Innenecken-Korrektur (nie < 0). */
+function bayAufmassLen(bay, korr) {
+  const k = korr && korr.get(bay.id);
+  return Math.max(0, bay.len + (k ? k.delta : 0));
+}
+
 /**
  * Aufmaß einer Feldmenge nach den eingestellten Regeln.
- * Grundlage ist immer das Achsmaß; Zuschläge kommen nur dazu, wenn sie
- * eingeschaltet sind.
+ * Grundlage ist immer das Achsmaß; Korrektur und Zuschläge kommen nur dazu,
+ * wenn sie eingeschaltet sind.
  *
  * @param {Array} bays  Felder (z. B. ein Abschnitt oder alle Felder)
- * @returns {{achse:number, ecken:number, eckLaenge:number, felder:number,
+ * @returns {{achse:number, innenecken:number, innenLaenge:number,
+ *            ecken:number, eckLaenge:number, felder:number,
  *            feldLaenge:number, laenge:number, achsFlaeche:number,
  *            flaeche:number, hoehe:number|null}}
  */
@@ -5054,13 +6217,32 @@ function computeAufmass(bays) {
   const achse       = bays.reduce((s, b) => s + b.len, 0);
   const achsFlaeche = bays.reduce((s, b) => s + bayFlaecheM2(b), 0);
 
-  // Außenecken: Jede Ecke bringt den Zuschlag für JEDE angrenzende Seite ein,
-  // die zu dieser Feldmenge gehört – so wird die Ecke wie vorgesehen bei
-  // beiden Seiten mitgerechnet.
+  const alleEcken = (r.eckzuschlag.aktiv || r.innenecke.aktiv) ? eckenListe() : [];
+
+  // ── Innenecke: Umverteilung, kein Zuschlag ──────────────────────────────
+  // Gezählt wird, wie oft eine Innenecke Felder DIESER Menge betrifft; die
+  // Summe der Korrekturen kann dabei positiv, negativ oder (wenn beide Seiten
+  // in der Menge liegen) genau null sein.
+  const korr = innenEckKorrekturen();
+  let innenLaenge = 0, innenecken = 0;
+  if (r.innenecke.aktiv) {
+    bays.forEach(b => {
+      const k = korr.get(b.id);
+      if (!k) return;
+      innenLaenge += k.delta;
+      innenecken  += k.ecken.length;
+    });
+  }
+
+  // ── Außenecke: Zuschlag bei BEIDEN angrenzenden Seiten (La = L + L1) ─────
+  // Jede Ecke bringt den Zuschlag für JEDE angrenzende Seite ein, die zu
+  // dieser Feldmenge gehört – so wird die Ecke wie vorgesehen doppelt
+  // gerechnet. Innenecken sind hier bewusst ausgenommen: dort überlappen sich
+  // die Bahnen, statt eine Lücke zu lassen.
   let ecken = 0;
   if (r.eckzuschlag.aktiv) {
-    computeLayout().forEach(c => {
-      if (c.type !== 'corner') return;
+    alleEcken.forEach(c => {
+      if (c.art !== 'aussen') return;
       [c.si, c.ni].forEach(i => {
         const sec = state.sections[i];
         if (sec && sec.bays.some(b => ids.has(b.id))) ecken++;
@@ -5085,7 +6267,7 @@ function computeAufmass(bays) {
   }
   const feldLaenge = felder * r.feldzuschlag.wert;
 
-  const laenge = achse + eckLaenge + feldLaenge;
+  const laenge = achse + innenLaenge + eckLaenge + feldLaenge;
   // Die Zuschlagslängen werden mit der längengewichteten mittleren Gerüsthöhe
   // in Fläche umgerechnet – dieselbe Höhe, mit der auch das Achsmaß rechnet.
   const hoehe = achse > 0 ? achsFlaeche / achse : null;
@@ -5093,11 +6275,42 @@ function computeAufmass(bays) {
 
   const r2 = n => +n.toFixed(2);
   return {
-    achse: r2(achse), ecken, eckLaenge: r2(eckLaenge),
+    achse: r2(achse),
+    innenecken, innenLaenge: r2(innenLaenge),
+    ecken, eckLaenge: r2(eckLaenge),
     felder, feldLaenge: r2(feldLaenge), laenge: r2(laenge),
     achsFlaeche: r2(achsFlaeche), flaeche: r2(flaeche),
     hoehe: hoehe != null ? r2(hoehe) : null
   };
+}
+
+/**
+ * Aufmaß je ACHSE – die Gliederung, auf die sich die Innenecken-Regel
+ * bezieht. Liefert zusätzlich den feldgenauen Rechenweg als Text, damit im
+ * PDF nachvollziehbar bleibt, WELCHES Feld gekürzt bzw. verlängert wurde.
+ */
+function aufmassAchsen() {
+  const korr  = innenEckKorrekturen();
+  const r     = aufmassRules();
+  const ecken = eckenListe();          // einmal ermitteln, nicht je Achse
+  return achsenListe().map(a => {
+    const m = computeAufmass(a.bays);
+    const teile = a.bays.map(b => {
+      const k = r.innenecke.aktiv && korr.get(b.id);
+      if (!k || !k.delta) return fmtQty(b.len);
+      const vz = k.delta < 0 ? '−' : '+';
+      return `(${fmtQty(b.len)} ${vz} ${fmtQty(Math.abs(k.delta))})`;
+    });
+    // Rolle der Achse an ihren Innenecken – für die Spalte „Innenecke".
+    const inChain = new Set(a.chain);
+    const rollen = [];
+    ecken.forEach(e => {
+      if (e.art !== 'innen') return;
+      if (inChain.has(e.durchSi))      rollen.push('durchlaufend');
+      else if (inChain.has(e.fuellSi)) rollen.push('ausfüllend');
+    });
+    return { ...a, m, rechenweg: teile.join(' + '), rollen };
+  });
 }
 
 /* ── PDF-Export (Vektor) ─────────────────────────────────────────────────────
@@ -5394,6 +6607,12 @@ function pdfLegendEntries() {
       entries.push({ label: a.name, color: pdfHex(a.color), shape: 'line' });
     }
   });
+  // Innenecken erklären sich im Plan nicht von selbst: dort steht kein
+  // Bauteil, sondern es überlappen sich zwei Bahnen. Ohne Legendeneintrag
+  // bliebe die gestrichelte Kontur unverständlich.
+  if (eckenListe().some(e => e.art === 'innen')) {
+    entries.push({ label: 'Innenecke (Überlappung, ± Aufmaß)', color: '#c2691b' });
+  }
   return entries;
 }
 
@@ -5546,17 +6765,30 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     ghosts.forEach(el => drawClipped(el.pts, 'FD'));
   }
 
-  // 1. Eckstücke (nur die, deren Nachbarfelder auf dieser Seite liegen)
+  // 1. Eckstücke (nur die, deren Nachbarfelder auf dieser Seite liegen).
+  //    Wie in der Zeichnung wird nur die AUSSENECKE als Fläche dargestellt –
+  //    sie ist ein Bauteil. Die Innenecke ist eine Überlappung und bekommt
+  //    lediglich eine Kontur, damit im Plan erkennbar bleibt, wo die
+  //    Aufmaß-Anpassung greift, ohne Gerüst vorzutäuschen.
+  const sichtbar = el => {
+    const b = elBBox(el);
+    return !(b.maxX < win.minX || b.minX > win.minX + win.w
+          || b.maxY < win.minY || b.minY > win.minY + win.h);
+  };
   const cornerStroke = pdfCol(theme, [44, 111, 168]);
   const cornerFill   = pdfCol(theme, [181, 212, 240]);
   doc.setDrawColor(...cornerStroke); doc.setLineWidth(0.4);
   doc.setFillColor(...cornerFill);
-  layout.filter(e => e.type === 'corner').forEach(el => {
-    const b = elBBox(el);
-    if (b.maxX < win.minX || b.minX > win.minX + win.w) return;
-    if (b.maxY < win.minY || b.minY > win.minY + win.h) return;
-    drawClipped(el.pts, 'FD');
-  });
+  layout.filter(e => e.type === 'corner' && eckArtEffektiv(e) === 'aussen')
+        .forEach(el => { if (sichtbar(el)) drawClipped(el.pts, 'FD'); });
+
+  const innenCorners = layout.filter(e => e.type === 'corner' && eckArtEffektiv(e) === 'innen');
+  if (innenCorners.length) {
+    doc.setDrawColor(...pdfCol(theme, [194, 105, 27])); doc.setLineWidth(0.35);
+    if (doc.setLineDashPattern) doc.setLineDashPattern([1.1, 0.9], 0);
+    innenCorners.forEach(el => { if (sichtbar(el)) drawClipped(el.pts, 'D'); });
+    if (doc.setLineDashPattern) doc.setLineDashPattern([], 0);
+  }
 
   // 2. Wandlinien – am Rand des Ausschnitts abgeschnitten (Liang-Barsky),
   //    damit auf einer Seite keine Linie ins Nichts weiterläuft.
@@ -5920,14 +7152,32 @@ function buildAufmassSettings() {
     const calc = () => computeAufmass(visibleBaysFlat());
     const m = pdfIncludeHidden ? withHiddenShown(calc) : calc();
     summary.textContent = `Achsmaß ${fmtQty(m.achse)} m`
+      + (m.innenLaenge ? `  ${m.innenLaenge < 0 ? '−' : '+'}  ${fmtQty(Math.abs(m.innenLaenge))} m Innenecke` : '')
       + (m.ecken ? `  +  ${m.ecken} × ${fmtQty(eckZuschlagWert())} m Ecke` : '')
       + (m.felder ? `  +  ${m.felder} × ${fmtQty(aufmassRules().feldzuschlag.wert)} m Feld` : '')
       + `  =  Aufmaß ${fmtQty(m.laenge)} m`
       + (m.flaeche ? `  ·  ${fmtQty(m.flaeche)} m²` : '');
+    // Unbestätigte Innenecken sichtbar machen: die Zahl steht dann auf einer
+    // Annahme, die der Nutzer noch nicht geprüft hat.
+    const offen = aufmassRules().innenecke.aktiv ? offeneInnenecken() : [];
+    warn.style.display = offen.length ? '' : 'none';
+    if (offen.length) {
+      warn.textContent = offen.length === 1
+        ? 'Eine Innenecke ist noch nicht festgelegt – es gilt der Vorschlag '
+          + `„${state.sections[offen[0].durchSi].name} läuft durch". `
+          + 'In der Zeichnung auf das „?" tippen, um sie zu bestätigen.'
+        : `${offen.length} Innenecken sind noch nicht festgelegt. Es gilt der `
+          + 'Vorschlag „längere Achse läuft durch". In der Zeichnung auf das '
+          + '„?" tippen, um sie zu bestätigen.';
+    }
   };
   // Der Schalter „ausgeblendete mitexportieren" liegt weiter oben im Dialog und
   // zieht die Vorschau hierüber nach.
   wrap._syncSummary = syncSummary;
+
+  const warn = document.createElement('div');
+  warn.className = 'aufmass-warn';
+  warn.style.display = 'none';
 
   // ── Außenecke ───────────────────────────────────────────────────────────
   const eckRow = document.createElement('label');
@@ -6047,7 +7297,50 @@ function buildAufmassSettings() {
   syncFeld();
 
   syncSummary();
+  // ── Innenecke ───────────────────────────────────────────────────────────
+  // Steht bewusst NACH den beiden Zuschlägen: die sind Aufschläge auf das
+  // Aufmaß, dies hier ist eine Korrektur, die nur umverteilt.
+  const innRow = document.createElement('label');
+  innRow.className = 'pdf-opt-row';
+  const innChk = document.createElement('input');
+  innChk.type = 'checkbox'; innChk.checked = r.innenecke.aktiv;
+  const innTxt = document.createElement('span');
+  innTxt.innerHTML = '<strong>Innenecken verrechnen</strong>'
+                   + '<br><span class="pdf-opt-hint">An einer Innenecke überlappen '
+                   + 'sich beide Bahnen. Die durchlaufende Achse wird am letzten '
+                   + 'Feld vor der Ecke gekürzt, die ausfüllende um denselben Wert '
+                   + 'verlängert – in der Summe neutral.</span>';
+  innRow.appendChild(innChk); innRow.appendChild(innTxt);
+  wrap.appendChild(innRow);
+
+  const innCfg = document.createElement('div');
+  innCfg.className = 'aufmass-cfg-row aufmass-cfg-innen';
+  const innLab = document.createElement('span');
+  innLab.className = 'aufmass-cfg-label';
+  innLab.textContent = 'Ecklänge (m)';
+  const innInp = document.createElement('input');
+  innInp.type = 'number'; innInp.className = 'aufmass-cfg-inp';
+  innInp.min = '0'; innInp.step = '0.01'; innInp.inputMode = 'decimal';
+  innInp.placeholder = state.depth.toFixed(2);
+  innInp.title = 'Leer lassen = Gerüsttiefe (' + state.depth.toFixed(2).replace('.', ',') + ' m)';
+  innInp.value = r.innenecke.wert != null ? r.innenecke.wert.toFixed(2) : '';
+  innInp.addEventListener('input', () => {
+    const v = parseFloat(innInp.value);
+    state.aufmass.innenecke.wert = (innInp.value === '' || isNaN(v) || v < 0) ? null : +v.toFixed(2);
+    syncSummary(); scheduleAutosave2d();
+  });
+  innCfg.appendChild(innLab); innCfg.appendChild(innInp);
+  wrap.appendChild(innCfg);
+
+  const syncInn = () => { innCfg.style.display = innChk.checked ? '' : 'none'; };
+  innChk.addEventListener('change', () => {
+    state.aufmass.innenecke.aktiv = innChk.checked;
+    syncInn(); syncSummary(); scheduleAutosave2d(); renderAll();
+  });
+  syncInn();
+
   wrap.appendChild(summary);
+  wrap.appendChild(warn);
   return wrap;
 }
 
@@ -6381,13 +7674,14 @@ async function buildPdfDocument(themeName) {
                   .filter(b => b.bays.length);
 
     const aCols = [
-      { t: 'Abschnitt',      w: 0.25, a: 'left'   },
-      { t: 'Felder',         w: 0.09, a: 'center' },
-      { t: 'Achsmaß',        w: 0.13, a: 'right'  },
+      { t: 'Abschnitt',      w: 0.22, a: 'left'   },
+      { t: 'Felder',         w: 0.07, a: 'center' },
+      { t: 'Achsmaß',        w: 0.12, a: 'right'  },
+      { t: 'Innenecke',      w: 0.13, a: 'right'  },
       { t: 'Eckzuschlag',    w: 0.14, a: 'right'  },
-      { t: 'Feldzuschlag',   w: 0.14, a: 'right'  },
-      { t: 'Aufmaßlänge',    w: 0.13, a: 'right'  },
-      { t: 'Aufmaßfläche',   w: 0.12, a: 'right'  }
+      { t: 'Feldzuschlag',   w: 0.13, a: 'right'  },
+      { t: 'Aufmaßlänge',    w: 0.10, a: 'right'  },
+      { t: 'Aufmaßfläche',   w: 0.09, a: 'right'  }
     ];
     const aW = availW;
     const aX = []; let aAcc = margin;
@@ -6439,12 +7733,20 @@ async function buildPdfDocument(themeName) {
       doc.text(label, aX[0] + labelX, ay + 5);
       aCell(1, String(m.count), bold);
       aCell(2, fmtQty(m.achse) + ' m', bold);
-      aCell(3, m.ecken ? `${m.ecken} × ${fmtQty(eckZuschlagWert())} = ${fmtQty(m.eckLaenge)} m` : '–', bold);
-      aCell(4, m.felder ? `${m.felder} × ${fmtQty(aufmassRules().feldzuschlag.wert)} = ${fmtQty(m.feldLaenge)} m` : '–', bold);
+      // Innenecke: Vorzeichen ist die Aussage. „± 0,00" statt „–" zeigt, dass
+      // sich die Korrektur innerhalb dieser Zeile aufhebt (beide Achsen der
+      // Ecke liegen im selben Abschnitt) – das ist etwas anderes als „keine
+      // Innenecke vorhanden".
+      aCell(3, m.innenecken
+        ? (m.innenLaenge === 0 ? '± 0,00 m'
+           : (m.innenLaenge < 0 ? '− ' : '+ ') + fmtQty(Math.abs(m.innenLaenge)) + ' m')
+        : '–', bold);
+      aCell(4, m.ecken ? `${m.ecken} × ${fmtQty(eckZuschlagWert())} = ${fmtQty(m.eckLaenge)} m` : '–', bold);
+      aCell(5, m.felder ? `${m.felder} × ${fmtQty(aufmassRules().feldzuschlag.wert)} = ${fmtQty(m.feldLaenge)} m` : '–', bold);
       doc.setFont('helvetica', 'bold');
-      doc.text(fmtQty(m.laenge) + ' m', aX[5] + aCols[5].w * aW - 2.5, ay + 5, { align: 'right' });
+      doc.text(fmtQty(m.laenge) + ' m', aX[6] + aCols[6].w * aW - 2.5, ay + 5, { align: 'right' });
       doc.text(m.flaeche ? fmtQty(m.flaeche) + ' m²' : '–',
-               aX[6] + aCols[6].w * aW - 2.5, ay + 5, { align: 'right' });
+               aX[7] + aCols[7].w * aW - 2.5, ay + 5, { align: 'right' });
       ay += aRowH;
       doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
       doc.line(margin, ay, margin + aW, ay);
@@ -6458,13 +7760,96 @@ async function buildPdfDocument(themeName) {
 
     // Bei Abschnitts-Gliederung: Hinweis, dass eine Ecke bei BEIDEN
     // angrenzenden Abschnitten zählt – sonst wirkt die Summe fehlerhaft.
+    const fuss = [];
     if (aufmassRules().eckzuschlag.aktiv) {
+      fuss.push('Außenecken werden nach DIN 18451 bei beiden angrenzenden Seiten '
+              + 'mitgerechnet (La = L + L1); eine Ecke erscheint daher in zwei Zeilen.');
+    }
+    if (aufmassRules().innenecke.aktiv) {
+      fuss.push('An Innenecken überlappen sich die Bahnen: die durchlaufende Achse '
+              + `wird um ${fmtQty(innenEckWert())} m gekürzt, die ausfüllende um `
+              + 'denselben Wert verlängert. Über beide Achsen zusammen ist die '
+              + 'Innenecke damit neutral.');
+    }
+    if (fuss.length) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7.4);
       doc.setTextColor(...theme.inkSoft);
-      doc.splitTextToSize(
-        'Außenecken werden nach DIN 18451 bei beiden angrenzenden Seiten mitgerechnet '
-        + '(La = L + L1); eine Ecke erscheint daher in zwei Zeilen.', aW)
-        .forEach((line, i) => doc.text(line, margin, ay + 5 + i * 4));
+      let fy = ay + 5;
+      fuss.forEach(txt => {
+        doc.splitTextToSize(txt, aW).forEach(line => { doc.text(line, margin, fy); fy += 3.6; });
+        fy += 1;
+      });
+      ay = fy;
+    }
+
+    // ── Aufstellung je ACHSE ────────────────────────────────────────────────
+    // Die Innenecken-Regel greift feldgenau („letztes Feld vor der Ecke"),
+    // deshalb wird der Rechenweg hier Feld für Feld ausgeschrieben. Erst das
+    // macht auf der Baustelle nachvollziehbar, warum eine Achse kürzer ist als
+    // die Summe ihrer Felder.
+    const achsen = aufmassAchsen();
+    if (achsen.length) {
+      const kCols = [
+        { t: 'Achse',        w: 0.16, a: 'left'   },
+        { t: 'Felder',       w: 0.07, a: 'center' },
+        { t: 'Rechenweg (Feldlängen inkl. Eckanpassung)', w: 0.47, a: 'left' },
+        { t: 'Rolle an der Ecke', w: 0.17, a: 'left' },
+        { t: 'Aufmaßlänge',  w: 0.13, a: 'right'  }
+      ];
+      const kX = []; let kAcc = margin;
+      kCols.forEach(c => { kX.push(kAcc); kAcc += c.w * aW; });
+      const kCell = (i, txt, bold, y) => {
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        const c = kCols[i];
+        const x = c.a === 'right' ? kX[i] + c.w * aW - 2.5
+                : c.a === 'center' ? kX[i] + c.w * aW / 2
+                : kX[i] + 2.5;
+        doc.text(txt, x, y, { align: c.a });
+      };
+
+      if (ay + 26 > contentBottom) {
+        ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'je Achse' }) + 3;
+      } else {
+        ay += 4;
+      }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      doc.setTextColor(...theme.ink);
+      doc.text('Aufmaß je Achse', margin, ay + 4);
+      ay += 7;
+
+      const kDrawHead = () => {
+        doc.setFillColor(...theme.tableHead);
+        doc.rect(margin, ay, aW, aHeadH, 'F');
+        doc.setFontSize(7.8); doc.setTextColor(...theme.tableHeadText);
+        kCols.forEach((c, i) => kCell(i, c.t, true, ay + 5));
+        ay += aHeadH;
+      };
+      kDrawHead();
+
+      achsen.forEach((a, i) => {
+        // Lange Rechenwege umbrechen, damit nichts über die Spalte hinausläuft.
+        const wegLines = doc.splitTextToSize(a.rechenweg, kCols[2].w * aW - 5);
+        const rowH = Math.max(aRowH, 3.1 + wegLines.length * 3.6);
+        if (ay + rowH > contentBottom) {
+          ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'je Achse (Fortsetzung)' }) + 3;
+          kDrawHead();
+        }
+        if (i % 2 === 1) { doc.setFillColor(...theme.zebra); doc.rect(margin, ay, aW, rowH, 'F'); }
+        doc.setFontSize(8.6); doc.setTextColor(...theme.ink);
+        kCell(0, a.name, false, ay + 5);
+        kCell(1, String(a.bays.length), false, ay + 5);
+        doc.setFont('helvetica', 'normal');
+        wegLines.forEach((line, li) => doc.text(line, kX[2] + 2.5, ay + 5 + li * 3.6));
+        const rolle = a.rollen.length
+          ? [...new Set(a.rollen)].join(', ')
+          : (a.m.ecken ? 'Außenecke' : '–');
+        kCell(3, rolle, false, ay + 5);
+        doc.setFont('helvetica', 'bold');
+        doc.text(fmtQty(a.m.laenge) + ' m', kX[4] + kCols[4].w * aW - 2.5, ay + 5, { align: 'right' });
+        ay += rowH;
+        doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
+        doc.line(margin, ay, margin + aW, ay);
+      });
     }
   }
 
@@ -6731,6 +8116,8 @@ function init() {
 
   document.getElementById('photosBtn').addEventListener('click', openPhotosSheet);
   document.getElementById('photoFileInput').addEventListener('change', onPhotoFilesSelected);
+  document.getElementById('grundrissBtn').addEventListener('click', openGrundrissSheet);
+  document.getElementById('grundrissFileInput').addEventListener('change', onGrundrissFileSelected);
 
   document.getElementById('deviceToggleBtn').addEventListener('click', () => {
     showDevicePicker(() => renderAll());
@@ -6778,6 +8165,7 @@ function init() {
   // Tap empty canvas → deselect section (hides + buttons)
   const deselect = () => {
     if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → nicht abwählen
+    if (grundrissMessen) return;                                 // im Messmodus zählt der Tipp als Messpunkt
     // Klick, der nur die Nachwehe eines gerade losgelassenen Griffs ist,
     // darf die eben getroffene Auswahl nicht wieder aufheben.
     if (Date.now() - handleReleasedAt < CLICK_AFTER_HANDLE_MS) return;
@@ -6785,6 +8173,15 @@ function init() {
   };
   svg.addEventListener('click',       deselect);
   svg.addEventListener('pointerdown', e => { if (e.target === svg || e.target.id === 'gridBg') deselect(); });
+
+  // Messmodus für den Grundriss-Maßstab: zwei Tipps auf die Zeichenfläche.
+  // Liegt VOR den Pan/Pinch-Handlern, damit ein Tipp nicht als Wischen zählt.
+  svg.addEventListener('click', e => {
+    if (!grundrissMessen) return;
+    if (canvasJustMoved) { canvasJustMoved = false; return; }
+    e.stopPropagation();
+    grundrissMessKlick(screenToSvg(e.clientX, e.clientY));
+  }, true);
 
   // Pinch-Zoom & Pan (ein/zwei Finger) – nach den bestehenden Handle-Listenern,
   // damit Verschiebe-/Dreh-Griffe (die stopPropagation() aufrufen) Vorrang haben.
