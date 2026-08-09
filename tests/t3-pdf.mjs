@@ -50,7 +50,7 @@ assert(Object.values(pages).every(t => t.some(x => x.includes('Testprojekt'))),
   'Projektname steht auf JEDER Seite');
 assert(Object.values(pages).every(t => t.some(x => /Seite \d+ von \d+/.test(x))),
   'Seitenzahl steht auf jeder Seite');
-assert(Object.values(pages).every(t => t.some(x => x.includes('Gesamtlänge') && x.includes('Gerüstfläche'))),
+assert(Object.values(pages).every(t => t.some(x => x.includes('Achsmaß') && x.includes('Gerüstfläche'))),
   'Kennzahlen-Fußzeile steht auf jeder Seite');
 assert(pages[1].some(x => x === 'LEGENDE'), 'Planseite hat eine Legende');
 assert(pages[1].some(x => x === 'Konsole') && pages[1].some(x => x === 'Netz'),

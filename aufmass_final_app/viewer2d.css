@@ -258,6 +258,85 @@
   font-weight: 700;
   cursor: pointer;
 }
+/* „Kopiertes Feld auf Auswahl anwenden" */
+.bulk-paste-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1.5px solid #cbd6ea;
+  background: #f5f8fd;
+  border-radius: 8px;
+  padding: 0.45rem 0.5rem;
+}
+.bulk-paste-info {
+  font-size: 0.7rem;
+  color: #5a6b7a;
+  font-variant-numeric: tabular-nums;
+}
+.bulk-paste-apply-btn {
+  align-self: flex-start;
+  padding: 0.35rem 0.6rem;
+  border: none;
+  border-radius: 7px;
+  background: #2c6fa8;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bulk-paste-apply-btn:disabled { background: #b6c4d2; cursor: not-allowed; }
+
+/* Auswahl, was beim Einfügen übertragen wird (Sheet + Mehrfachauswahl) */
+.paste-scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.paste-scope-chip {
+  padding: 0.25rem 0.55rem;
+  border: 1.5px solid #d0d6dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #6b7785;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.paste-scope-chip.active {
+  border-color: #2c6fa8;
+  background: #eaf3fb;
+  color: #1a4a7a;
+}
+
+/* Einstell-Dialog „Zusatzbauteil für Auswahl" */
+.bulk-pos-unit-row { flex-wrap: wrap; }
+.bulk-pos-qty-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.bulk-pos-qty-hint {
+  font-size: 0.75rem;
+  color: #7b8794;
+}
+.bulk-pos-preview {
+  margin-top: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: #f2f6fa;
+  border-left: 4px solid #2c6fa8;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1a4a7a;
+  font-variant-numeric: tabular-nums;
+}
+.bulk-pos-preview.warn {
+  background: #fff6e8;
+  border-left-color: #cc7a00;
+  color: #8a5200;
+}
+
 .bulk-bay-check {
   width: 1.1rem;
   height: 1.1rem;
@@ -1736,6 +1815,58 @@ body[data-mode="ipad"] .bottom-sheet.open {
 .absch-mini-btn.danger { color: #c0392b; border-color: #f0d2ce; }
 .absch-mini-btn.danger:hover { background: #fdeceb; }
 
+/* Sichtbarkeit: Auge je Abschnitt + Sammelknopf „alle einblenden".
+   Ausgeblendete Zeilen bleiben lesbar (nur gedämpft) – die Felder sind ja
+   weiterhin vorhanden, sie werden bloß nicht gezeichnet. */
+.absch-eye-btn {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid #dfe3e7;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.absch-eye-btn:hover { background: #f0f3f6; }
+.absch-eye-btn.off {
+  background: #f2f4f6;
+  border-color: #cfd6dd;
+  filter: grayscale(1);
+}
+.absch-row.absch-hidden .absch-pick { opacity: 0.55; background: #f7f8f9; }
+.absch-row.absch-hidden .absch-name { text-decoration: line-through; }
+
+.absch-showall-btn {
+  align-self: flex-start;
+  padding: 0.26rem 0.6rem;
+  border: 1.5px dashed #b8860b;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #8a6508;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.absch-showall-btn:hover { background: #fdf2dc; }
+
+/* Feldzeile eines ausgeblendeten Abschnitts */
+.bay-row.bay-hidden { opacity: 0.6; background: #f7f8f9; }
+.bay-hidden-tag {
+  flex: 0 0 auto;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid #cfd6dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #7b8794;
+  font-size: 0.64rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 /* Abschnitts-Marker in der Feldzeile */
 .bay-absch-tag {
   --absch-color: #8a97a5;
@@ -1956,4 +2087,86 @@ select,
   font-size: 0.76rem;
   line-height: 1.4;
   color: #7b8794;
+}
+
+/* Optionen im PDF-Dialog (ausgeblendete Abschnitte, Aufmaßregeln) */
+.pdf-opt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  margin-top: 0.35rem;
+  border: 1px solid #e0e4e8;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: #22303c;
+  cursor: pointer;
+}
+.pdf-opt-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  accent-color: #2c6fa8;
+}
+.pdf-opt-hint {
+  font-size: 0.72rem;
+  color: #7b8794;
+}
+
+.aufmass-settings { display: block; }
+.aufmass-cfg-block { display: block; }
+.aufmass-cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0 0.35rem;
+}
+.aufmass-cfg-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #5a6b7a;
+}
+.aufmass-cfg-inp {
+  width: 6rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid #d6dbe0;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.aufmass-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0 0.35rem;
+}
+.aufmass-preset {
+  padding: 0.26rem 0.6rem;
+  border: 1.5px solid #d6dbe0;
+  border-radius: 999px;
+  background: #fff;
+  color: #5a6b7a;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.aufmass-preset.active {
+  border-color: #2c6fa8;
+  background: #eaf3fb;
+  color: #1a4a7a;
+}
+.aufmass-summary {
+  margin-top: 0.55rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: #f2f6fa;
+  border-left: 4px solid #2c6fa8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1a4a7a;
+  font-variant-numeric: tabular-nums;
 }
