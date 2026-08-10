@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Aufmaß-App</title>
-  <link rel="stylesheet" href="style.css?v=20260707" />
+  <link rel="stylesheet" href="style.css?v=20260811" />
 </head>
 <body>
 
@@ -271,6 +271,14 @@
         </div>
       </section>
 
+      <!-- 6b. Notizen -->
+      <section class="card">
+        <h2 class="card-title">Notizen / Allgemeine Informationen</h2>
+        <textarea class="form-input form-textarea" id="fieldNotizen" rows="4"
+          placeholder="Allgemeine Informationen zum Aufmaß – z. B. Absprachen mit dem Kunden, Besonderheiten vor Ort, Zufahrt, Termine …"></textarea>
+        <p class="ueberstand-setting-hint">Erscheint als eigener Abschnitt im PDF. Notizen zu einzelnen Abschnitten können direkt am jeweiligen Abschnitt der Hausseite erfasst werden.</p>
+      </section>
+
       <!-- 7. Zusammenfassung -->
       <section class="card">
         <h2 class="card-title">Zusammenfassung</h2>
@@ -298,6 +306,6 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="script.js?v=20260707"></script>
+  <script src="script.js?v=20260811"></script>
 </body>
 </html>
