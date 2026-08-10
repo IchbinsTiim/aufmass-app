@@ -466,6 +466,7 @@ let state = {
   aufmass:   null,  // Aufmaßregeln nach ATV DIN 18451 (siehe aufmassRules())
   ecken:     {},    // Eck-Entscheidungen des Nutzers (siehe eckWahl())
   grundriss: null,  // Grundriss-Hintergrundebene (siehe grundrissLayer())
+  bordbretter: [],  // gezeichnete Bordbretter-Linien (siehe bordbretterListe())
   sections:  []
   // section: { id, name, dir, bays:[{id,len,…,abschnittId}], x0, y0 }
 };
@@ -488,6 +489,7 @@ function normalizeState() {
     }));
   state.hideUnassigned = !!state.hideUnassigned;
   if (!state.ecken || typeof state.ecken !== 'object') state.ecken = {};
+  normalizeBordbretter();
   // ID-Zähler hinter die höchste vergebene „abN"-Nummer setzen, damit neue
   // Abschnitte niemals eine bereits benutzte ID bekommen.
   state.abschnitte.forEach(a => {
@@ -593,6 +595,7 @@ function loadFromLinkedProject() {
     state.aufmass    = z.aufmass || null;
     state.ecken      = z.ecken || {};
     state.grundriss  = z.grundriss || null;
+    state.bordbretter = Array.isArray(z.bordbretter) ? z.bordbretter : [];
     _sId = z._sId || state.sections.length;
     _bId = z._bId || state.sections.flatMap(s => s.bays).length;
     normalizeState();
@@ -615,7 +618,8 @@ function scheduleAutosave2d() {
       depth: state.depth, sections: state.sections,
       abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
       aufmass: aufmassRules(), ecken: state.ecken || {},
-      grundriss: state.grundriss || null, _sId, _bId
+      grundriss: state.grundriss || null, bordbretter: state.bordbretter || [],
+      _sId, _bId
     };
     list[idx].geaendert = new Date().toISOString().slice(0, 10);
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
@@ -741,7 +745,8 @@ function serializeUndoState() {
     project: state.project, depth: state.depth,
     abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
     aufmass: aufmassRules(), ecken: state.ecken || {},
-    grundriss: state.grundriss || null, sections: state.sections
+    grundriss: state.grundriss || null, bordbretter: state.bordbretter || [],
+    sections: state.sections
   });
 }
 
@@ -784,6 +789,7 @@ function applyUndoState(json) {
   state.aufmass    = data.aufmass || null;
   state.ecken      = data.ecken || {};
   state.grundriss  = data.grundriss || null;
+  state.bordbretter = Array.isArray(data.bordbretter) ? data.bordbretter : [];
   state.sections   = data.sections;
   normalizeState();
   selectedSi = null; selectedBi = null;
@@ -2253,6 +2259,10 @@ function renderSvg() {
   // (Die früheren grünen „+"-Buttons an den Verbindungsstellen wurden entfernt.
   //  Neue Felder werden über die blauen „+"-Punkte links/rechts hinzugefügt.)
 
+  // 6b. Bordbretter-Linien (gezeichnete Kante der Gerüstlage) – über den
+  //     Feldern, damit ihr Verlauf entlang der Kanten ablesbar bleibt.
+  renderBordbretter(g, hs);
+
   // 7. Andock-Vorschau (während des Verschiebens)
   drawMovePreview(g);
 
@@ -2394,6 +2404,188 @@ function grundrissMessKlick(pt) {
   scheduleAutosave2d();
 }
 
+/* ── Bordbretter-Linie zeichnen ──────────────────────────────────────────────
+   Bedienung bewusst wie die Referenzstrecke des Grundrisses: Modus starten,
+   Punkte antippen, fertig. Jeder Tipp rastet auf die nächstgelegene Feldkante
+   (bzw. deren Eckpunkt) ein – ohne dieses Einrasten läge die Linie um ein paar
+   Zentimeter neben der Kante, und die Ecken-Auswertung würde die Sektion
+   verfehlen.                                                                */
+
+let bordbrettModus  = false;   // Zeichenmodus aktiv?
+let bordbrettPunkte = [];      // Punkte der gerade entstehenden Linie
+
+/** Fangradius in Welt-px – bildschirmbezogen, damit er bei jedem Zoom passt. */
+function bordbrettFangRadius() {
+  return worldPerScreenPx() * 26;
+}
+
+function starteBordbrettZeichnen() {
+  if (!state.sections.some(s => s.bays.some(isBayVisible))) {
+    showToast('Erst Gerüstfelder zeichnen – die Linie rastet auf deren Kanten ein.');
+    return;
+  }
+  bordbrettModus  = true;
+  bordbrettPunkte = [];
+  closeSheet();
+  // Kein Toast: die Bedienleiste sagt dasselbe und bleibt stehen, statt nach
+  // zwei Sekunden zu verschwinden.
+  renderAll();
+  updateBordbrettBar();
+}
+
+function brichBordbrettZeichnenAb() {
+  bordbrettModus  = false;
+  bordbrettPunkte = [];
+  renderAll();
+  updateBordbrettBar();
+}
+
+/** Tipp auf die Zeichenfläche im Zeichenmodus: Punkt einrasten und anhängen. */
+function bordbrettKlick(pt) {
+  const s = bordbrettSnap(pt, bordbrettFangRadius());
+  const letzter = bordbrettPunkte[bordbrettPunkte.length - 1];
+  if (letzter && Math.hypot(letzter.x - s.x, letzter.y - s.y) < 1) {
+    showToast('Dieser Punkt ist schon gesetzt');
+    return;
+  }
+  bordbrettPunkte.push({ x: s.x, y: s.y });
+  if (s.art === 'frei') {
+    showToast('Punkt liegt neben den Feldkanten – näher an eine Kante tippen');
+  }
+  renderAll();
+  updateBordbrettBar();
+}
+
+function bordbrettPunktZurueck() {
+  bordbrettPunkte.pop();
+  renderAll();
+  updateBordbrettBar();
+}
+
+/** Zeichnen beenden: Linie anlegen, Achse vorschlagen, Dialog öffnen. */
+function beendeBordbrettZeichnen() {
+  if (bordbrettPunkte.length < 2) {
+    showToast('Mindestens zwei Punkte setzen');
+    return;
+  }
+  const linie = mkBordbrett(bordbrettPunkte);
+  bordbretterListe().push(linie);
+  bordbrettModus  = false;
+  bordbrettPunkte = [];
+  invalidateEckenCache();
+  // Vorschlag: die Achse, auf der der größte Teil der Linie verläuft. Der
+  // Nutzer kann sie im Dialog jederzeit ändern.
+  const vorschlag = bordbrettAchsVorschlag(linie);
+  if (vorschlag) bordbrettZuordnen(linie, vorschlag);
+  renderAll();
+  scheduleAutosave2d();
+  updateBordbrettBar();
+  openBordbrettSheet(linie.id);
+}
+
+/** Blendet die Bedienleiste des Zeichenmodus ein/aus. */
+function updateBordbrettBar() {
+  const bar = document.getElementById('bordbrettBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !bordbrettModus);
+  const info = document.getElementById('bordbrettBarInfo');
+  if (info) {
+    info.textContent = bordbrettPunkte.length < 2
+      ? `Bordbretter-Linie · ${bordbrettPunkte.length} von mindestens 2 Punkten`
+      : `Bordbretter-Linie · ${bordbrettPunkte.length} Punkte`;
+  }
+  const fertig = document.getElementById('bordbrettFertigBtn');
+  if (fertig) fertig.disabled = bordbrettPunkte.length < 2;
+  const zurueck = document.getElementById('bordbrettZurueckBtn');
+  if (zurueck) zurueck.disabled = bordbrettPunkte.length === 0;
+  const btn = document.getElementById('bordbrettBtn');
+  if (btn) btn.classList.toggle('active', bordbrettModus);
+}
+
+/** Zeichnet die gespeicherten Linien und die gerade entstehende. */
+function renderBordbretter(g, hs) {
+  const linien = bordbretterListe();
+  if (!linien.length && !bordbrettModus) return;
+
+  // Achsen und Ecken EINMAL ermitteln, nicht je Linie – renderSvg() läuft bei
+  // jeder Zeichnungsänderung.
+  const achsen = achsenListe();
+  const ecken  = linien.length ? roheEcken() : [];
+
+  const polyline = (pts, attrs) => svgEl('polyline', {
+    points: pts.map(p => `${p.x},${p.y}`).join(' '),
+    fill: 'none', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', ...attrs
+  });
+
+  linien.forEach(linie => {
+    const zugeordnet = !!bordbrettAchse(linie, achsen);
+    const farbe = zugeordnet ? '#0f8f8e' : '#c2691b';
+
+    // Breite, unsichtbare Trefferfläche: die Linie selbst ist zu dünn zum
+    // Antippen, gerade auf dem iPad.
+    const hit = polyline(linie.punkte, {
+      stroke: 'rgba(0,0,0,0.001)', 'stroke-width': hs(22), style: 'cursor:pointer'
+    });
+    const tt = svgEl('title', {});
+    tt.textContent = zugeordnet
+      ? `${bordbrettName(linie)} – zugeordnet. Tippen zum Ändern.`
+      : `${bordbrettName(linie)} – noch keiner Achse zugeordnet. Tippen zum Zuordnen.`;
+    hit.appendChild(tt);
+    hit.addEventListener('click', ev => { ev.stopPropagation(); openBordbrettSheet(linie.id); });
+    g.appendChild(hit);
+
+    g.appendChild(polyline(linie.punkte, {
+      stroke: '#fff', 'stroke-width': hs(7), 'stroke-opacity': 0.85,
+      'pointer-events': 'none'
+    }));
+    g.appendChild(polyline(linie.punkte, {
+      stroke: farbe, 'stroke-width': hs(3.4),
+      'stroke-dasharray': zugeordnet ? '' : `${hs(9)},${hs(6)}`,
+      'pointer-events': 'none'
+    }));
+
+    // Wirkung an den erkannten Ecken direkt anschreiben.
+    if (zugeordnet) {
+      bordbrettAuswertung(linie, achsen, ecken).enden.forEach(ende => {
+        if (!ende.ecke || !ende.delta) return;
+        // An Innenecken schreibt die Eck-Markierung ihr ±-Maß bereits an die
+        // beteiligten Felder – hier nicht ein zweites Mal danebenschreiben.
+        if (ende.ecke.art !== 'aussen') return;
+        const pts = ende.ecke.pts;
+        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+        const t = svgEl('text', {
+          x: cx, y: cy - hs(16), 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+          'font-size': hs(13), 'font-family': 'system-ui, sans-serif',
+          fill: ende.delta < 0 ? '#b3402a' : '#1d7a4c', 'font-weight': '700',
+          stroke: '#fff', 'stroke-width': hs(3), 'paint-order': 'stroke',
+          'pointer-events': 'none'
+        });
+        t.textContent = (ende.delta < 0 ? '−' : '+') + fmtQty(Math.abs(ende.delta)) + ' m';
+        g.appendChild(t);
+      });
+    }
+  });
+
+  // Linie im Entstehen: Punkte sichtbar, damit erkennbar ist, wo eingerastet
+  // wurde.
+  if (bordbrettModus && bordbrettPunkte.length) {
+    if (bordbrettPunkte.length > 1) {
+      g.appendChild(polyline(bordbrettPunkte, {
+        stroke: '#0f8f8e', 'stroke-width': hs(3.4),
+        'stroke-dasharray': `${hs(10)},${hs(6)}`, 'pointer-events': 'none'
+      }));
+    }
+    bordbrettPunkte.forEach((p, i) => {
+      g.appendChild(svgEl('circle', {
+        cx: p.x, cy: p.y, r: hs(i === bordbrettPunkte.length - 1 ? 7 : 5),
+        fill: '#0f8f8e', stroke: '#fff', 'stroke-width': hs(2),
+        'pointer-events': 'none'
+      }));
+    });
+  }
+}
+
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
 function drawMovePreview(g) {
   if (!movePreview) return;
@@ -2519,6 +2711,9 @@ function rotateSectionBy(si, step) {
 }
 
 function onRotateHandleDown(e) {
+  // Beim Zeichnen einer Bordbretter-Linie zählt jeder Tipp als Linienpunkt –
+  // dann darf ein Griff die Zeichnung nicht nebenbei verändern.
+  if (bordbrettModus) return;
   e.preventDefault();
   e.stopPropagation();
   canvasJustMoved = false;   // Griff-Bedienung ist nie die Nachwehe eines Wischens
@@ -2536,6 +2731,7 @@ function onRotateHandleDown(e) {
 }
 
 function onMoveHandleDown(e) {
+  if (bordbrettModus) return;   // siehe onRotateHandleDown
   e.preventDefault();
   e.stopPropagation();
   canvasJustMoved = false;   // Griff-Bedienung ist nie die Nachwehe eines Wischens
@@ -4042,10 +4238,17 @@ function openEckSheet(key) {
     zuRow.style.display   = istInnen ? '' : 'none';
     if (!istInnen) return;
 
-    zuHint.textContent = e.bestaetigt
-      ? 'Ihre Festlegung. Antippen, um sie zu ändern.'
-      : 'Noch nicht festgelegt – bis dahin gilt der Vorschlag (die längere '
-        + 'Achse läuft durch). Bitte bestätigen oder ändern.';
+    const bbLinie = e.bordbrettId ? bordbrettById(e.bordbrettId) : null;
+    zuHint.textContent = e.quelle === 'bordbrett'
+      ? `Ergibt sich aus dem gezeichneten Verlauf von „${bbLinie ? bordbrettName(bbLinie) : 'Bordbrett'}". `
+        + 'Ein Tipp hier setzt sich darüber hinweg.'
+        + (e.bordbrettKonflikt
+           ? ' Achtung: zwei Bordbretter-Linien widersprechen sich an dieser Ecke.'
+           : '')
+      : (e.bestaetigt
+          ? 'Ihre Festlegung. Antippen, um sie zu ändern.'
+          : 'Noch nicht festgelegt – bis dahin gilt der Vorschlag (die längere '
+            + 'Achse läuft durch). Bitte bestätigen oder ändern.');
 
     // Beide Möglichkeiten mit ihrem jeweiligen Ergebnis anbieten. Dafür wird
     // die Wahl kurz probeweise gesetzt und danach wiederhergestellt – so
@@ -4081,6 +4284,219 @@ function openEckSheet(key) {
       });
       zuRow.appendChild(b);
     });
+  };
+
+  sync();
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/* ── Bordbretter-Dialog ──────────────────────────────────────────────────────
+   Hier wird die gezeichnete Linie einer ACHSE zugeordnet. Alles Weitere ergibt
+   sich daraus von selbst: das Programm liest den Verlauf entlang der Felder
+   aus, erkennt die durchlaufenen Innen- und Außenecken und korrigiert die
+   Achslänge um die Gerüsttiefe. Der Dialog zeigt beides – die erkannten Ecken
+   und die daraus folgende Aufmaßlänge –, damit die Zahl nicht aus dem Nichts
+   kommt.                                                                     */
+
+function openBordbrettSheet(id) {
+  if (!bordbrettById(id)) return;
+  closeSheet();
+
+  const fertigUndZu = () => { renderAll(); scheduleAutosave2d(); closeSheet(); };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay';
+  overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', fertigUndZu);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet';
+  sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  sheet.appendChild(hdr);
+
+  const note = document.createElement('p');
+  note.className = 'pdf-sheet-note';
+  note.textContent = 'Die Linie folgt den Bordbrettern am Rand der Gerüstlage. '
+    + 'Ordnen Sie sie einer Achse zu – die Eckenkorrektur rechnet das Programm '
+    + 'dann selbst: Innenecke − Gerüsttiefe, Außenecke + Gerüsttiefe.';
+  sheet.appendChild(note);
+
+  const achsLabel = document.createElement('div');
+  achsLabel.className = 'sheet-section-label';
+  achsLabel.textContent = 'Achse zuordnen';
+  sheet.appendChild(achsLabel);
+
+  const achsRow = document.createElement('div');
+  achsRow.className = 'eck-choice-row bordbrett-achs-row';
+  sheet.appendChild(achsRow);
+
+  const verlaufLabel = document.createElement('div');
+  verlaufLabel.className = 'sheet-section-label';
+  verlaufLabel.textContent = 'Erkannter Verlauf';
+  sheet.appendChild(verlaufLabel);
+
+  const verlauf = document.createElement('div');
+  verlauf.className = 'bordbrett-verlauf';
+  sheet.appendChild(verlauf);
+
+  const actRow = document.createElement('div');
+  actRow.className = 'sheet-actions';
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button'; delBtn.className = 'sheet-del';
+  delBtn.textContent = 'Linie löschen';
+  delBtn.addEventListener('click', () => {
+    loescheBordbrett(id);
+    showToast('Bordbretter-Linie gelöscht');
+    fertigUndZu();
+  });
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button'; okBtn.className = 'sheet-ok';
+  okBtn.textContent = 'Fertig';
+  okBtn.addEventListener('click', fertigUndZu);
+  actRow.appendChild(delBtn); actRow.appendChild(okBtn);
+  sheet.appendChild(actRow);
+
+  /** Aufmaßlänge einer Achse, WENN die Linie ihr zugeordnet wäre. Dafür wird
+   *  die Zuordnung kurz probeweise gesetzt und danach wiederhergestellt – so
+   *  stimmt die angezeigte Länge garantiert mit dem PDF überein. */
+  const probe = (linie, achse) => {
+    const vorher = linie.achseSecId;
+    bordbrettZuordnen(linie, achse);
+    const a = aufmassAchsen().find(x => x.idx === achse.idx);
+    linie.achseSecId = vorher;
+    invalidateEckenCache();
+    return a ? a.m.laenge : null;
+  };
+
+  const sync = () => {
+    const linie = bordbrettById(id);
+    if (!linie) { closeSheet(); return; }
+    const achsen  = achsenListe();
+    const aktuell = bordbrettAchse(linie, achsen);
+
+    hdr.textContent = `${bordbrettName(linie)} · ${fmtQty(bordbrettLaenge(linie))} m gezeichnet`;
+
+    // ── Achsen zur Auswahl ────────────────────────────────────────────────
+    // Angeboten werden die Achsen, an denen die Linie tatsächlich entlangläuft –
+    // sonst stünden bei großen Zeichnungen dutzende belangloser Achsen im
+    // Dialog.
+    const beruehrt = bordbrettBeruehrteAchsen(linie);
+    if (aktuell && !beruehrt.includes(aktuell.idx)) beruehrt.unshift(aktuell.idx);
+
+    achsRow.replaceChildren();
+    if (!beruehrt.length) {
+      const p = document.createElement('p');
+      p.className = 'pdf-sheet-note';
+      p.textContent = 'Die Linie verläuft an keinem Gerüstfeld entlang. Bitte '
+                    + 'löschen und näher an den Feldkanten neu zeichnen.';
+      achsRow.appendChild(p);
+    }
+    beruehrt.forEach(i => {
+      const achse = achsen[i];
+      if (!achse) return;
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'eck-choice bordbrett-achs';
+      b.classList.toggle('active', !!aktuell && aktuell.idx === achse.idx);
+      const t1 = document.createElement('strong');
+      t1.textContent = achse.name;
+      const t2 = document.createElement('span');
+      t2.className = 'eck-choice-sub';
+      const len = probe(linie, achse);
+      t2.textContent = `${achse.bays.length} Feld${achse.bays.length === 1 ? '' : 'er'} `
+                     + `·  Aufmaß ${len != null ? fmtQty(len) + ' m' : '–'}`;
+      b.appendChild(t1); b.appendChild(t2);
+      b.addEventListener('click', () => {
+        bordbrettZuordnen(linie, achse);
+        renderAll(); scheduleAutosave2d(); sync();
+      });
+      achsRow.appendChild(b);
+    });
+    if (aktuell) {
+      const off = document.createElement('button');
+      off.type = 'button'; off.className = 'eck-choice bordbrett-achs';
+      const o1 = document.createElement('strong');
+      o1.textContent = 'Zuordnung aufheben';
+      const o2 = document.createElement('span');
+      o2.className = 'eck-choice-sub';
+      o2.textContent = 'Linie bleibt als Notiz erhalten, wirkt aber nicht aufs Aufmaß';
+      off.appendChild(o1); off.appendChild(o2);
+      off.addEventListener('click', () => {
+        bordbrettZuordnen(linie, null);
+        renderAll(); scheduleAutosave2d(); sync();
+      });
+      achsRow.appendChild(off);
+    }
+
+    // ── Verlauf & Wirkung ─────────────────────────────────────────────────
+    verlauf.replaceChildren();
+    const zeile = (txt, cls) => {
+      const d = document.createElement('div');
+      d.className = 'bordbrett-zeile' + (cls ? ' ' + cls : '');
+      d.textContent = txt;
+      verlauf.appendChild(d);
+    };
+
+    if (!aktuell) {
+      zeile('Noch keiner Achse zugeordnet – die Linie wirkt erst danach aufs '
+          + 'Aufmaß.', 'neutral');
+    } else {
+      const aus = bordbrettAuswertung(linie, achsen);
+      const rollen = bordbrettEckRollen();
+      const seiteTxt = { start: 'Achsanfang', ende: 'Achsende' };
+      aus.enden.forEach(e => {
+        if (!e.ecke) {
+          if (e.zustand !== 'buendig' && e.zustand !== 'unklar') {
+            zeile(`${seiteTxt[e.seite]}: hier trifft keine andere Achse an – `
+                + 'keine Eckenkorrektur.', 'neutral');
+          }
+          return;
+        }
+        const nameSi = state.sections[e.ecke.si] ? state.sections[e.ecke.si].name : '?';
+        const nameNi = state.sections[e.ecke.ni] ? state.sections[e.ecke.ni].name : '?';
+        const artTxt = e.ecke.art === 'innen' ? 'Innenecke' : 'Außenecke';
+        if (!e.rolle) {
+          zeile(`${artTxt} ${nameSi}/${nameNi} am ${seiteTxt[e.seite]}: `
+              + (e.zustand === 'buendig'
+                 ? 'die Linie endet bündig mit der Achse – keine Korrektur.'
+                 : `die Linie endet ${fmtQty(Math.abs(e.roh))} m `
+                   + `${e.roh < 0 ? 'vor' : 'hinter'} dem Achsende und passt damit `
+                   + `nicht zur Gerüsttiefe (${fmtQty(state.depth)} m) – keine `
+                   + 'Korrektur. Bitte die Linie an der Feldkante nachziehen.'),
+            e.zustand === 'buendig' ? 'neutral' : 'warn');
+          return;
+        }
+        const konflikt = (rollen.get(e.ecke.key) || {}).konflikt;
+        const sec = state.sections[e.achsSi];
+        zeile(e.ecke.art === 'innen'
+          ? (e.rolle === 'durchlaufend'
+              ? `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} läuft durch → `
+                + `letztes Feld vor der Ecke − ${fmtQty(Math.abs(e.delta))} m`
+              : `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} füllt die Ecke `
+                + `aus → Feld an der Ecke + ${fmtQty(Math.abs(e.delta))} m`)
+          : `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} läuft um die Ecke → `
+            + `Feld an der Ecke + ${fmtQty(Math.abs(e.delta))} m`,
+          e.delta < 0 ? 'minus' : 'plus');
+        if (konflikt) {
+          zeile('An dieser Innenecke widersprechen sich zwei Bordbretter-Linien. '
+              + 'Es gilt die zuerst gezeichnete – über das Eck-Symbol in der '
+              + 'Zeichnung lässt sich die Zuordnung festlegen.', 'warn');
+        }
+      });
+
+      const m = aufmassAchsen().find(x => x.idx === aktuell.idx);
+      if (m) {
+        zeile(`${aktuell.name}: ${m.rechenweg} = ${fmtQty(m.m.laenge)} m`, 'summe');
+      }
+    }
+    zeile(`Korrekturwert = Gerüsttiefe ${fmtQty(state.depth)} m`
+        + (aufmassRules().innenecke.wert != null || aufmassRules().eckzuschlag.wert != null
+           ? ' (in den Aufmaßregeln überschrieben)' : ''), 'neutral');
   };
 
   sync();
@@ -5534,6 +5950,7 @@ function onLoadFile(e) {
       state.aufmass  = s.aufmass || null;
       state.ecken    = s.ecken || {};
       state.grundriss = s.grundriss || null;
+      state.bordbretter = Array.isArray(s.bordbretter) ? s.bordbretter : [];
       // Migrate v1 saves (no x0/y0): reconstruct chain positions
       let cx = 0, cy = 0;
       state.sections = (s.sections || []).map(sec => {
@@ -5982,6 +6399,10 @@ function aufmassRuleText() {
     parts.push(`Innenecke ± ${fmtQty(innenEckWert())} m `
              + '(durchlaufende Achse −, ausfüllende Achse +)');
   }
+  if (bordbretterListe().some(l => l.achseSecId != null)) {
+    parts.push('Ecken nach dem gezeichneten Verlauf der Bordbretter '
+             + `(± Gerüsttiefe ${fmtQty(state.depth)} m)`);
+  }
   return parts.join('   ·   ');
 }
 
@@ -6024,6 +6445,404 @@ function achsenListe() {
 /** Achse (Index in achsenListe()) zu einem Sektionsindex – oder -1. */
 function achseVonSektion(achsen, si) {
   return achsen.findIndex(a => a.chain.includes(si));
+}
+
+/* ── Bordbretter-Linien ──────────────────────────────────────────────────────
+   Das Aufmaß orientiert sich am tatsächlichen Verlauf der BORDBRETTER – der
+   Kantenbretter am Rand der Gerüstlage. Sie laufen genau dort, wo die Lage
+   endet, und damit auch um jede Ecke herum. Genau dieser Verlauf entscheidet,
+   wie lang eine Achse im Aufmaß ist:
+
+     • Die Linie knickt an einer INNENECKE nach innen ab → die Achse endet um
+       eine Gerüsttiefe früher: ihr letztes Feld vor der Ecke wird REDUZIERT.
+     • Die Linie knickt an einer AUSSENECKE nach außen ab → die Achse läuft um
+       die Ecke herum: ihr Feld an der Ecke wird ERHÖHT.
+
+   Der Korrekturwert ist KEINE Konstante, sondern immer die im Abschnitt
+   eingestellte Gerüsttiefe (`state.depth`, überschreibbar in den Aufmaßregeln
+   – siehe innenEckWert()/eckZuschlagWert()). Bei 0,73 m Gerüsttiefe ergibt
+   sich die aus dem Aufmaßblatt bekannte Korrektur von ±0,73 m, bei 1,09 m
+   entsprechend ±1,09 m.
+
+   Der Nutzer zeichnet die Linie einmal entlang der Feldkanten (mit Snapping,
+   damit sie exakt am Rand liegt) und ordnet sie einer Achse zu. Alles Weitere –
+   Eckenerkennung, Vorzeichen, Rechenweg, PDF – macht das Programm. Die
+   Eckenerkennung ist dabei NICHT neu gebaut: die Linie sagt nur, WELCHE der
+   bereits erkannten Ecken (computeLayout → eckenListe) sie durchläuft und
+   welche Achse dort durchgeht.                                              */
+
+let _bbId = 0;
+
+/** Bordbretter-Linien der Zeichnung (legt die Liste bei Altdaten transparent an). */
+function bordbretterListe() {
+  if (!Array.isArray(state.bordbretter)) state.bordbretter = [];
+  return state.bordbretter;
+}
+
+/** Ergänzt/prüft die gespeicherten Linien und hält den ID-Zähler vorn. */
+function normalizeBordbretter() {
+  const roh = Array.isArray(state.bordbretter) ? state.bordbretter : [];
+  state.bordbretter = roh
+    .filter(l => l && Array.isArray(l.punkte))
+    .map((l, i) => ({
+      id: String(l.id || ('bb' + (i + 1))),
+      name: (l.name != null && String(l.name).trim()) || '',
+      achseSecId: (l.achseSecId === '' || l.achseSecId == null) ? null : l.achseSecId,
+      punkte: l.punkte
+        .filter(p => p && isFinite(p.x) && isFinite(p.y))
+        .map(p => ({ x: +p.x, y: +p.y }))
+    }))
+    .filter(l => l.punkte.length >= 2);
+  state.bordbretter.forEach(l => {
+    const n = parseInt(String(l.id).replace(/^bb/, ''), 10);
+    if (!isNaN(n) && n > _bbId) _bbId = n;
+  });
+  return state.bordbretter;
+}
+
+function mkBordbrett(punkte) {
+  return { id: 'bb' + (++_bbId), name: '', achseSecId: null,
+           punkte: punkte.map(p => ({ x: p.x, y: p.y })) };
+}
+
+function bordbrettById(id) {
+  return bordbretterListe().find(l => l.id === id) || null;
+}
+
+/** Anzeigename einer Linie – eigener Name, sonst „Bordbrett n". */
+function bordbrettName(linie) {
+  if (linie.name) return linie.name;
+  const i = bordbretterListe().indexOf(linie);
+  return 'Bordbrett ' + (i >= 0 ? i + 1 : '?');
+}
+
+/** Lotfußpunkt von `p` auf die Strecke a–b (inkl. Abstand). */
+function lotAufStrecke(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+  const x = a.x + dx * t, y = a.y + dy * t;
+  return { x, y, t, dist: Math.hypot(p.x - x, p.y - y) };
+}
+
+/** Abstand eines Punktes zum Rand eines Polygons (0 nur AUF dem Rand). */
+function abstandZuPolygonrand(p, pts) {
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const d = lotAufStrecke(p, pts[i], pts[(i + 1) % pts.length]).dist;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * Snap-Ziele für die Bordbretter-Linie: alle Kanten und Eckpunkte der
+ * gezeichneten Felder – und zusätzlich die der Eckvierecke. Deren Punkte sind
+ * wichtig: An einer Innenecke knickt das Bordbrett genau dort, wo sich die
+ * beiden Außenkanten schneiden, und dieser Punkt ist KEIN Feld-Eckpunkt,
+ * sondern der äußere Punkt des Eckvierecks.
+ */
+function bordbrettSnapZiele(els) {
+  const liste = els || computeLayout();
+  const punkte = [], kanten = [];
+  liste.forEach(el => {
+    if (el.type !== 'bay' && el.type !== 'corner') return;
+    el.pts.forEach((p, i) => {
+      punkte.push(p);
+      kanten.push([p, el.pts[(i + 1) % el.pts.length]]);
+    });
+  });
+  return { punkte, kanten };
+}
+
+/**
+ * Rastet einen Rohpunkt auf die Feldkanten ein. Nah an einem Eckpunkt gewinnt
+ * dieser: genau dort knickt die Bordbretter-Linie, und ein um wenige
+ * Zentimeter danebenliegender Knick würde die Eckenauswertung verfälschen.
+ * Weiter weg vom Eckpunkt zählt dagegen die nächstgelegene Kante – sonst
+ * würde ein Tipp in Feldmitte an den Feldrand springen.
+ * @returns {{x:number,y:number,art:'punkt'|'kante'|'frei'}}
+ */
+function bordbrettSnap(p, toleranz, els) {
+  const ziele = bordbrettSnapZiele(els);
+  let punkt = null, kante = null;
+  ziele.punkte.forEach(q => {
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d <= toleranz && (!punkt || d < punkt.dist)) punkt = { x: q.x, y: q.y, art: 'punkt', dist: d };
+  });
+  if (punkt && punkt.dist <= toleranz * 0.6) return punkt;
+  ziele.kanten.forEach(([a, b]) => {
+    const r = lotAufStrecke(p, a, b);
+    if (r.dist <= toleranz && (!kante || r.dist < kante.dist)) {
+      kante = { x: r.x, y: r.y, art: 'kante', dist: r.dist };
+    }
+  });
+  if (kante && (!punkt || kante.dist < punkt.dist)) return kante;
+  return punkt || kante || { x: p.x, y: p.y, art: 'frei', dist: Infinity };
+}
+
+/** Sektionsindex des Feldes, an dessen Kante der Punkt am nächsten liegt. */
+function bordbrettSektionAn(p, bayEls) {
+  let best = null;
+  bayEls.forEach(el => {
+    const d = abstandZuPolygonrand(p, el.pts);
+    if (!best || d < best.d) best = { d, si: el.si };
+  });
+  return best ? best.si : null;
+}
+
+/** Gesamtlänge der gezeichneten Linie in m. */
+function bordbrettLaenge(linie) {
+  const p = linie.punkte || [];
+  let l = 0;
+  for (let i = 0; i + 1 < p.length; i++) l += Math.hypot(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y);
+  return +(l / PX_PER_M).toFixed(3);
+}
+
+/** Ecken der Zeichnung OHNE die Durchlauf-Entscheidung – die hängt ihrerseits
+ *  von den Bordbretter-Linien ab (siehe eckenListeBerechnen). */
+function roheEcken() {
+  return computeLayout()
+    .filter(e => e.type === 'corner')
+    .map(c => {
+      const a = state.sections[c.si], b = state.sections[c.ni];
+      if (!a || !b) return null;
+      return { key: eckKey(a, b), si: c.si, ni: c.ni, art: eckArtEffektiv(c), pts: c.pts };
+    })
+    .filter(Boolean);
+}
+
+/** Anfang, Ende, Laufrichtung und Länge einer Achse (nur sichtbare Felder). */
+function achsGeometrie(achse) {
+  let start = null, ende = null;
+  achse.chain.forEach(si => {
+    const sec = state.sections[si];
+    if (!sec) return;
+    const dir = secVec(sec);
+    let x = sec.x0, y = sec.y0;
+    sec.bays.forEach(b => {
+      const l = b.len * PX_PER_M;
+      if (isBayVisible(b)) {
+        if (!start) start = { x, y };
+        ende = { x: x + dir.dx * l, y: y + dir.dy * l };
+      }
+      x += dir.dx * l; y += dir.dy * l;
+    });
+  });
+  if (!start || !ende) return null;
+  const erste = state.sections[achse.chain[0]];
+  return { start, ende, d: secVec(erste),
+           laenge: Math.hypot(ende.x - start.x, ende.y - start.y) };
+}
+
+/* Zustände eines Achsendes, abgeleitet aus dem gezeichneten Verlauf:
+     buendig  – das Bordbrett endet dort, wo auch die Achse rechnerisch endet
+     laenger  – es läuft um die Gerüsttiefe darüber hinaus (um die Ecke herum)
+     kuerzer  – es endet um die Gerüsttiefe früher (die andere Bahn stößt an)
+     unklar   – weder das eine noch das andere; die Linie sagt hier nichts aus */
+const BB_TOL_BUENDIG = 0.30;   // Anteil der Gerüsttiefe
+const BB_TOL_ECKE    = 0.45;
+
+/**
+ * Wertet eine gezeichnete Linie gegen ihre Achse aus.
+ *
+ * Gemessen wird, WIE WEIT das Bordbrett über die rechnerischen Achsenden
+ * hinaus- bzw. dahinter zurückbleibt. Dafür werden alle Linienpunkte auf die
+ * Laufrichtung der Achse projiziert; die Über-/Unterlänge an beiden Enden
+ * ergibt unmittelbar die Eckenkorrektur:
+ *
+ *   • + eine Gerüsttiefe  → die Lage läuft um eine AUSSENECKE herum
+ *                           → Feld an der Ecke + Gerüsttiefe
+ *   • − eine Gerüsttiefe  → an einer INNENECKE stößt die andere Bahn an
+ *                           → letztes Feld vor der Ecke − Gerüsttiefe
+ *
+ * Verglichen wird gegen die tatsächlich gezeichnete Gerüsttiefe; der ANGESETZTE
+ * Wert kommt aus den Aufmaßregeln (dort standardmäßig ebenfalls die
+ * Gerüsttiefe, aber überschreibbar).
+ *
+ * @returns {{achse, laenge:number, achsLaenge:number, enden:Array}}
+ */
+function bordbrettAuswertung(linie, achsen, ecken) {
+  const liste  = achsen || achsenListe();
+  const alleE  = ecken || roheEcken();
+  const achse  = bordbrettAchse(linie, liste);
+  const laenge = bordbrettLaenge(linie);
+  if (!achse) return { achse: null, laenge, achsLaenge: 0, enden: [] };
+
+  const g = achsGeometrie(achse);
+  if (!g || !(linie.punkte || []).length) {
+    return { achse, laenge, achsLaenge: 0, enden: [] };
+  }
+
+  const proj = p => (p.x - g.start.x) * g.d.dx + (p.y - g.start.y) * g.d.dy;
+  const ts   = linie.punkte.map(proj);
+  const tMin = Math.min(...ts), tMax = Math.max(...ts);
+
+  const tiefe   = state.depth * PX_PER_M;
+  const ersteSi = achse.chain[0], letzteSi = achse.chain[achse.chain.length - 1];
+
+  const zustandVon = roh => {
+    if (!(tiefe > 0)) return 'unklar';
+    if (Math.abs(roh) <= tiefe * BB_TOL_BUENDIG)         return 'buendig';
+    if (Math.abs(roh - tiefe) <= tiefe * BB_TOL_ECKE)    return 'laenger';
+    if (Math.abs(roh + tiefe) <= tiefe * BB_TOL_ECKE)    return 'kuerzer';
+    return 'unklar';
+  };
+
+  const bauEnde = (seite, roh, ecke) => {
+    const zustand = zustandVon(roh);
+    const e = {
+      seite, roh: +(roh / PX_PER_M).toFixed(3), zustand, ecke: ecke || null,
+      // Sektion DIESER Achse an der Ecke – dort greift die Korrektur.
+      achsSi: ecke ? (ecke.si === (seite === 'ende' ? letzteSi : ersteSi) ? ecke.si : ecke.ni) : null,
+      delta: 0, rolle: null
+    };
+    if (!ecke || zustand === 'buendig' || zustand === 'unklar') return e;
+    if (ecke.art === 'aussen' && zustand === 'laenger') {
+      e.delta = +eckZuschlagWert();
+      e.rolle = 'umlaufend';
+    } else if (ecke.art === 'innen' && zustand === 'kuerzer') {
+      e.delta = -innenEckWert();
+      e.rolle = 'durchlaufend';
+    } else if (ecke.art === 'innen' && zustand === 'laenger') {
+      // Das Bordbrett läuft in den Rücksprung hinein: diese Achse füllt die
+      // Ecke aus, die andere läuft durch.
+      e.delta = +innenEckWert();
+      e.rolle = 'ausfuellend';
+    }
+    return e;
+  };
+
+  return {
+    achse, laenge, achsLaenge: +(g.laenge / PX_PER_M).toFixed(3),
+    enden: [
+      bauEnde('start', -tMin, alleE.find(e => e.ni === ersteSi)),
+      bauEnde('ende', tMax - g.laenge, alleE.find(e => e.si === letzteSi))
+    ]
+  };
+}
+
+/** Achse, der die Linie zugeordnet ist (oder null). */
+function bordbrettAchse(linie, achsen) {
+  if (linie.achseSecId == null) return null;
+  const liste = achsen || achsenListe();
+  return liste.find(a => a.secs.some(s => String(s.id) === String(linie.achseSecId))) || null;
+}
+
+/** Vorschlag: die Achse, an der der größte Teil der Linie entlangläuft. */
+function bordbrettAchsVorschlag(linie) {
+  const achsen = achsenListe();
+  const bayEls = computeLayout().filter(e => e.type === 'bay');
+  if (!bayEls.length) return null;
+  const proAchse = new Map();
+  const pts = linie.punkte || [];
+  const schritt = Math.max(state.depth * PX_PER_M * 0.4, 10);
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(2, Math.ceil(len / schritt));
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n;
+      const si = bordbrettSektionAn({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, bayEls);
+      if (si == null) continue;
+      const idx = achseVonSektion(achsen, si);
+      if (idx < 0) continue;
+      proAchse.set(idx, (proAchse.get(idx) || 0) + len / n);
+    }
+  }
+  let best = null;
+  proAchse.forEach((len, idx) => { if (!best || len > best.len) best = { idx, len }; });
+  return best ? achsen[best.idx] : null;
+}
+
+/** Achsen, an denen die Linie entlangläuft (Indizes, in Reihenfolge). */
+function bordbrettBeruehrteAchsen(linie) {
+  const achsen = achsenListe();
+  const bayEls = computeLayout().filter(e => e.type === 'bay');
+  const out = [];
+  const pts = linie.punkte || [];
+  const schritt = Math.max(state.depth * PX_PER_M * 0.4, 10);
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(2, Math.ceil(len / schritt));
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n;
+      const si = bordbrettSektionAn({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, bayEls);
+      if (si == null) continue;
+      const idx = achseVonSektion(achsen, si);
+      if (idx >= 0 && !out.includes(idx)) out.push(idx);
+    }
+  }
+  return out;
+}
+
+/** Ordnet eine Linie einer Achse zu (achse === null hebt die Zuordnung auf). */
+function bordbrettZuordnen(linie, achse) {
+  linie.achseSecId = achse ? achse.secs[0].id : null;
+  invalidateEckenCache();
+  return linie;
+}
+
+function loescheBordbrett(id) {
+  const list = bordbretterListe();
+  const i = list.findIndex(l => l.id === id);
+  if (i >= 0) list.splice(i, 1);
+  invalidateEckenCache();
+}
+
+/* Was die gezeichneten Linien über die Ecken aussagen: `eckKey → Rolle`.
+     durchSi    Innenecke – welche Achse dort DURCHLÄUFT (sie wird gekürzt,
+                die andere um denselben Wert verlängert; siehe eckKorrekturen)
+     aussenSis  Außenecke – Achsen, deren Lage um die Ecke herumläuft; jede
+                bekommt ihr Feld an der Ecke um die Gerüsttiefe verlängert
+                (nach DIN 18451 zählt eine Außenecke bei beiden Seiten, hier
+                aber nur, soweit es auch gezeichnet ist)
+     konflikt   zwei Linien behaupten an derselben Innenecke Gegenteiliges –
+                es gilt die zuerst gezeichnete, der Hinweis bleibt sichtbar */
+let _bbRollenSig = null, _bbRollen = null;
+
+function bordbrettEckRollen() {
+  const sig = eckenSignatur();
+  if (_bbRollenSig === sig && _bbRollen) return _bbRollen;
+  const map = new Map();
+  const achsen = achsenListe();
+  const ecken  = roheEcken();
+  const hole = e => {
+    let r = map.get(e.key);
+    if (!r) {
+      r = { key: e.key, art: e.art, si: e.si, ni: e.ni,
+            durchSi: null, durchLinieId: null, aussenSis: [], konflikt: false };
+      map.set(e.key, r);
+    }
+    return r;
+  };
+
+  bordbretterListe().forEach(linie => {
+    const a = bordbrettAchse(linie, achsen);
+    if (!a) return;
+    bordbrettAuswertung(linie, achsen, ecken).enden.forEach(ende => {
+      if (!ende.ecke || !ende.rolle) return;
+      const r = hole(ende.ecke);
+      const gegenSi = ende.achsSi === ende.ecke.si ? ende.ecke.ni : ende.ecke.si;
+      if (ende.rolle === 'umlaufend') {
+        if (!r.aussenSis.includes(ende.achsSi)) r.aussenSis.push(ende.achsSi);
+        return;
+      }
+      const durch = ende.rolle === 'durchlaufend' ? ende.achsSi : gegenSi;
+      if (r.durchSi != null) { if (r.durchSi !== durch) r.konflikt = true; return; }
+      r.durchSi = durch;
+      r.durchLinieId = linie.id;
+    });
+  });
+  _bbRollen = map; _bbRollenSig = sig;
+  return map;
+}
+
+/** Läuft an dieser Ecke eine Bordbretter-Linie um die Sektion `si` herum? */
+function bordbrettDecktEcke(key, si) {
+  const r = bordbrettEckRollen().get(key);
+  return !!r && r.aussenSis.includes(si);
 }
 
 /* ── Ecken: Erkennung + Entscheidung des Nutzers ───────────────────────────── */
@@ -6081,7 +6900,7 @@ function eckenListe() {
 }
 
 /* Merker für eckenListe(). Die Liste wird pro Achse und pro Abschnitt
-   gebraucht (computeAufmass → innenEckKorrekturen), ihre Ermittlung ist aber
+   gebraucht (computeAufmass → eckKorrekturen), ihre Ermittlung ist aber
    vergleichsweise teuer: computeLayout() plus wallChains(). Ohne Merker
    kostete ein Aufmaß über 160 Achsen rund 0,6 s – spürbar beim PDF-Export.
 
@@ -6101,11 +6920,23 @@ function eckenSignatur() {
     s.bays.forEach(b => p.push(b.id, b.len, isBayVisible(b) ? 1 : 0));
   });
   p.push(JSON.stringify(state.ecken || {}));
+  // Die gezeichneten Bordbretter-Linien bestimmen mit, welche Achse an einer
+  // Innenecke durchläuft – sie gehören deshalb in die Signatur.
+  p.push(JSON.stringify(state.bordbretter || []));
   return p.join('|');
+}
+
+/** Verwirft die gemerkten Ecken-/Bordbrettauswertungen. Nötig, wenn sich etwas
+ *  ändert, das die Signatur zwar erfasst, aber innerhalb desselben
+ *  Auswertungsdurchlaufs (z. B. beim Zuordnen einer Linie). */
+function invalidateEckenCache() {
+  _eckenCache = null; _eckenSig = null;
+  _bbRollen = null;   _bbRollenSig = null;
 }
 
 function eckenListeBerechnen() {
   const achsen = achsenListe();
+  const rollen = bordbrettEckRollen();
   const laengeVon = si => {
     const a = achsen[achseVonSektion(achsen, si)];
     return a ? a.bays.reduce((s, b) => s + b.len, 0) : 0;
@@ -6127,7 +6958,14 @@ function eckenListeBerechnen() {
     const gewaehlt = w.durch != null
       ? [c.si, c.ni].find(i => state.sections[i] && state.sections[i].id === w.durch)
       : undefined;
-    const durchSi = gewaehlt != null ? gewaehlt : vorschlagDurch;
+    // Läuft eine zugeordnete Bordbretter-Linie durch die Ecke, ist das die
+    // Aussage des Nutzers über den tatsächlichen Verlauf – sie geht dem
+    // Vorschlag vor, weicht aber einem direkt am Eck-Symbol gesetzten Wunsch.
+    const bb = rollen.get(key);
+    const ausLinie = (gewaehlt == null && bb && bb.durchSi != null && art === 'innen')
+      ? bb.durchSi : null;
+    const durchSi = gewaehlt != null ? gewaehlt
+                  : (ausLinie != null ? ausLinie : vorschlagDurch);
 
     return {
       key, si: c.si, ni: c.ni, pts: c.pts,
@@ -6135,7 +6973,10 @@ function eckenListeBerechnen() {
       typBestaetigt: w.typ === 'aussen' || w.typ === 'innen',
       durchSi,
       fuellSi: durchSi === c.si ? c.ni : c.si,
-      bestaetigt: gewaehlt != null
+      bestaetigt: gewaehlt != null || ausLinie != null,
+      quelle: gewaehlt != null ? 'nutzer' : (ausLinie != null ? 'bordbrett' : 'vorschlag'),
+      bordbrettId: bb ? bb.durchLinieId : null,
+      bordbrettKonflikt: !!(bb && bb.konflikt)
     };
   });
 }
@@ -6158,46 +6999,111 @@ function eckFeldVon(si, endetAnDerEcke) {
 }
 
 /**
- * Innenecken-Korrektur je Feld: `bay.id → { delta, ecken:[…] }`.
+ * Ecken-Korrektur je Feld:
+ * `bay.id → { delta, innen, innenAnzahl, aussen, aussenAnzahl, ecken:[…] }`.
  *
- * Pro Innenecke wird das Feld an der Ecke der DURCHLAUFENDEN Achse um die
- * Ecklänge gekürzt und das Feld an der Ecke der AUSFÜLLENDEN Achse um
- * dieselbe Länge verlängert. Die Korrektur hängt am einzelnen Feld (nicht an
- * der Achse), damit der Rechenweg im PDF feldgenau dargestellt werden kann –
- * „2,57 + 2,57 + (2,57 − 0,73)" statt einer anonymen Summenkorrektur.
+ * Zwei Quellen, beide feldgenau – damit der Rechenweg im PDF „2,57 + 2,57 +
+ * (2,57 − 0,73)" lauten kann statt einer anonymen Summenkorrektur:
  *
- * Liegen beide Felder in derselben Auswertung (z. B. Gesamtsumme), heben sich
- * −x und +x exakt auf: die Innenecke ist in der Summe neutral.
+ * 1. INNENECKE (Regel „Innenecken verrechnen"): das Feld an der Ecke der
+ *    DURCHLAUFENDEN Achse wird um die Ecklänge gekürzt, das Feld an der Ecke
+ *    der AUSFÜLLENDEN Achse um dieselbe Länge verlängert. Liegen beide Felder
+ *    in derselben Auswertung, heben sich −x und +x exakt auf: die Innenecke
+ *    ist in der Summe neutral.
+ *
+ * 2. AUSSENECKE, um die eine zugeordnete BORDBRETTER-LINIE herumläuft: das
+ *    Feld dieser Achse an der Ecke wird um die Ecklänge verlängert – die
+ *    Gerüstlage läuft dort tatsächlich um die Ecke herum. Ohne gezeichnete
+ *    Linie ändert sich nichts; dann gilt weiter allein der (abschaltbare)
+ *    pauschale Eckzuschlag aus den Aufmaßregeln.
+ *
+ * Die Ecklänge ist in beiden Fällen die Gerüsttiefe des Abschnitts, solange in
+ * den Aufmaßregeln kein eigener Wert eingetragen ist.
  */
-function innenEckKorrekturen() {
+function eckKorrekturen() {
   const map = new Map();
   const r = aufmassRules();
-  if (!r.innenecke.aktiv) return map;
-  const wert = innenEckWert();
-  if (!(wert > 0)) return map;
 
   const merke = (bay, delta, info) => {
     if (!bay) return;
-    const cur = map.get(bay.id) || { delta: 0, ecken: [] };
+    const cur = map.get(bay.id)
+      || { delta: 0, innen: 0, innenAnzahl: 0, aussen: 0, aussenAnzahl: 0, ecken: [] };
     cur.delta += delta;
+    if (info.art === 'innen') { cur.innen  += delta; cur.innenAnzahl++; }
+    else                      { cur.aussen += delta; cur.aussenAnzahl++; }
     cur.ecken.push(info);
     map.set(bay.id, cur);
   };
 
-  eckenListe().forEach(e => {
-    if (e.art !== 'innen') return;
-    merke(eckFeldVon(e.durchSi, e.durchSi === e.si), -wert,
-          { key: e.key, rolle: 'durchlaufend', wert: -wert });
-    merke(eckFeldVon(e.fuellSi, e.fuellSi === e.si), +wert,
-          { key: e.key, rolle: 'ausfuellend', wert: +wert });
-  });
+  const innenWert = innenEckWert();
+  if (r.innenecke.aktiv && innenWert > 0) {
+    eckenListe().forEach(e => {
+      if (e.art !== 'innen') return;
+      merke(eckFeldVon(e.durchSi, e.durchSi === e.si), -innenWert,
+            { key: e.key, art: 'innen', rolle: 'durchlaufend', wert: -innenWert });
+      merke(eckFeldVon(e.fuellSi, e.fuellSi === e.si), +innenWert,
+            { key: e.key, art: 'innen', rolle: 'ausfuellend', wert: +innenWert });
+    });
+  }
+
+  const eckWert = eckZuschlagWert();
+  if (eckWert > 0) {
+    bordbrettEckRollen().forEach(rolle => {
+      if (rolle.art !== 'aussen') return;
+      rolle.aussenSis.forEach(si => {
+        merke(eckFeldVon(si, si === rolle.si), +eckWert,
+              { key: rolle.key, art: 'aussen', rolle: 'umlaufend', wert: +eckWert });
+      });
+    });
+  }
   return map;
 }
 
-/** Aufmaßlänge eines einzelnen Feldes inkl. Innenecken-Korrektur (nie < 0). */
+/** Aufmaßlänge eines einzelnen Feldes inkl. Eckenkorrektur (nie < 0). */
 function bayAufmassLen(bay, korr) {
   const k = korr && korr.get(bay.id);
   return Math.max(0, bay.len + (k ? k.delta : 0));
+}
+
+/** Aufmaßrelevante Gerüsthöhe eines Feldes (kleinere der beiden Höhen). */
+function bayHoehe(bay) {
+  const hs = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
+  return hs.length ? Math.min(...hs) : null;
+}
+
+/**
+ * Felder einer Menge nach ihrer Gerüsthöhe zusammengefasst.
+ *
+ * Auf einer Seite stehen häufig unterschiedlich hohe Gerüste (z. B. 5 Felder
+ * bis 10,20 m, 5 weitere bis 8,20 m). Im Aufmaß gehören diese Felder getrennt
+ * zusammengefasst, weil sich Fläche und Abrechnung sonst nicht nachvollziehen
+ * lassen: 12,85 m × 10,20 m UND 12,85 m × 8,20 m statt einer Mischzahl.
+ *
+ * Die Länge je Höhengruppe ist das Achsmaß der Gruppe inklusive der
+ * feldgenauen Eckenkorrekturen (Innenecke, Bordbretter-Linie an Außenecken).
+ *
+ * @returns {Array<{hoehe:number|null, bays:Array, felder:number,
+ *                  laenge:number, flaeche:number}>} nach Höhe absteigend
+ */
+function aufmassNachHoehe(bays, korr) {
+  const k = korr || eckKorrekturen();
+  const gruppen = new Map();
+  bays.forEach(b => {
+    const h = bayHoehe(b);
+    const key = h == null ? 'ohne' : h.toFixed(2);
+    const g = gruppen.get(key) || { hoehe: h, bays: [] };
+    g.bays.push(b);
+    gruppen.set(key, g);
+  });
+  const r2 = n => +n.toFixed(2);
+  return [...gruppen.values()].map(g => {
+    const laenge = g.bays.reduce((s, b) => s + bayAufmassLen(b, k), 0);
+    return {
+      hoehe: g.hoehe, bays: g.bays, felder: g.bays.length,
+      laenge: r2(laenge),
+      flaeche: g.hoehe != null ? r2(laenge * g.hoehe) : 0
+    };
+  }).sort((a, b) => (b.hoehe == null ? -1 : b.hoehe) - (a.hoehe == null ? -1 : a.hoehe));
 }
 
 /**
@@ -6219,37 +7125,44 @@ function computeAufmass(bays) {
 
   const alleEcken = (r.eckzuschlag.aktiv || r.innenecke.aktiv) ? eckenListe() : [];
 
-  // ── Innenecke: Umverteilung, kein Zuschlag ──────────────────────────────
-  // Gezählt wird, wie oft eine Innenecke Felder DIESER Menge betrifft; die
-  // Summe der Korrekturen kann dabei positiv, negativ oder (wenn beide Seiten
-  // in der Menge liegen) genau null sein.
-  const korr = innenEckKorrekturen();
-  let innenLaenge = 0, innenecken = 0;
-  if (r.innenecke.aktiv) {
-    bays.forEach(b => {
-      const k = korr.get(b.id);
-      if (!k) return;
-      innenLaenge += k.delta;
-      innenecken  += k.ecken.length;
-    });
-  }
+  // ── Feldgenaue Eckenkorrekturen ─────────────────────────────────────────
+  // Innenecke: Umverteilung, kein Zuschlag. Gezählt wird, wie oft eine
+  // Innenecke Felder DIESER Menge betrifft; die Summe der Korrekturen kann
+  // dabei positiv, negativ oder (wenn beide Seiten in der Menge liegen) genau
+  // null sein. Außenecke: nur dort, wo eine Bordbretter-Linie tatsächlich um
+  // die Ecke läuft (siehe eckKorrekturen()).
+  const korr = eckKorrekturen();
+  let innenLaenge = 0, innenecken = 0, linienEcken = 0, linienLaenge = 0;
+  bays.forEach(b => {
+    const k = korr.get(b.id);
+    if (!k) return;
+    innenLaenge  += k.innen;
+    innenecken   += k.innenAnzahl;
+    linienLaenge += k.aussen;
+    linienEcken  += k.aussenAnzahl;
+  });
 
   // ── Außenecke: Zuschlag bei BEIDEN angrenzenden Seiten (La = L + L1) ─────
   // Jede Ecke bringt den Zuschlag für JEDE angrenzende Seite ein, die zu
   // dieser Feldmenge gehört – so wird die Ecke wie vorgesehen doppelt
   // gerechnet. Innenecken sind hier bewusst ausgenommen: dort überlappen sich
-  // die Bahnen, statt eine Lücke zu lassen.
+  // die Bahnen, statt eine Lücke zu lassen. Seiten, deren Bordbretter-Linie
+  // bereits um die Ecke läuft, sind oben schon feldgenau erfasst und werden
+  // hier NICHT ein zweites Mal gezählt.
   let ecken = 0;
   if (r.eckzuschlag.aktiv) {
     alleEcken.forEach(c => {
       if (c.art !== 'aussen') return;
       [c.si, c.ni].forEach(i => {
         const sec = state.sections[i];
-        if (sec && sec.bays.some(b => ids.has(b.id))) ecken++;
+        if (!sec || !sec.bays.some(b => ids.has(b.id))) return;
+        if (bordbrettDecktEcke(c.key, i)) return;
+        ecken++;
       });
     });
   }
-  const eckLaenge = ecken * eckZuschlagWert();
+  const eckLaenge = ecken * eckZuschlagWert() + linienLaenge;
+  ecken += linienEcken;
 
   // Feldzuschlag – je nach eingestelltem Wirkungsbereich.
   let felder = 0;
@@ -6290,18 +7203,20 @@ function computeAufmass(bays) {
  * PDF nachvollziehbar bleibt, WELCHES Feld gekürzt bzw. verlängert wurde.
  */
 function aufmassAchsen() {
-  const korr  = innenEckKorrekturen();
-  const r     = aufmassRules();
-  const ecken = eckenListe();          // einmal ermitteln, nicht je Achse
-  return achsenListe().map(a => {
+  const korr   = eckKorrekturen();
+  const ecken  = eckenListe();          // einmal ermitteln, nicht je Achse
+  const rollenBB = bordbrettEckRollen();
+  const linien = bordbretterListe();
+  const achsen = achsenListe();
+  return achsen.map(a => {
     const m = computeAufmass(a.bays);
     const teile = a.bays.map(b => {
-      const k = r.innenecke.aktiv && korr.get(b.id);
+      const k = korr.get(b.id);
       if (!k || !k.delta) return fmtQty(b.len);
       const vz = k.delta < 0 ? '−' : '+';
       return `(${fmtQty(b.len)} ${vz} ${fmtQty(Math.abs(k.delta))})`;
     });
-    // Rolle der Achse an ihren Innenecken – für die Spalte „Innenecke".
+    // Rolle der Achse an ihren Ecken – für die Spalte „Rolle an der Ecke".
     const inChain = new Set(a.chain);
     const rollen = [];
     ecken.forEach(e => {
@@ -6309,7 +7224,60 @@ function aufmassAchsen() {
       if (inChain.has(e.durchSi))      rollen.push('durchlaufend');
       else if (inChain.has(e.fuellSi)) rollen.push('ausfüllend');
     });
-    return { ...a, m, rechenweg: teile.join(' + '), rollen };
+    rollenBB.forEach(rb => {
+      if (rb.art !== 'aussen') return;
+      if (rb.aussenSis.some(si => inChain.has(si))) rollen.push('um die Außenecke');
+    });
+    // Zugeordnete Bordbretter-Linien dieser Achse.
+    const bb = linien.filter(l => {
+      const ach = bordbrettAchse(l, achsen);
+      return ach && ach.idx === a.idx;
+    });
+    return { ...a, m, rechenweg: teile.join(' + '), rollen,
+             bordbretter: bb, hoehen: aufmassNachHoehe(a.bays, korr) };
+  });
+}
+
+/**
+ * Aufstellung der Bordbretter-Linien für Dialog und PDF: was gezeichnet wurde,
+ * welcher Achse es zugeordnet ist, welche Ecken daraus folgen und wie sich das
+ * auf die Aufmaßlänge auswirkt.
+ */
+function bordbretterAufstellung() {
+  const achsen  = achsenListe();
+  const ecken   = roheEcken();
+  const achsMass = aufmassAchsen();
+  const r = aufmassRules();
+  return bordbretterListe().map(linie => {
+    const aus = bordbrettAuswertung(linie, achsen, ecken);
+    const m   = aus.achse ? achsMass.find(a => a.idx === aus.achse.idx) : null;
+    // Eine Innenecken-Korrektur greift nur, solange die Regel eingeschaltet
+    // ist – sonst stünde im PDF eine Zahl, mit der gar nicht gerechnet wurde.
+    const wirksam = e => !!e.rolle && (e.ecke.art === 'aussen' || r.innenecke.aktiv);
+    const texte = [], hinweise = [];
+    let korrektur = 0;
+    aus.enden.forEach(e => {
+      if (!e.ecke) return;
+      const art = e.ecke.art === 'innen' ? 'Innenecke' : 'Außenecke';
+      const nSi = state.sections[e.ecke.si], nNi = state.sections[e.ecke.ni];
+      const bez = `${art} ${nSi ? nSi.name : '?'}/${nNi ? nNi.name : '?'}`;
+      if (!wirksam(e)) {
+        hinweise.push(e.rolle
+          ? `${bez}: Regel abgeschaltet`
+          : `${bez}: Verlauf ohne eindeutigen Bezug – keine Korrektur`);
+        return;
+      }
+      korrektur += e.delta;
+      texte.push(`${bez} ${e.delta < 0 ? '−' : '+'} ${fmtQty(Math.abs(e.delta))} m`);
+    });
+    return {
+      linie, name: bordbrettName(linie),
+      achse: aus.achse ? aus.achse.name : null,
+      laenge: aus.laenge, achsLaenge: aus.achsLaenge,
+      ecken: texte, hinweise,
+      korrektur: +korrektur.toFixed(2),
+      aufmass: m ? m.m.laenge : null
+    };
   });
 }
 
@@ -6613,6 +7581,10 @@ function pdfLegendEntries() {
   if (eckenListe().some(e => e.art === 'innen')) {
     entries.push({ label: 'Innenecke (Überlappung, ± Aufmaß)', color: '#c2691b' });
   }
+  if (bordbretterListe().length) {
+    entries.push({ label: 'Bordbretter-Linie (Kante der Gerüstlage)',
+                   color: '#0f8f8e', shape: 'line' });
+  }
   return entries;
 }
 
@@ -6824,6 +7796,24 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     doc.setDrawColor(...strk); doc.setLineWidth(0.45);
     pdfPoly(doc, el.pts.map(P), 'FD');
   });
+
+  // 3b. Bordbretter-Linien: der gezeichnete Verlauf der Lagenkante. Er gehört
+  //     in den Plan, weil die Eckenkorrektur im Aufmaß genau daraus abgeleitet
+  //     ist – ohne ihn stünde im Dokument eine Zahl ohne Beleg.
+  const bbLinien = bordbretterListe();
+  if (bbLinien.length) {
+    doc.setDrawColor(...pdfCol(theme, [15, 143, 142]));
+    doc.setLineWidth(0.75);
+    bbLinien.forEach(l => {
+      for (let i = 0; i + 1 < l.punkte.length; i++) {
+        const seg = clipSeg(l.punkte[i].x, l.punkte[i].y,
+                            l.punkte[i + 1].x, l.punkte[i + 1].y);
+        if (!seg) continue;
+        const a = XY(seg[0], seg[1]), b = XY(seg[2], seg[3]);
+        doc.line(a.x, a.y, b.x, b.y);
+      }
+    });
+  }
 
   // 4. Beschriftungen – nach den Flächen, damit nichts überdeckt wird.
   //    Auf der Übersichtsseite entfallen sie: dort ist der Maßstab bewusst
@@ -7851,6 +8841,167 @@ async function buildPdfDocument(themeName) {
         doc.line(margin, ay, margin + aW, ay);
       });
     }
+
+    /* ── Bordbretter-Linien ──────────────────────────────────────────────
+       Beleg für die Eckenkorrektur: Welche Linie wurde gezeichnet, zu welcher
+       Achse gehört sie, welche Ecke ergibt sich daraus und mit welchem Wert
+       geht sie ins Aufmaß ein.                                            */
+    const bbAufstellung = bordbretterAufstellung();
+    if (bbAufstellung.length) {
+      const bCols = [
+        { t: 'Bordbretter-Linie', w: 0.17, a: 'left'  },
+        { t: 'Achse',             w: 0.17, a: 'left'  },
+        { t: 'gezeichnet',        w: 0.11, a: 'right' },
+        { t: 'erkannte Ecken',    w: 0.32, a: 'left'  },
+        { t: 'Korrektur',         w: 0.11, a: 'right' },
+        { t: 'Aufmaßlänge',       w: 0.12, a: 'right' }
+      ];
+      const bX = []; let bAcc = margin;
+      bCols.forEach(c => { bX.push(bAcc); bAcc += c.w * aW; });
+      const bCell = (i, txt, bold, y) => {
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        const c = bCols[i];
+        const x = c.a === 'right' ? bX[i] + c.w * aW - 2.5
+                : c.a === 'center' ? bX[i] + c.w * aW / 2
+                : bX[i] + 2.5;
+        doc.text(txt, x, y, { align: c.a });
+      };
+
+      if (ay + 26 > contentBottom) {
+        ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'Bordbretter' }) + 3;
+      } else {
+        ay += 4;
+      }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      doc.setTextColor(...theme.ink);
+      doc.text('Bordbretter-Linien und Eckenkorrektur', margin, ay + 4);
+      ay += 7;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+      doc.setTextColor(...theme.inkSoft);
+      doc.splitTextToSize(
+        'Die Linien folgen der Kante der Gerüstlage (Bordbretter). Wo eine Linie '
+        + 'um eine Außenecke herumläuft, wird das Feld an der Ecke um die '
+        + `Gerüsttiefe (${fmtQty(state.depth)} m) verlängert; wo sie an einer `
+        + 'Innenecke früher endet, wird das letzte Feld vor der Ecke um denselben '
+        + 'Wert gekürzt und die ausfüllende Achse entsprechend verlängert.', aW)
+        .forEach(line => { doc.text(line, margin, ay + 3); ay += 3.6; });
+      ay += 2;
+
+      const bDrawHead = () => {
+        doc.setFillColor(...theme.tableHead);
+        doc.rect(margin, ay, aW, aHeadH, 'F');
+        doc.setFontSize(7.8); doc.setTextColor(...theme.tableHeadText);
+        bCols.forEach((c, i) => bCell(i, c.t, true, ay + 5));
+        ay += aHeadH;
+      };
+      bDrawHead();
+
+      bbAufstellung.forEach((b, i) => {
+        const txt = [...b.ecken, ...b.hinweise];
+        const eckLines = doc.splitTextToSize(txt.length ? txt.join(';  ') : '–',
+                                             bCols[3].w * aW - 5);
+        const rowH = Math.max(aRowH, 3.1 + eckLines.length * 3.6);
+        if (ay + rowH > contentBottom) {
+          ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'Bordbretter (Fortsetzung)' }) + 3;
+          bDrawHead();
+        }
+        if (i % 2 === 1) { doc.setFillColor(...theme.zebra); doc.rect(margin, ay, aW, rowH, 'F'); }
+        doc.setFontSize(8.6); doc.setTextColor(...theme.ink);
+        bCell(0, b.name, false, ay + 5);
+        bCell(1, b.achse || 'nicht zugeordnet', false, ay + 5);
+        bCell(2, fmtQty(b.laenge) + ' m', false, ay + 5);
+        doc.setFont('helvetica', 'normal');
+        eckLines.forEach((line, li) => doc.text(line, bX[3] + 2.5, ay + 5 + li * 3.6));
+        bCell(4, b.korrektur
+          ? (b.korrektur < 0 ? '− ' : '+ ') + fmtQty(Math.abs(b.korrektur)) + ' m'
+          : '–', false, ay + 5);
+        doc.setFont('helvetica', 'bold');
+        doc.text(b.aufmass != null ? fmtQty(b.aufmass) + ' m' : '–',
+                 bX[5] + bCols[5].w * aW - 2.5, ay + 5, { align: 'right' });
+        ay += rowH;
+        doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
+        doc.line(margin, ay, margin + aW, ay);
+      });
+    }
+
+    /* ── Aufmaß nach Gerüsthöhen ─────────────────────────────────────────
+       Auf einer Seite stehen häufig unterschiedlich hohe Gerüste. Die Felder
+       werden dann je Höhe getrennt zusammengefasst – „12,85 m × 10,20 m" und
+       „12,85 m × 8,20 m" statt einer Mischzahl, die niemand nachrechnen kann.
+       Die Tabelle erscheint nur, wenn es tatsächlich mehrere Höhen gibt.   */
+    const korrH = eckKorrekturen();
+    const hoehenBloecke = groups
+      .map(g => ({ ...g, hoehen: aufmassNachHoehe(g.bays, korrH) }))
+      .filter(g => g.bays.length);
+    if (hoehenBloecke.some(g => g.hoehen.length > 1)) {
+      const hCols = [
+        { t: 'Abschnitt / Seite', w: 0.28, a: 'left'   },
+        { t: 'Gerüsthöhe',        w: 0.14, a: 'right'  },
+        { t: 'Felder',            w: 0.09, a: 'center' },
+        { t: 'Länge',             w: 0.14, a: 'right'  },
+        { t: 'Aufmaß (L × H)',    w: 0.35, a: 'right'  }
+      ];
+      const hX = []; let hAcc = margin;
+      hCols.forEach(c => { hX.push(hAcc); hAcc += c.w * aW; });
+      const hCell = (i, txt, bold, y) => {
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        const c = hCols[i];
+        const x = c.a === 'right' ? hX[i] + c.w * aW - 2.5
+                : c.a === 'center' ? hX[i] + c.w * aW / 2
+                : hX[i] + 2.5;
+        doc.text(txt, x, y, { align: c.a });
+      };
+
+      if (ay + 30 > contentBottom) {
+        ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'nach Gerüsthöhen' }) + 3;
+      } else {
+        ay += 5;
+      }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      doc.setTextColor(...theme.ink);
+      doc.text('Aufmaß nach Gerüsthöhen', margin, ay + 4);
+      ay += 7;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+      doc.setTextColor(...theme.inkSoft);
+      doc.splitTextToSize(
+        'Felder gleicher Gerüsthöhe sind je Abschnitt bzw. Seite getrennt '
+        + 'zusammengefasst. Die Länge enthält die Eckenkorrekturen; die Höhe ist '
+        + 'die kleinere der beiden am Feld eingetragenen Höhen.', aW)
+        .forEach(line => { doc.text(line, margin, ay + 3); ay += 3.6; });
+      ay += 2;
+
+      const hDrawHead = () => {
+        doc.setFillColor(...theme.tableHead);
+        doc.rect(margin, ay, aW, aHeadH, 'F');
+        doc.setFontSize(7.8); doc.setTextColor(...theme.tableHeadText);
+        hCols.forEach((c, i) => hCell(i, c.t, true, ay + 5));
+        ay += aHeadH;
+      };
+      hDrawHead();
+
+      hoehenBloecke.forEach(g => {
+        g.hoehen.forEach((h, i) => {
+          if (ay + aRowH > contentBottom) {
+            ay = startPage({ kicker: 'Aufmaß-Ermittlung', sheet: 'nach Gerüsthöhen (Fortsetzung)' }) + 3;
+            hDrawHead();
+          }
+          if (i % 2 === 1) { doc.setFillColor(...theme.zebra); doc.rect(margin, ay, aW, aRowH, 'F'); }
+          doc.setFontSize(8.6); doc.setTextColor(...theme.ink);
+          hCell(0, i === 0 ? g.title : '', i === 0, ay + 5);
+          hCell(1, h.hoehe != null ? fmtQty(h.hoehe) + ' m' : 'ohne Höhe', false, ay + 5);
+          hCell(2, String(h.felder), false, ay + 5);
+          hCell(3, fmtQty(h.laenge) + ' m', false, ay + 5);
+          doc.setFont('helvetica', 'bold');
+          doc.text(h.hoehe != null
+            ? `${fmtQty(h.laenge)} m × ${fmtQty(h.hoehe)} m = ${fmtQty(h.flaeche)} m²`
+            : 'keine Höhe erfasst',
+            hX[4] + hCols[4].w * aW - 2.5, ay + 5, { align: 'right' });
+          ay += aRowH;
+          doc.setDrawColor(...theme.rule); doc.setLineWidth(0.1);
+          doc.line(margin, ay, margin + aW, ay);
+        });
+      });
+    }
   }
 
   // ── Aufmaß-Tabellen ─────────────────────────────────────────────────────
@@ -8119,6 +9270,16 @@ function init() {
   document.getElementById('grundrissBtn').addEventListener('click', openGrundrissSheet);
   document.getElementById('grundrissFileInput').addEventListener('change', onGrundrissFileSelected);
 
+  // ── Bordbretter-Linie ───────────────────────────────────────────────────
+  document.getElementById('bordbrettBtn')?.addEventListener('click', () => {
+    if (bordbrettModus) { brichBordbrettZeichnenAb(); return; }
+    starteBordbrettZeichnen();
+  });
+  document.getElementById('bordbrettZurueckBtn')?.addEventListener('click', bordbrettPunktZurueck);
+  document.getElementById('bordbrettAbbruchBtn')?.addEventListener('click', brichBordbrettZeichnenAb);
+  document.getElementById('bordbrettFertigBtn')?.addEventListener('click', beendeBordbrettZeichnen);
+  updateBordbrettBar();
+
   document.getElementById('deviceToggleBtn').addEventListener('click', () => {
     showDevicePicker(() => renderAll());
   });
@@ -8165,7 +9326,7 @@ function init() {
   // Tap empty canvas → deselect section (hides + buttons)
   const deselect = () => {
     if (canvasJustMoved) { canvasJustMoved = false; return; }   // Tap direkt nach Pan/Pinch → nicht abwählen
-    if (grundrissMessen) return;                                 // im Messmodus zählt der Tipp als Messpunkt
+    if (grundrissMessen || bordbrettModus) return;               // im Mess-/Zeichenmodus zählt der Tipp als Punkt
     // Klick, der nur die Nachwehe eines gerade losgelassenen Griffs ist,
     // darf die eben getroffene Auswahl nicht wieder aufheben.
     if (Date.now() - handleReleasedAt < CLICK_AFTER_HANDLE_MS) return;
@@ -8176,11 +9337,15 @@ function init() {
 
   // Messmodus für den Grundriss-Maßstab: zwei Tipps auf die Zeichenfläche.
   // Liegt VOR den Pan/Pinch-Handlern, damit ein Tipp nicht als Wischen zählt.
+  // Ebenso der Zeichenmodus der Bordbretter-Linie: dort fängt der Tipp den
+  // Punkt ab, bevor ein Feld darunter das Bearbeiten-Sheet öffnet.
   svg.addEventListener('click', e => {
-    if (!grundrissMessen) return;
+    if (!grundrissMessen && !bordbrettModus) return;
     if (canvasJustMoved) { canvasJustMoved = false; return; }
     e.stopPropagation();
-    grundrissMessKlick(screenToSvg(e.clientX, e.clientY));
+    const pt = screenToSvg(e.clientX, e.clientY);
+    if (grundrissMessen) grundrissMessKlick(pt);
+    else                 bordbrettKlick(pt);
   }, true);
 
   // Pinch-Zoom & Pan (ein/zwei Finger) – nach den bestehenden Handle-Listenern,

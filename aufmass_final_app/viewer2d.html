@@ -7,15 +7,15 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Gerüst 2D-Ansicht</title>
-  <link rel="stylesheet" href="style.css?v=20260810" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260810" />
+  <link rel="stylesheet" href="style.css?v=20260813" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260813" />
 </head>
 <body>
 
   <header class="viewer-header">
     <a href="index.html" class="back-link">← Aufmaß</a>
     <h1>Gerüst 2D-Ansicht</h1>
-    <p>Tippen Sie auf ein Feld, um Maße, Höhen, Abschnitt und Drehung zu bearbeiten. Der violette&nbsp;↻ Griff am ausgewählten Feld dreht per Tipp um 90°, per Ziehen frei (am Rechner auch mit der Taste&nbsp;<kbd>R</kbd>). Ziehen Sie den orangenen Punkt, um ein Feld frei zu bewegen, oder tippen Sie auf einen blauen&nbsp;+ Button (links/rechts), um ein weiteres Feld anzufügen.</p>
+    <p>Tippen Sie auf ein Feld, um Maße, Höhen, Abschnitt und Drehung zu bearbeiten. Der violette&nbsp;↻ Griff am ausgewählten Feld dreht per Tipp um 90°, per Ziehen frei (am Rechner auch mit der Taste&nbsp;<kbd>R</kbd>). Ziehen Sie den orangenen Punkt, um ein Feld frei zu bewegen, oder tippen Sie auf einen blauen&nbsp;+ Button (links/rechts), um ein weiteres Feld anzufügen. Mit&nbsp;„📏&nbsp;Bordbrett“ zeichnen Sie die Kante der Gerüstlage nach und ordnen sie einer Achse zu – die Eckenkorrektur (±&nbsp;Gerüsttiefe) rechnet das Programm dann selbst.</p>
   </header>
 
   <div id="toolbar">
@@ -48,6 +48,7 @@
       <button id="loadPlanBtn" class="secondary">Laden</button>
       <button id="photosBtn" class="secondary" title="Projekt-Fotos ansehen/hinzufügen">📷 Fotos</button>
       <button id="grundrissBtn" class="secondary" title="Grundriss als Hintergrund einblenden und ausrichten">🗺️ Grundriss</button>
+      <button id="bordbrettBtn" class="secondary" title="Linie entlang der Bordbretter zeichnen und einer Achse zuordnen (Eckenkorrektur automatisch)">📏 Bordbrett</button>
       <button id="exportPdfBtn" class="primary">PDF</button>
       <button id="deviceToggleBtn" class="secondary" title="Gerät wechseln">📱</button>
     </div>
@@ -91,6 +92,17 @@
         </div>
       </div>
       <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
+
+      <!-- Bedienleiste beim Zeichnen der Bordbretter-Linie -->
+      <div id="bordbrettBar" class="bordbrett-bar hidden">
+        <span id="bordbrettBarInfo" class="bordbrett-bar-info">Bordbretter-Linie</span>
+        <span class="bordbrett-bar-hint">Punkte entlang der Feldkanten antippen – sie rasten auf Kante und Ecke ein.</span>
+        <div class="bordbrett-bar-actions">
+          <button id="bordbrettZurueckBtn" type="button" class="secondary">↶ Punkt</button>
+          <button id="bordbrettAbbruchBtn" type="button" class="secondary">Abbrechen</button>
+          <button id="bordbrettFertigBtn" type="button" class="primary">Fertig &amp; zuordnen</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -99,6 +111,6 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js?v=20260810"></script>
+  <script src="viewer2d.js?v=20260813"></script>
 </body>
 </html>

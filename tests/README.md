@@ -51,6 +51,24 @@ node tests/r4-aufmass-positionen.mjs   # Parkplatz/Genehmigung, Umlauf-„+" mit
                                        # 50-m-Warnung je Abschnitt, Seite und über alle Seiten
 ```
 
+Runde 5:
+
+```bash
+node tests/r5-bordbretter.mjs      # Bordbretter-Linie zeichnen (Snapping an Feldkanten),
+                                   # einer Achse zuordnen, Ecken automatisch korrigieren
+                                   # (Innenecke − / Außenecke + Gerüsttiefe);
+                                   # Aufmaß je Gerüsthöhe getrennt zusammengefasst
+```
+
+`r5` prüft das Testbeispiel bei 0,73 m Gerüsttiefe: eine Achse, deren
+Bordbretter-Linie durch eine Innenecke läuft, verliert am letzten Feld vor der
+Ecke 0,73 m (2,57 + 2,57 + (2,57 − 0,73) = 6,98 m); eine Achse, deren Linie um
+eine Außenecke herumläuft, gewinnt am Feld an der Ecke 0,73 m
+(2,57 + (2,57 + 0,73) = 5,87 m). Bei 1,09 m Gerüsttiefe wird entsprechend um
+1,09 m korrigiert – der Wert ist keine Konstante. Zusätzlich: 10 Felder à
+2,57 m auf einer Seite, davon 5 mit 10,20 m und 5 mit 8,20 m Höhe, erscheinen
+im PDF getrennt als 12,85 m × 10,20 m und 12,85 m × 8,20 m.
+
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
 Innenecke ergeben 2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse
 2,57 + 0,73 = 3,30 m, eine unbeteiligte Achse unverändert 3 × 2,57 = 7,71 m.
