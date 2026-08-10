@@ -2101,6 +2101,25 @@ html, body {
   border-color: var(--color-border-focus);
 }
 
+/* Notiz je Hausseite – gleiche Optik wie die Abschnitts-Notiz, aber deutlich
+   abgesetzt, da sie für die ganze Seite gilt. */
+.seite-notiz {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: #fff;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+  margin-top: 10px;
+}
+
+.seite-notiz:focus {
+  border-color: var(--color-border-focus);
+}
+
 /* 50-m-Hinweis (Treppenturm) an Abschnitt bzw. Hausseite */
 .laenge-warn {
   font-size: 0.8rem;
@@ -2120,6 +2139,20 @@ html, body {
 .summary-warn {
   color: #92400e;
   font-weight: 700;
+}
+
+/* 50-m-Hinweis über alle Hausseiten – eigene Zeile unter der Gesamtfläche.
+   Muss `.summary-table td:last-child` überstimmen (rechtsbündig, nowrap), sonst
+   läuft der lange Hinweis auf schmalen Displays aus der Tabelle heraus. */
+.summary-table td.summary-warn-row {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  border-top: 1.5px solid #f59e0b;
+  padding: 7px 10px;
+  text-align: left;
+  white-space: normal;
 }
 
 .acc-multi-total {

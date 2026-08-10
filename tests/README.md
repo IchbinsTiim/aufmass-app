@@ -47,7 +47,8 @@ Runde 4 (Aufmaß-Programm, nicht 2D-Zeichner):
 
 ```bash
 node tests/r4-aufmass-positionen.mjs   # Parkplatz/Genehmigung, Umlauf-„+" mit Höhen-Übernahme,
-                                       # Notizfelder, 50-m-Warnung (Treppenturm), H vor L
+                                       # Notizfelder (Projekt/Seite/Abschnitt), H vor L,
+                                       # 50-m-Warnung je Abschnitt, Seite und über alle Seiten
 ```
 
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer

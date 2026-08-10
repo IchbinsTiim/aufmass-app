@@ -362,6 +362,22 @@ function abschnittLaenge(abschnitt) {
   return round2(total);
 }
 
+// Gesamtlänge aller Hausseiten zusammen. Grundlage für den 50-m-Hinweis auf
+// Projektebene: mehrere kurze Seiten (z. B. ein Umlauf ums Haus) ergeben in
+// Summe oft einen Gerüstzug über 50 m, ohne dass eine einzelne Seite die
+// Grenze erreicht.
+function projektLaenge() {
+  let total = 0;
+  document.querySelectorAll('#seitenContainer .seite-card').forEach(card => {
+    total += computeCardLaenge(card);
+  });
+  return round2(total);
+}
+
+// Merkt sich, ob der 50-m-Hinweis auf Projektebene bereits aktiv ist, damit die
+// Meldung nur beim Überschreiten erscheint und nicht bei jeder Eingabe.
+let projektWarn50 = false;
+
 // Warntext für den 50-m-Hinweis (Treppenturm) – oder '' wenn unkritisch
 function treppenturmHinweis(laenge, was) {
   if (!(laenge > TREPPENTURM_WARN_LAENGE)) return '';
@@ -1111,6 +1127,7 @@ function collectSeiten() {
       id:               card.dataset.sideId,
       name:             sel ? sel.value : '',
       manualName:       manual ? manual.value.trim() : '',
+      notiz:            card.querySelector('.seite-notiz')?.value.trim() || '',
       abschnitte,
       wandabstand:      isNaN(wandabstandVal) ? null : wandabstandVal,
       wdvs:             isNaN(wdvsVal) ? null : wdvsVal,
@@ -1211,6 +1228,9 @@ function renderSeiten(seitenData) {
   seitenData.forEach(seite => container.appendChild(createSeiteCard(seite)));
   renumberSeitenBadges();
   refreshNoSidesHint();
+  // Beim Laden eines Projekts nur den Warnzustand übernehmen – der Hinweis wird
+  // angezeigt, aber ohne Meldung (die gilt dem Überschreiten, nicht dem Öffnen).
+  projektWarn50 = projektLaenge() > TREPPENTURM_WARN_LAENGE;
   updateSummary();
 }
 
@@ -1366,6 +1386,16 @@ function createSeiteCard(seiteData) {
   wandWdvsRow.appendChild(makeSideMetaField('Wandabstand', 'm',  'seite-wandabstand', seiteData.wandabstand));
   wandWdvsRow.appendChild(makeSideMetaField('WDVS',        'cm', 'seite-wdvs',        seiteData.wdvs));
 
+  // Notiz zur Hausseite – die mittlere von drei Notiz-Ebenen (Projekt → Seite →
+  // Abschnitt). Gilt für die ganze Seite, z. B. „Zufahrt nur über den Hof" oder
+  // „Balkone bauseits freiräumen".
+  const seiteNotizInp = document.createElement('input');
+  seiteNotizInp.type = 'text';
+  seiteNotizInp.className = 'seite-notiz';
+  seiteNotizInp.placeholder = 'Notiz zur Seite (optional)';
+  seiteNotizInp.value = seiteData.notiz || '';
+  seiteNotizInp.addEventListener('input', () => updateSummary());
+
   // Abschnitte
   const abschnittSection = createAbschnittSection(seiteData, mainOnChange);
 
@@ -1434,6 +1464,7 @@ function createSeiteCard(seiteData) {
   body.appendChild(seiteWarn);
   body.appendChild(ksRow);
   body.appendChild(accSectionRef);
+  body.appendChild(seiteNotizInp);
   body.appendChild(footer);
 
   card.appendChild(header);
@@ -2524,6 +2555,10 @@ function updateSummary() {
       seitenFlaeche += abFlaeche;
     });
 
+    // Notiz zur Hausseite
+    const seiteNotiz = card.querySelector('.seite-notiz')?.value.trim() || '';
+    if (seiteNotiz) detailParts.push('Notiz: ' + escHtml(seiteNotiz));
+
     // 50-m-Hinweis (Treppenturm) für die gesamte Seite
     const seiteHinweis = treppenturmHinweis(computeCardLaenge(card), 'Seite');
     if (seiteHinweis) detailParts.push('<span class="summary-warn">⚠ ' + seiteHinweis + '</span>');
@@ -2601,6 +2636,20 @@ function updateSummary() {
       <td>Gesamtfläche</td>
       <td>${fmtNum(totalArea)} m²</td>
     </tr>`;
+
+  // 50-m-Hinweis über alle Hausseiten hinweg: mehrere kurze Seiten ergeben in
+  // Summe oft einen Gerüstzug über 50 m, ohne dass eine einzelne Seite warnt.
+  const projektHinweis = treppenturmHinweis(projektLaenge(), 'alle Seiten');
+  if (projektHinweis) {
+    html += `<tr><td colspan="2" class="summary-warn-row">⚠ ${projektHinweis}</td></tr>`;
+  }
+  // Meldung nur beim Überschreiten – und nur, wenn nicht ohnehin schon eine
+  // einzelne Seite darauf hingewiesen hat (sonst käme dasselbe doppelt).
+  const seiteWarntBereits = Array.from(cards).some(c => c._warn50);
+  if (projektHinweis && !projektWarn50 && !seiteWarntBereits) {
+    showToast('Alle Seiten zusammen über ' + TREPPENTURM_WARN_LAENGE + ' m – Treppenturm erforderlich');
+  }
+  projektWarn50 = !!projektHinweis;
 
   const ankerAnzahl = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
   if (!isNaN(ankerAnzahl) && ankerAnzahl > 0) {
@@ -2778,6 +2827,7 @@ function generatePDF() {
   secHead('Gerüstfläche');
 
   let totalArea = 0;
+  let gesamtLaenge = 0;
   const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
 
   seiten.forEach((seite, idx) => {
@@ -2860,6 +2910,21 @@ function generatePDF() {
       y += 5;
     }
 
+    // Notiz zur Hausseite
+    if (seite.notiz) {
+      chk(6);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'italic');
+      doc.splitTextToSize('Notiz: ' + seite.notiz, RM - (IND + 3)).forEach(zeile => {
+        chk(5);
+        doc.text(zeile, IND + 3, y);
+        y += 4.5;
+      });
+      doc.setFont(undefined, 'normal');
+    }
+
+    gesamtLaenge += seitenLaenge;
+
     // Hinweis: ab 50 m Gerüstlänge ist ein Treppenturm erforderlich
     const seitenHinweis = treppenturmHinweis(round2(seitenLaenge), 'Seite');
     if (seitenHinweis) {
@@ -2906,6 +2971,17 @@ function generatePDF() {
   doc.line(LM, y, RM, y);
   y += 5;
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
+
+  // 50-m-Hinweis über alle Hausseiten hinweg
+  const projektHinweisPdf = treppenturmHinweis(round2(gesamtLaenge), 'alle Seiten');
+  if (projektHinweisPdf) {
+    chk(6);
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'bold');
+    doc.text('Hinweis: ' + projektHinweisPdf, IND, y);
+    doc.setFont(undefined, 'normal');
+    y += 5;
+  }
 
   // ── Positionen ─────────────────────────────────────────────────
   // Konsolen: rein numerisch nach Typ sortiert, Dachfang-Variante (z. B. "50df")
