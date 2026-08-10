@@ -52,6 +52,22 @@ export async function open({ width = 1280, height = 900 } = {}) {
   };
 }
 
+/** Öffnet das Aufmaß-Programm (index.html) mit leerem Speicher. */
+export async function openAufmass({ width = 1280, height = 900 } = {}) {
+  const { server, port } = await serve();
+  const browser = await chromium.launch(EXE ? { executablePath: EXE } : {});
+  const page = await browser.newPage({ viewport: { width, height } });
+  const logs = [];
+  page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
+  page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.waitForFunction(() => document.getElementById('projectGrid') && typeof window.jspdf !== 'undefined');
+  return {
+    page, logs,
+    async close() { await browser.close(); server.close(); }
+  };
+}
+
 /** Baut n Felder als gerade Wand über die App-eigenen Funktionen auf. */
 export async function seedFields(page, n) {
   await page.evaluate(count => {

@@ -548,6 +548,14 @@ html, body {
   background: #fff;
 }
 
+/* Freies Notizfeld (allgemeine Informationen zum Aufmaß) */
+.form-textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.45;
+  font-size: 0.95rem;
+}
+
 /* ============================================================
    Gerusttyp selector
    ============================================================ */
@@ -2056,6 +2064,64 @@ html, body {
   margin-top: 4px;
 }
 
+/* „+" an einer Messzeile: dieselbe Position noch einmal erfassen (Umlauf) */
+.messung-dup-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 6px;
+  background: #eff6ff;
+  color: var(--color-primary);
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.messung-dup-btn:active {
+  background: #dbeafe;
+}
+
+/* Notiz je Abschnitt */
+.abschnitt-notiz {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: #fff;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+}
+
+.abschnitt-notiz:focus {
+  border-color: var(--color-border-focus);
+}
+
+/* 50-m-Hinweis (Treppenturm) an Abschnitt bzw. Hausseite */
+.laenge-warn {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1.5px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  margin-top: 4px;
+}
+
+.seite-warn {
+  margin: 8px 0 2px;
+}
+
+.summary-warn {
+  color: #92400e;
+  font-weight: 700;
+}
+
 .acc-multi-total {
   font-size: 0.82rem;
   font-weight: 700;
@@ -2091,6 +2157,12 @@ html, body {
     padding: 10px 6px;
     font-size: 0.85rem;
     min-height: 44px;
+  }
+
+  .messung-dup-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 1.4rem;
   }
 }
 

@@ -42,11 +42,22 @@ let overviewState = {
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
   'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen',
-  'Bautenschutzmatte','Fleece','Bauzaun','Käfig'
+  'Bautenschutzmatte','Fleece','Bauzaun','Käfig','Parkplatz','Genehmigung'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 // Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
-const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.' };
+const PREFERRED_EINHEIT = {
+  'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.',
+  // Parkplatz (Halteverbotszone) und Genehmigung werden nicht gemessen, sondern
+  // pauschal je Stück erfasst (Anzahl Parkplätze / Anzahl Genehmigungen).
+  // Details wie Zeitraum oder Behörde gehören in die Notiz der Zeile.
+  'Parkplatz': 'Stk.', 'Genehmigung': 'Stk.'
+};
+// Positionsarten ohne Maßbezug: nur Anzahl + Notiz (Pauschal-/Stückpositionen)
+const PAUSCHAL_ARTEN = ['Parkplatz', 'Genehmigung'];
+// Ab dieser Gerüstlänge (m) ist ein zweiter Aufstieg/Treppenturm erforderlich –
+// die App weist beim Überschreiten automatisch darauf hin.
+const TREPPENTURM_WARN_LAENGE = 50;
 
 // Konsolentypen (Breite in cm) + Sonder-Variante "Dachfang" (intern Konsole 0,50)
 const KONSOLE_TYPES = ['0', '19', '30', '50', '70', '109'];
@@ -86,6 +97,7 @@ function migrateProjectMeta(p) {
   if (p.status === undefined)      p.status = 'in_bearbeitung';
   if (p.folderId === undefined)    p.folderId = null;
   if (p.zeichnung2d === undefined) p.zeichnung2d = null;
+  if (p.notizen === undefined)     p.notizen = '';
   if (p.archiviert !== undefined) { // sehr alte Übergangsdaten
     if (p.archiviert) p.status = 'archiviert';
     delete p.archiviert;
@@ -169,6 +181,13 @@ function fmtNum(n) {
 function parseNum(str) {
   if (str === null || str === undefined || str === '') return NaN;
   return parseFloat(String(str).replace(',', '.'));
+}
+
+// Freitext (Notizen) sicher in die HTML-Zusammenfassung einsetzen
+function escHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function getTypeLabel(type) {
@@ -310,6 +329,44 @@ function computeCardFlaeche(card) {
     });
   });
   return round2(total);
+}
+
+// Gesamtlänge einer Karte (Summe aller Messlängen inkl. Zuschlag über alle
+// Abschnitte). Grundlage für den 50-m-Hinweis (Treppenturm): maßgeblich ist die
+// Länge des Gerüstzugs, nicht die Fläche.
+function computeCardLaenge(card) {
+  let total = 0;
+  card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+    const ef = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+    abRow.querySelectorAll('.messung-row').forEach(mRow => {
+      const l  = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lZ = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+      if (isNaN(l)) return;
+      let lEff = (l || 0) + lZ;
+      if (ef) lEff = Math.max(lEff, 2.5);
+      if (lEff > 0) total += lEff;
+    });
+  });
+  return round2(total);
+}
+
+// Gesamtlänge eines gespeicherten Abschnitts (für Zusammenfassung/PDF)
+function abschnittLaenge(abschnitt) {
+  const ef = abschnitt.einzelfeld || false;
+  let total = 0;
+  for (const m of (abschnitt.messungen || [])) {
+    let l = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
+    if (ef) l = Math.max(l, 2.5);
+    if (l > 0) total += l;
+  }
+  return round2(total);
+}
+
+// Warntext für den 50-m-Hinweis (Treppenturm) – oder '' wenn unkritisch
+function treppenturmHinweis(laenge, was) {
+  if (!(laenge > TREPPENTURM_WARN_LAENGE)) return '';
+  return 'Gesamtlänge ' + was + ' ' + fmtNum(laenge) + ' m (über '
+    + TREPPENTURM_WARN_LAENGE + ' m) – Treppenturm erforderlich';
 }
 
 // Größte eingetragene Höhe einer Karte (über alle Abschnitte/Messungen hinweg,
@@ -833,6 +890,9 @@ function openProject(projectId, opts) {
   loadTechnik(proj.technik);
   loadLogistik(proj.logistik);
 
+  const notizenEl = document.getElementById('fieldNotizen');
+  if (notizenEl) notizenEl.value = proj.notizen || '';
+
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
   update2dSummary(proj);
@@ -973,7 +1033,8 @@ function collectSeiten() {
     // Abschnitte
     const abschnitte = [];
     card.querySelectorAll('.abschnitt-row').forEach(abRow => {
-      const bez    = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      const bez    = abRow.querySelector('.abschnitt-bez')?.value.trim()   || '';
+      const notiz  = abRow.querySelector('.abschnitt-notiz')?.value.trim() || '';
       const ef     = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
       const giebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
       const messungen = [];
@@ -994,7 +1055,7 @@ function collectSeiten() {
           hoehe2Zuschlag: h2Z > 0 ? h2Z : null
         });
       });
-      abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
+      abschnitte.push({ id: genId('ab'), bezeichnung: bez, notiz, einzelfeld: ef, giebel, messungen });
     });
 
     // Konsolen (mehrere Lagen je Seite moeglich)
@@ -1086,6 +1147,7 @@ function collectProjectFromForm(proj) {
   proj.technik           = collectTechnik();
   proj.logistik          = collectLogistik();
   proj.zusatzpositionen  = collectZusatzpositionen();
+  proj.notizen           = document.getElementById('fieldNotizen')?.value.trim() || '';
   proj.geaendert = new Date().toISOString().slice(0, 10);
 }
 
@@ -1200,8 +1262,25 @@ function createSeiteCard(seiteData) {
   let accSectionRef = null;
   let ksInputRef    = null;
 
+  // 50-m-Hinweis für die gesamte Seite (Summe aller Abschnitte): ein
+  // durchgehender Gerüstzug läuft meist über mehrere Abschnitte.
+  const seiteWarn = document.createElement('div');
+  seiteWarn.className = 'laenge-warn seite-warn';
+  seiteWarn.style.display = 'none';
+
+  function refreshSeiteWarn(silent) {
+    const hinweis = treppenturmHinweis(computeCardLaenge(card), 'Seite');
+    seiteWarn.textContent = hinweis ? '⚠ ' + hinweis : '';
+    seiteWarn.style.display = hinweis ? '' : 'none';
+    if (hinweis && !card._warn50 && !silent) {
+      showToast('Seite über ' + TREPPENTURM_WARN_LAENGE + ' m – Treppenturm erforderlich');
+    }
+    card._warn50 = !!hinweis;
+  }
+
   const mainOnChange = () => {
     updateCardPreview(card, previewEl);
+    refreshSeiteWarn();
     updateSummary();
     if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
     if (ksInputRef && !ksInputRef._ksManual) {
@@ -1352,6 +1431,7 @@ function createSeiteCard(seiteData) {
   body.appendChild(nameRow);
   body.appendChild(wandWdvsRow);
   body.appendChild(abschnittSection);
+  body.appendChild(seiteWarn);
   body.appendChild(ksRow);
   body.appendChild(accSectionRef);
   body.appendChild(footer);
@@ -1376,6 +1456,7 @@ function createSeiteCard(seiteData) {
   if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
 
   updateCardPreview(card, previewEl);
+  refreshSeiteWarn(true);
   return card;
 }
 
@@ -1478,18 +1559,24 @@ function createAbschnittRow(data, container, onChange) {
   topLine.appendChild(giebelBtn);
   topLine.appendChild(removeAbBtn);
 
-  // Messpaare (L × H)
+  // Messpaare (H × L)
   const messungenList = document.createElement('div');
   messungenList.className = 'messungen-list';
+
+  // 50-m-Hinweis (Treppenturm) für diesen Abschnitt
+  const warnLine = document.createElement('div');
+  warnLine.className = 'laenge-warn';
+  warnLine.style.display = 'none';
 
   // Abschnitt-Summe
   const abTotalLine = document.createElement('div');
   abTotalLine.className = 'abschnitt-total';
 
-  function refreshAbschnittCalc() {
+  function refreshAbschnittCalc(silent) {
     const ef       = efBtn.classList.contains('active');
     const isGiebel = giebelBtn.classList.contains('active');
     let total = 0;
+    let totalLaenge = 0;
     messungenList.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
       const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
@@ -1498,6 +1585,7 @@ function createAbschnittRow(data, container, onChange) {
       if (ef) lEff = Math.max(lEff, 2.5);
       let f = 0;
       if (!isNaN(l) && lEff > 0) {
+        totalLaenge += lEff;
         if (isGiebel) {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
           const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
@@ -1521,7 +1609,55 @@ function createAbschnittRow(data, container, onChange) {
       if (calcEl) calcEl.textContent = f > 0 ? '= ' + fmtNum(f) + ' m²' : '';
     });
     total = round2(total);
-    abTotalLine.textContent = total > 0 ? 'Σ ' + fmtNum(total) + ' m²' : '';
+    totalLaenge = round2(totalLaenge);
+    abTotalLine.textContent = total > 0
+      ? 'Σ L ' + fmtNum(totalLaenge) + ' m · ' + fmtNum(total) + ' m²'
+      : (totalLaenge > 0 ? 'Σ L ' + fmtNum(totalLaenge) + ' m' : '');
+
+    // Treppenturm-Hinweis, sobald der Abschnitt 50 m überschreitet
+    const hinweis = treppenturmHinweis(totalLaenge, 'Abschnitt');
+    warnLine.textContent = hinweis ? '⚠ ' + hinweis : '';
+    warnLine.style.display = hinweis ? '' : 'none';
+    if (hinweis && !row._warn50 && !silent) {
+      showToast('Über ' + TREPPENTURM_WARN_LAENGE + ' m – Treppenturm erforderlich');
+    }
+    row._warn50 = !!hinweis;
+  }
+
+  // Höhenwerte der ersten Messzeile des Abschnitts – innerhalb eines Abschnitts
+  // (z. B. Balkon) ändert sich in der Regel nur die Länge, die Höhe bleibt
+  // gleich. Neue Zeilen übernehmen diese Höhe daher als Vorschlag.
+  function getErsteHoehe() {
+    const first = messungenList.querySelector('.messung-row');
+    if (!first) return {};
+    const h   = parseNum(first.querySelector('.messung-hoehe')?.value);
+    const hZ  = readZuschlag(first.querySelector('.messung-hoehe-zuschlag'));
+    const h2  = parseNum(first.querySelector('.messung-hoehe2')?.value);
+    const h2Z = readZuschlag(first.querySelector('.messung-hoehe2-zuschlag'));
+    return {
+      hoehe:          isNaN(h)  ? null : h,
+      hoeheZuschlag:  hZ  > 0 ? hZ  : null,
+      hoehe2:         isNaN(h2) ? null : h2,
+      hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+    };
+  }
+
+  // Kompletter Wertesatz einer Zeile (für „Position noch einmal erfassen")
+  function readMessungRow(mRow) {
+    const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+    const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+    const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+    const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+    const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+    const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
+    return {
+      laenge:         isNaN(l)  ? null : l,
+      laengeZuschlag: lZ  > 0 ? lZ  : null,
+      hoehe:          isNaN(h)  ? null : h,
+      hoeheZuschlag:  hZ  > 0 ? hZ  : null,
+      hoehe2:         isNaN(h2) ? null : h2,
+      hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+    };
   }
 
   function createMessungRow(mData) {
@@ -1585,6 +1721,23 @@ function createAbschnittRow(data, container, onChange) {
     const calcSpan = document.createElement('span');
     calcSpan.className = 'messung-calc';
 
+    // „+" duplziert die Zeile mit allen Werten – für Positionen, die für den
+    // Umlauf ein zweites Mal erfasst werden müssen. Nichts muss neu getippt
+    // werden; die Kopie ist danach ganz normal einzeln änderbar.
+    const dupMBtn = document.createElement('button');
+    dupMBtn.type = 'button';
+    dupMBtn.className = 'messung-dup-btn';
+    dupMBtn.textContent = '+';
+    dupMBtn.title = 'Position noch einmal erfassen (z. B. für den Umlauf)';
+    dupMBtn.addEventListener('click', () => {
+      const kopie = createMessungRow(readMessungRow(mRow));
+      mRow.after(kopie);
+      refreshAbschnittCalc();
+      onChange();
+      const inp = kopie.querySelector('.messung-laenge');
+      if (inp) { inp.focus(); if (inp.select) inp.select(); }
+    });
+
     const removeMBtn = document.createElement('button');
     removeMBtn.type = 'button';
     removeMBtn.className = 'meas-remove-btn';
@@ -1605,15 +1758,17 @@ function createAbschnittRow(data, container, onChange) {
     hoeheField.classList.add('meas-field-h');
     const hoehe2Field = wrapMeasField('H2', hoehe2Inp, 'giebel-part');
 
-    mRow.appendChild(laengeField);
-    mRow.appendChild(laengeZuschlagCtrl);
-    mRow.appendChild(mulSign);
+    // Reihenfolge: erst Höhe (bleibt im Abschnitt meist gleich), dann Länge
     mRow.appendChild(hoeheField);
     mRow.appendChild(hoeheZuschlagCtrl);
     mRow.appendChild(giebelSep);
     mRow.appendChild(hoehe2Field);
     mRow.appendChild(hoehe2ZuschlagCtrl);
+    mRow.appendChild(mulSign);
+    mRow.appendChild(laengeField);
+    mRow.appendChild(laengeZuschlagCtrl);
     mRow.appendChild(calcSpan);
+    mRow.appendChild(dupMBtn);
     mRow.appendChild(removeMBtn);
     return mRow;
   }
@@ -1624,14 +1779,30 @@ function createAbschnittRow(data, container, onChange) {
 
   initMessungen.forEach(m => messungenList.appendChild(createMessungRow(m)));
 
+  // Neue Zeilen übernehmen die Höhe der ersten Zeile des Abschnitts als
+  // Vorschlag (nur die Länge muss noch eingetragen werden). Der Wert bleibt
+  // ganz normal überschreibbar, falls die Höhe doch abweicht.
   const addMessBtn = document.createElement('button');
   addMessBtn.type = 'button';
   addMessBtn.className = 'meas-add-btn meas-add-btn-sm';
   addMessBtn.textContent = '+ Maß';
+  addMessBtn.title = 'Weitere Messung – Höhe wird aus der ersten Zeile übernommen';
   addMessBtn.addEventListener('click', () => {
-    messungenList.appendChild(createMessungRow({}));
+    const neu = createMessungRow(getErsteHoehe());
+    messungenList.appendChild(neu);
+    refreshAbschnittCalc();
     onChange();
+    const inp = neu.querySelector('.messung-laenge');
+    if (inp) inp.focus();
   });
+
+  // Notiz zum Abschnitt (z. B. „nur bis OK Brüstung", „Zufahrt frei halten")
+  const notizInp = document.createElement('input');
+  notizInp.type = 'text';
+  notizInp.className = 'abschnitt-notiz';
+  notizInp.placeholder = 'Notiz zum Abschnitt (optional)';
+  notizInp.value = data.notiz || '';
+  notizInp.addEventListener('input', onChange);
 
   // Giebel-Startzustand anwenden
   if (data.giebel) row.classList.add('giebel-active');
@@ -1639,9 +1810,11 @@ function createAbschnittRow(data, container, onChange) {
   row.appendChild(topLine);
   row.appendChild(messungenList);
   row.appendChild(addMessBtn);
+  row.appendChild(notizInp);
+  row.appendChild(warnLine);
   row.appendChild(abTotalLine);
 
-  refreshAbschnittCalc();
+  refreshAbschnittCalc(true);
   return row;
 }
 
@@ -1743,7 +1916,10 @@ function createZusatzRow(data) {
   artSel.addEventListener('change', () => {
     const pref = PREFERRED_EINHEIT[artSel.value];
     if (pref) einheitSel.value = pref;
+    refreshArtHinweise();
+    updateSummary();
   });
+  einheitSel.addEventListener('change', updateSummary);
 
   // Menge
   const mengeInp = document.createElement('input');
@@ -1754,6 +1930,7 @@ function createZusatzRow(data) {
   mengeInp.inputMode = 'decimal';
   mengeInp.placeholder = '0,00';
   if (data?.menge !== null && data?.menge !== undefined && !isNaN(data.menge)) mengeInp.value = data.menge;
+  mengeInp.addEventListener('input', updateSummary);
 
   // Notiz
   const notizInp = document.createElement('input');
@@ -1761,13 +1938,26 @@ function createZusatzRow(data) {
   notizInp.className = 'zusatz-notiz';
   notizInp.placeholder = 'Notiz (optional)';
   notizInp.value = data?.notiz || '';
+  notizInp.addEventListener('input', updateSummary);
+
+  // Pauschal-/Stückpositionen (Parkplatz, Genehmigung) werden nicht gemessen –
+  // dort zählt nur die Anzahl; Zeitraum/Behörde gehören in die Notiz.
+  function refreshArtHinweise() {
+    const pauschal = PAUSCHAL_ARTEN.includes(artSel.value);
+    mengeInp.placeholder = pauschal ? 'Anzahl' : '0,00';
+    notizInp.placeholder = artSel.value === 'Parkplatz'
+      ? 'Notiz, z. B. Zeitraum / Halteverbotszone'
+      : (artSel.value === 'Genehmigung' ? 'Notiz, z. B. Behörde / Art der Genehmigung' : 'Notiz (optional)');
+  }
 
   // Remove
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'meas-remove-btn';
   removeBtn.innerHTML = '&times;';
-  removeBtn.addEventListener('click', () => { row.remove(); refreshNoZusatzHint(); });
+  removeBtn.addEventListener('click', () => { row.remove(); refreshNoZusatzHint(); updateSummary(); });
+
+  refreshArtHinweise();
 
   const topLine = document.createElement('div');
   topLine.className = 'zusatz-top';
@@ -2292,7 +2482,8 @@ function updateSummary() {
     card.querySelectorAll('.abschnitt-row').forEach(abRow => {
       const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
       const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
-      const bez      = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      const bez      = abRow.querySelector('.abschnitt-bez')?.value.trim()   || '';
+      const abNotiz  = abRow.querySelector('.abschnitt-notiz')?.value.trim() || '';
       let abFlaeche  = 0;
       abRow.querySelectorAll('.messung-row').forEach(mRow => {
         const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
@@ -2313,7 +2504,7 @@ function updateSummary() {
             if (h2Eff >= h1Eff && h1Eff >= 0) {
               const pair = round2(lEff * (h1Eff + h2Eff) / 2);
               abFlaeche += pair;
-              detailParts.push(bezPfx + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)');
+              detailParts.push(bezPfx + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)');
             }
           }
         } else {
@@ -2324,13 +2515,18 @@ function updateSummary() {
             if (hEff > 0) {
               const pair = round2(lEff * hEff);
               abFlaeche += pair;
-              detailParts.push(bezPfx + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
+              detailParts.push(bezPfx + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
             }
           }
         }
       });
+      if (abNotiz) detailParts.push((bez ? bez + ': ' : '') + 'Notiz: ' + escHtml(abNotiz));
       seitenFlaeche += abFlaeche;
     });
+
+    // 50-m-Hinweis (Treppenturm) für die gesamte Seite
+    const seiteHinweis = treppenturmHinweis(computeCardLaenge(card), 'Seite');
+    if (seiteHinweis) detailParts.push('<span class="summary-warn">⚠ ' + seiteHinweis + '</span>');
 
     totalArea += seitenFlaeche;
 
@@ -2394,7 +2590,7 @@ function updateSummary() {
       const notiz   = row.querySelector('.zusatz-notiz')?.value.trim();
       const mengeStr = !isNaN(menge) ? fmtNum(menge) + ' ' + einheit : '–';
       html += `<tr>
-        <td><span class="summary-side-name" style="font-size:0.88rem">${art}</span>${notiz ? '<span class="summary-side-detail">' + notiz + '</span>' : ''}</td>
+        <td><span class="summary-side-name" style="font-size:0.88rem">${art}</span>${notiz ? '<span class="summary-side-detail">' + escHtml(notiz) + '</span>' : ''}</td>
         <td>${mengeStr}</td>
       </tr>`;
     });
@@ -2605,9 +2801,11 @@ function generatePDF() {
     }
 
     let seitenFlaeche = 0;
+    let seitenLaenge  = 0;
     (seite.abschnitte || []).forEach(a => {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
+      seitenLaenge += abschnittLaenge(a);
       (a.messungen || []).forEach(m => {
         let lEff = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
@@ -2622,7 +2820,7 @@ function generatePDF() {
           seitenFlaeche += pair;
           chk(6);
           doc.setFontSize(9);
-          doc.text(bezStr + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr, IND + 3, y);
+          doc.text(bezStr + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr, IND + 3, y);
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
@@ -2632,11 +2830,24 @@ function generatePDF() {
           seitenFlaeche += pair;
           chk(6);
           doc.setFontSize(9);
-          doc.text(bezStr + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr, IND + 3, y);
+          doc.text(bezStr + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr, IND + 3, y);
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         }
       });
+
+      // Notiz zum Abschnitt
+      if (a.notiz) {
+        chk(6);
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'italic');
+        doc.splitTextToSize('Notiz: ' + a.notiz, RM - (IND + 3)).forEach(zeile => {
+          chk(5);
+          doc.text(zeile, IND + 3, y);
+          y += 4.5;
+        });
+        doc.setFont(undefined, 'normal');
+      }
     });
 
     if (seitenFlaeche > 0) {
@@ -2645,6 +2856,17 @@ function generatePDF() {
       doc.setFontSize(10);
       doc.setFont(undefined, 'bold');
       doc.text(fmtNum(seitenFlaeche) + ' m²', RM, y, { align: 'right' });
+      doc.setFont(undefined, 'normal');
+      y += 5;
+    }
+
+    // Hinweis: ab 50 m Gerüstlänge ist ein Treppenturm erforderlich
+    const seitenHinweis = treppenturmHinweis(round2(seitenLaenge), 'Seite');
+    if (seitenHinweis) {
+      chk(6);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'bold');
+      doc.text('Hinweis: ' + seitenHinweis, IND + 3, y);
       doc.setFont(undefined, 'normal');
       y += 5;
     }
@@ -2747,6 +2969,25 @@ function generatePDF() {
     hline(0.3);
     secHead('Transport / Laufaufwand');
     transportParts.forEach(([label, val]) => pdfRow(label, val));
+  }
+
+  // ── Notizen / Allgemeine Informationen ────────────────────────
+  const notizen = document.getElementById('fieldNotizen')?.value.trim() || '';
+  if (notizen) {
+    y += 1;
+    hline(0.3);
+    secHead('Notizen / Allgemeine Informationen');
+    doc.setFontSize(10);
+    // Absätze des Notizfeldes einzeln umbrechen, damit Zeilenumbrüche des
+    // Anwenders erhalten bleiben.
+    notizen.split(/\r?\n/).forEach(absatz => {
+      if (absatz.trim() === '') { y += 3; return; }
+      doc.splitTextToSize(absatz, RM - IND).forEach(zeile => {
+        chk(6);
+        doc.text(zeile, IND, y);
+        y += 5;
+      });
+    });
   }
 
   const proj = getCurrentProject();
@@ -2936,6 +3177,7 @@ function initApp() {
     const container = document.getElementById('zusatzContainer');
     container.appendChild(createZusatzRow({}));
     refreshNoZusatzHint();
+    updateSummary();
     scheduleAutosave();
   });
 

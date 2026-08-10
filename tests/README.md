@@ -1,8 +1,9 @@
-# Tests zum 2D-Zeichner
+# Tests zum 2D-Zeichner und zum Aufmaß-Programm
 
-Browser-Tests gegen `aufmass_final_app/viewer2d.html`. Sie starten einen
-kleinen statischen Server, öffnen die Seite in Chromium (Playwright) und
-prüfen Verhalten statt Implementierungsdetails.
+Browser-Tests gegen `aufmass_final_app/viewer2d.html` (2D-Zeichner) und
+`aufmass_final_app/index.html` (Aufmaß-Programm, Positionserfassung). Sie
+starten einen kleinen statischen Server, öffnen die Seite in Chromium
+(Playwright) und prüfen Verhalten statt Implementierungsdetails.
 
 ## Voraussetzungen
 
@@ -40,6 +41,13 @@ Runde 3:
 ```bash
 node tests/r3-t1-innenecken.mjs     # Innenecken: durchlaufende Achse −0,73 m, ausfüllende +0,73 m
 node tests/r3-t2-grundriss.mjs      # Grundriss als Hintergrundebene; Eckentyp aus dem Bild ableiten
+```
+
+Runde 4 (Aufmaß-Programm, nicht 2D-Zeichner):
+
+```bash
+node tests/r4-aufmass-positionen.mjs   # Parkplatz/Genehmigung, Umlauf-„+" mit Höhen-Übernahme,
+                                       # Notizfelder, 50-m-Warnung (Treppenturm), H vor L
 ```
 
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
