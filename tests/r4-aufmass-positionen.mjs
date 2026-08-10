@@ -150,15 +150,18 @@ await page.evaluate(() => {
 console.log('\nAUFGABE 3 – Notizfeld für allgemeine Informationen\n');
 
 assert(await page.isVisible('#fieldNotizen'), 'das Projekt hat ein freies Notizfeld');
+assert(await page.isVisible('.seite-card .seite-notiz'), 'jede Hausseite hat ein eigenes Notizfeld');
 await page.fill('#fieldNotizen', 'Schlüssel beim Hausmeister abholen.\nZufahrt nur vormittags frei.');
+await page.fill('.seite-card .seite-notiz', 'Zufahrt nur über den Hof');
 await page.fill('.seite-card .abschnitt-row:first-child .abschnitt-notiz', 'Balkon nur bis OK Brüstung');
 
 const gespeichert = await page.evaluate(() => {
   flushAutosave();
   const p = getCurrentProject();
-  return { notizen: p.notizen, abschnittNotiz: p.seiten[0].abschnitte[0].notiz };
+  return { notizen: p.notizen, seiteNotiz: p.seiten[0].notiz, abschnittNotiz: p.seiten[0].abschnitte[0].notiz };
 });
 assert(/Hausmeister/.test(gespeichert.notizen), 'die Projekt-Notiz wird gespeichert');
+assert(gespeichert.seiteNotiz === 'Zufahrt nur über den Hof', 'die Seiten-Notiz wird gespeichert');
 assert(gespeichert.abschnittNotiz === 'Balkon nur bis OK Brüstung', 'die Abschnitts-Notiz wird gespeichert');
 
 const nachNeuladen = await page.evaluate(() => {
@@ -167,14 +170,17 @@ const nachNeuladen = await page.evaluate(() => {
   openProject(id);
   return {
     notizen: document.getElementById('fieldNotizen').value,
+    seiteNotiz: document.querySelector('.seite-notiz').value,
     abschnittNotiz: document.querySelector('.abschnitt-notiz').value
   };
 });
 assert(/Hausmeister/.test(nachNeuladen.notizen) && /Brüstung/.test(nachNeuladen.abschnittNotiz),
   'beide Notizen stehen nach erneutem Öffnen des Projekts wieder da');
+assert(/Hof/.test(nachNeuladen.seiteNotiz), 'auch die Seiten-Notiz steht nach erneutem Öffnen wieder da');
 
 const summaryNotiz = await page.textContent('#summaryContent');
 assert(/Brüstung/.test(summaryNotiz), 'die Abschnitts-Notiz erscheint in der Zusammenfassung');
+assert(/Hof/.test(summaryNotiz), 'die Seiten-Notiz erscheint in der Zusammenfassung');
 
 // ══ AUFGABE 1 – Parkplatz & Genehmigung ══════════════════════════════════
 console.log('\nAUFGABE 1 – Positionsarten „Parkplatz" und „Genehmigung"\n');
@@ -242,9 +248,73 @@ assert(/Notizen \/ ALLGEMEINE INFORMATIONEN|NOTIZEN/i.test(pdf), 'PDF: es gibt e
 assert(/Hausmeister/.test(pdf), 'PDF: der Notiztext steht im Bericht');
 assert(/Zufahrt nur vormittags frei/.test(pdf), 'PDF: Zeilenumbrüche der Notiz bleiben erhalten');
 assert(/Notiz: Balkon nur bis OK Brüstung/.test(pdf), 'PDF: die Abschnitts-Notiz steht beim Abschnitt');
+assert(/Notiz: Zufahrt nur über den Hof/.test(pdf), 'PDF: die Seiten-Notiz steht bei der Hausseite');
 assert(/Treppenturm/.test(pdf), 'PDF: der 50-m-Hinweis wird ausgegeben');
+assert(/alle Seiten 60,00 m/.test(pdf), 'PDF: der 50-m-Hinweis über alle Seiten steht unter der Gesamtfläche');
 // Höhe 3,00 m + Zuschlag 2,00 m = 5,00 m, Länge 20,00 m → „H × L"
 assert(/5,00 m × 20,00 m/.test(pdf), 'PDF: Maße stehen in der neuen Reihenfolge Höhe × Länge');
+
+// ══ AUFGABE 4b – 50-m-Hinweis über alle Hausseiten zusammen ══════════════
+console.log('\nAUFGABE 4b – 50-m-Hinweis über alle Hausseiten zusammen\n');
+
+// Frisches Projekt mit zwei Seiten à 30 m: jede einzeln unter 50 m, in Summe
+// aber 60 m – genau der Fall, den erst die Projektebene aufdeckt.
+await page.click('#backBtn');
+await page.waitForSelector('#homeScreen:not(.hidden)');
+await page.click('#newProjectBtn');
+await page.waitForSelector('#projectScreen:not(.hidden)');
+
+for (const nth of [1, 2]) {
+  await page.click('#addSideBtn');
+  await page.fill(`#seitenContainer .seite-card:nth-child(${nth}) .messung-hoehe`, '3');
+  await page.fill(`#seitenContainer .seite-card:nth-child(${nth}) .messung-laenge`, '30');
+}
+
+const projektWarn = await page.evaluate(() => {
+  const row   = document.querySelector('#summaryContent .summary-warn-row');
+  const toast = document.getElementById('toastEl');
+  return {
+    hinweis: row ? row.textContent : '',
+    seitenWarnungen: [...document.querySelectorAll('.seite-warn')]
+      .filter(el => el.style.display !== 'none' && el.textContent.trim() !== '').length,
+    toast: toast.classList.contains('show') ? toast.textContent : ''
+  };
+});
+assert(projektWarn.seitenWarnungen === 0, 'keine einzelne Seite überschreitet 50 m');
+assert(/Treppenturm/.test(projektWarn.hinweis),
+  'die Summe aller Seiten weist auf den Treppenturm hin: ' + projektWarn.hinweis.trim());
+assert(/60,00 m/.test(projektWarn.hinweis), 'der Hinweis nennt die Gesamtlänge aller Seiten');
+assert(/zusammen/.test(projektWarn.toast), 'beim Überschreiten erscheint eine Meldung: ' + projektWarn.toast);
+
+// Unter die Grenze zurück → Hinweis verschwindet wieder
+await page.fill('#seitenContainer .seite-card:nth-child(2) .messung-laenge', '10');
+assert(!(await page.evaluate(() => !!document.querySelector('#summaryContent .summary-warn-row'))),
+  'unter 50 m Gesamtlänge verschwindet der Hinweis wieder');
+
+// Warnt bereits eine einzelne Seite, kommt dieselbe Information nicht doppelt.
+await page.fill('#seitenContainer .seite-card:nth-child(2) .messung-laenge', '60');
+const doppelt = await page.evaluate(() => {
+  const el = document.getElementById('toastEl');
+  return el.classList.contains('show') ? el.textContent : '';
+});
+assert(/Seite über/.test(doppelt) && !/zusammen/.test(doppelt),
+  'warnt schon eine einzelne Seite, erscheint die Meldung nicht doppelt: ' + doppelt);
+
+// Erneutes Öffnen: Hinweis bleibt sichtbar, aber ohne neue Meldung.
+await page.fill('#seitenContainer .seite-card:nth-child(2) .messung-laenge', '30');
+const nachOeffnen = await page.evaluate(() => {
+  document.getElementById('toastEl').classList.remove('show');
+  const id = currentProjectId;
+  flushAutosave();
+  loadProjects();
+  openProject(id);
+  return {
+    hinweis: !!document.querySelector('#summaryContent .summary-warn-row'),
+    toast:   document.getElementById('toastEl').classList.contains('show')
+  };
+});
+assert(nachOeffnen.hinweis, 'nach erneutem Öffnen steht der Hinweis weiterhin in der Zusammenfassung');
+assert(!nachOeffnen.toast, 'beim Öffnen eines Projekts erscheint keine erneute Meldung');
 
 // ── Keine Fehler auf der Seite ────────────────────────────────────────────
 // „Failed to load resource" ignorieren: die Test-Seite hat kein favicon.ico.
