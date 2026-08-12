@@ -29,6 +29,14 @@ const KONSOLE_TYPES = ['0,19', '0,30', '0,50', '0,70', '1,09'];
 // Verfügbare Positions-Arten. `konsole:true` → mit Typ + Lagen, mehrfach möglich.
 // `unit` = voreingestellte Mengeneinheit ('m' | 'm2' | 'stgm' | 'stk' | 'lagen');
 // pro Position im Editor änderbar.
+//
+// Zwei Sonderfälle werden zusätzlich IN DER ZEICHNUNG dargestellt, weil sie die
+// Konstruktion verändern und nicht nur eine Menge sind (siehe Verbreiterungen
+// weiter unten):
+//   `strebe:true` – Verbreiterung „Rahmen mit Rohr": Rahmen + diagonales Rohr
+//                   als Strebendreieck an der offenen Feldseite.
+//   `feld:true`   – Modul-Abstützung: wird wie ein zusätzliches (gestricheltes)
+//                   Feld gezeichnet und hat eigene Länge/Breite/Höhe.
 const POSITIONS = [
   { key: 'konsole',       label: 'Konsole',          short: 'K',    color: '#cc7a00', konsole: true },
   { key: 'innengelaender',label: 'Innengeländer',    short: 'IG',   color: '#2f9e44', unit: 'lagen' },
@@ -38,6 +46,10 @@ const POSITIONS = [
   { key: 'durchgang',     label: 'Tunnelrahmen',     short: 'TR',   color: '#1f5f9e', unit: 'stk' },
   { key: 'geruesttreppe', label: 'Gerüsttreppe',     short: 'GT',   color: '#4659c9', unit: 'stk' },
   { key: 'verbreiterung', label: 'Verbreiterung',    short: 'VB',   color: '#0f9b8e', unit: 'lagen' },
+  { key: 'verbreiterung_rahmen', label: 'Verbreiterung – Rahmen mit Rohr',
+    short: 'VR', color: '#0d7f92', unit: 'stk', strebe: true },
+  { key: 'abstuetzung',   label: 'Modul-Abstützung', short: 'MA',   color: '#7a4bd1',
+    unit: 'stk', feld: true },
   { key: 'ueberbrueckung',label: 'Überbrückung',     short: 'ÜB',   color: '#a5612c', unit: 'stk' },
   { key: 'bekleidung',    label: 'Bekleidung',       short: 'BK',   color: '#a52c7e', unit: 'm' },
   { key: 'schutzdach',    label: 'Schutzdach',       short: 'SD',   color: '#c0392b', unit: 'm' },
@@ -56,6 +68,58 @@ const UNIT_LABEL = { m: 'm', m2: 'm²', stgm: 'Stg. m', stk: 'Stk', lagen: 'Lage
 function defaultUnit(cat) {
   const p = POS_BY_KEY[cat];
   return (p && p.unit) || 'stk';
+}
+
+/* ── Verbreiterungen ─────────────────────────────────────────────────────────
+   Manche Gerüste müssen verbreitert werden. Der Nutzer bildet das direkt beim
+   Zeichnen ab – in zwei Bauarten, die sich am Bau grundsätzlich unterscheiden:
+
+     A  „Verbreiterung – Rahmen mit Rohr" (POS-Art `verbreiterung_rahmen`):
+        ein Rahmen ragt über das Feld hinaus und wird von einem diagonalen Rohr
+        abgestützt. Im Grundriss ist das ein Strebendreieck an der offenen
+        (wandabgewandten) Feldseite – gezeichnet wie ein Zusatzbauteil, ohne
+        eigene Maße.
+
+     B  „Modul-Abstützung" (POS-Art `abstuetzung`): eine Abstützung, die wie ein
+        eigenes Feld neben dem Feld steht (typisch bei Türmen). Sie ist KEINE
+        begehbare Lage und wird deshalb GESTRICHELT gezeichnet, hat aber – wie
+        ein Feld – eigene Länge, Breite und Höhe.
+
+   Beide hängen an genau einem Gerüstfeld und werden wie die übrigen
+   Zusatzbauteile (Innengeländer …) in bay.positions[] geführt: damit gelten
+   Kopieren/Einfügen, Mehrfachauswahl, Speichern und die PDF-Aufstellung ohne
+   weiteres Zutun auch für sie.                                              */
+
+/** Maße einer Modul-Abstützung in m. Ohne eigene Eingabe gelten die Maße des
+ *  Feldes, an dem sie hängt (Länge, Gerüsttiefe, kleinere Feldhöhe) – so steht
+ *  auch ohne Tipparbeit ein plausibler Wert im Plan. */
+function abstuetzMasse(pos, bay) {
+  const num = v => {
+    const n = parseFloat(v);
+    return (v != null && v !== '' && !isNaN(n) && n > 0) ? +n.toFixed(2) : null;
+  };
+  return {
+    len:    num(pos.fLen)    != null ? num(pos.fLen)    : (bay && bay.len ? bay.len : null),
+    breite: num(pos.fBreite) != null ? num(pos.fBreite) : state.depth,
+    hoehe:  num(pos.fHoehe)  != null ? num(pos.fHoehe)  : (bay ? bayHoehe(bay) : null)
+  };
+}
+
+/** Maßangabe einer Modul-Abstützung, z. B. „2,57 × 0,73 × 4,00 m". */
+function abstuetzMassText(pos, bay) {
+  const m = abstuetzMasse(pos, bay);
+  const t = v => (v != null ? fmtQty(v) : '?');
+  return `${t(m.len)} × ${t(m.breite)} × ${t(m.hoehe)} m`;
+}
+
+/** Neue Position einer Art anlegen. Bauteile, die es je Feld schlicht „gibt"
+ *  (Verbreiterung, Abstützung), starten mit Anzahl 1 – sonst stünde sofort ein
+ *  Hinweis „Menge fehlt" im Feld, obwohl nichts fehlt. */
+function mkPosition(key) {
+  const p = POS_BY_KEY[key] || {};
+  const pos = { id: ++_bId, cat: key, qty: null, unit: defaultUnit(key) };
+  if (p.strebe || p.feld) pos.qty = 1;
+  return pos;
 }
 
 /** Zahl ohne überflüssige Nullen, deutsches Dezimalkomma. */
@@ -189,6 +253,9 @@ function posTitle(pos, bay) {
     base = 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · '
       + (isMeterBilling(pos) ? 'lfd. Meter' : lagenLabel(pos.lagen));
   }
+  // Modul-Abstützung: sie zählt nicht in Metern, sondern hat wie ein Feld eigene
+  // Maße – die gehören in den Namen, sonst stünde im PDF nur „1 Stk".
+  else if (p.feld) { base = p.label + ' · ' + abstuetzMassText(pos, bay); }
   else { const q = qtyLabel(pos, bay); base = q ? p.label + ' · ' + q : p.label; }
   const m = posMeters(pos, bay);
   if (m != null) base += ' = ' + fmtQty(m) + ' m';
@@ -200,6 +267,9 @@ function posBadge(pos, bay) {
   const p = POS_BY_KEY[pos.cat];
   if (!p) return '?';
   const m = posMeters(pos, bay);
+  // Die Modul-Abstützung ist im Plan als eigenes (gestricheltes) Feld zu sehen –
+  // ihr Badge nennt deshalb die Maße, nicht die Stückzahl.
+  if (p.feld) return p.short + ' ' + abstuetzMassText(pos, bay);
   if (p.konsole) {
     const lg = isMeterBilling(pos) || pos.lagen == null || pos.lagen === 'alle' || pos.lagen === ''
       ? '' : '×' + (parseInt(pos.lagen, 10) || '');
@@ -212,6 +282,22 @@ function posBadge(pos, bay) {
     const u = pos.unit || defaultUnit(pos.cat);
     const suf = (u === 'm' || u === 'stgm') ? 'm' : (u === 'm2' ? 'm²' : '×');
     return p.short + ' ' + fmtQty(v) + suf;
+  }
+  return p.short;
+}
+
+/** Kürzestmögliche Plan-Beschriftung einer Position: nur Art (und bei der
+ *  Konsole Typ + Lagen). Wird gebraucht, wenn das Feld auf dem Papier zu schmal
+ *  für den vollen Badge ist – dann steht lieber das Bauteil ohne Menge da als
+ *  eine Beschriftung, die ins Nachbarfeld läuft. Die Mengen stehen ohnehin in
+ *  den Aufmaß-Tabellen. */
+function posBadgeKurz(pos) {
+  const p = POS_BY_KEY[pos.cat];
+  if (!p) return '?';
+  if (p.konsole) {
+    const lg = isMeterBilling(pos) || pos.lagen == null || pos.lagen === 'alle' || pos.lagen === ''
+      ? '' : '×' + (parseInt(pos.lagen, 10) || '');
+    return 'K' + (pos.typ || '') + lg;
   }
   return p.short;
 }
@@ -232,6 +318,12 @@ function bayWarnings(bay) {
       } else if (pos.lagen == null || pos.lagen === '') {
         warnings.push('Konsole: Lagen oder Meter fehlt');
       }
+    } else if (p.feld) {
+      // Eine Modul-Abstützung wird gezeichnet – dafür braucht sie Maße. Länge
+      // und Breite erben notfalls vom Feld, die Höhe nicht immer.
+      const m = abstuetzMasse(pos, bay);
+      if (m.len == null || m.breite == null) warnings.push(p.label + ': Länge/Breite fehlt');
+      if (m.hoehe == null) warnings.push(p.label + ': Höhe fehlt');
     } else if (effQty(pos, bay) == null) {
       warnings.push(p.label + ': Menge fehlt');
     }
@@ -1367,6 +1459,80 @@ function sectionBayPolys(sec, x0, y0) {
   return polys;
 }
 
+/* ── Geometrie der Verbreiterungen ───────────────────────────────────────────
+   Beide Bauarten hängen an einem gezeichneten Feld (`el` aus computeLayout)
+   und liegen an dessen OFFENER Seite – also weg von der Wand. Die Geometrie
+   entsteht hier EINMAL in Weltkoordinaten, damit Zeichenfläche und PDF exakt
+   dasselbe darstellen.
+
+   el.pts = [p0, p1, p2, p3]:  p0→p1 Wandkante, p3→p2 Außenkante,
+                               p0→p3 quer (Gerüsttiefe).                     */
+
+/** Einheitsvektoren eines Feldes: längs (Laufrichtung) und quer nach außen. */
+function bayAxes(el) {
+  const [p0, p1, , p3] = el.pts;
+  const lx = p1.x - p0.x, ly = p1.y - p0.y;
+  const ll = Math.hypot(lx, ly) || 1;
+  const ox = p3.x - p0.x, oy = p3.y - p0.y;
+  const ol = Math.hypot(ox, oy) || 1;
+  return { dx: lx / ll, dy: ly / ll, ox: ox / ol, oy: oy / ol, len: ll, tiefe: ol };
+}
+
+/**
+ * Rechteck einer MODUL-ABSTÜTZUNG (Variante B) in Weltkoordinaten.
+ * Sie steht an der offenen Feldseite, beginnt am Feldanfang und ist so lang und
+ * breit, wie beim Bauteil eingetragen. Gezeichnet wird sie gestrichelt – sie
+ * ist eine Abstützung, keine begehbare Gerüstlage.
+ * @returns {{pts:Array, breite:number}|null}
+ */
+function abstuetzPoly(el, pos, bay) {
+  const m = abstuetzMasse(pos, bay);
+  if (!m.len || !m.breite) return null;
+  const a = bayAxes(el);
+  const [, , , p3] = el.pts;
+  const L = m.len * PX_PER_M, B = m.breite * PX_PER_M;
+  const q0 = { x: p3.x, y: p3.y };
+  const q1 = { x: q0.x + a.dx * L, y: q0.y + a.dy * L };
+  const q2 = { x: q1.x + a.ox * B, y: q1.y + a.oy * B };
+  const q3 = { x: q0.x + a.ox * B, y: q0.y + a.oy * B };
+  return { pts: [q0, q1, q2, q3], breite: B };
+}
+
+/**
+ * Strebendreieck der Verbreiterung „RAHMEN MIT ROHR" (Variante A) in
+ * Weltkoordinaten: der Rahmen steht quer zum Feld und ragt über dessen offene
+ * Kante hinaus, das Rohr läuft diagonal von der Feldkante zur Rahmenspitze.
+ * @returns {{rahmen:Array, rohr:Array, fuss:Array}}
+ */
+function rahmenRohrLinien(el) {
+  const a = bayAxes(el);
+  const [, , p2, p3] = el.pts;
+  const mid  = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
+  const aus  = a.tiefe * 0.6;                       // Überstand des Rahmens
+  const spitze = { x: mid.x + a.ox * aus, y: mid.y + a.oy * aus };
+  // Fußpunkt des Rohres: an der Außenkante, ein Stück vor dem Rahmen.
+  const fuss = { x: p3.x + a.dx * a.len * 0.18, y: p3.y + a.dy * a.len * 0.18 };
+  return { rahmen: [mid, spitze], rohr: [fuss, spitze], fuss: [fuss, mid] };
+}
+
+/** Wie weit ragen die Verbreiterungen eines Feldes über die offene Kante
+ *  hinaus (Welt-px)? Beschriftungen werden entsprechend weiter nach außen
+ *  gestapelt, damit sie nicht auf der Abstützung liegen. */
+function verbreiterungAusladung(el, bay) {
+  let aus = 0;
+  (bay.positions || []).forEach(pos => {
+    const p = POS_BY_KEY[pos.cat];
+    if (!p) return;
+    if (p.feld) {
+      const poly = abstuetzPoly(el, pos, bay);
+      if (poly) aus = Math.max(aus, poly.breite);
+    } else if (p.strebe) {
+      aus = Math.max(aus, bayAxes(el).tiefe * 0.6);
+    }
+  });
+  return aus;
+}
+
 /** Alle vier Eckpunkte jedes Feldes – als Offsets relativ zu (x0,y0). */
 function sectionLocalAnchors(sec) {
   const seen = new Set(), anchors = [];
@@ -1641,55 +1807,86 @@ function computeLayout() {
     }
   });
 
-  // ── Ecken zwischen verbundenen Sektionen ────────────────────────────────
-  // Früher wurde jede Sektion gegen JEDE andere geprüft (quadratischer
-  // Aufwand: bei 150 Feldern über 22 000 Vergleiche je Neuzeichnung – und
-  // neu gezeichnet wird bei jeder Mausbewegung). Jetzt liegen die
-  // Sektionsanfänge in einem groben 2-px-Raster; geprüft werden nur noch die
-  // Nachbarzellen des jeweiligen Sektionsendes. Ergebnis identisch, Aufwand
-  // linear zur Feldanzahl.
-  const cellKey  = (x, y) => Math.round(x / 2) + ',' + Math.round(y / 2);
-  const startBuckets = new Map();
+  /* ── Ecken zwischen verbundenen Sektionen ──────────────────────────────────
+     Eine Ecke entsteht, wo sich zwei Sektionen einen Punkt teilen. Das ist
+     ausdrücklich NICHT nur „Ende trifft Anfang": beim Zeichnen über die
+     Knoten-Plus laufen zwei Felder häufig von DEMSELBEN Punkt weg
+     (Anfang/Anfang) oder aufeinander zu (Ende/Ende). Genau diese beiden Fälle
+     blieben früher unerkannt – an solchen Ecken fehlte damit die komplette
+     Eckenrechnung (± Gerüsttiefe), obwohl in der Zeichnung eine Ecke steht.
+
+     Damit die Prüfung linear zur Feldanzahl bleibt, liegen alle Endpunkte in
+     einem groben 2-px-Raster; verglichen wird nur mit den Nachbarzellen.     */
+  const cellKey = (x, y) => Math.round(x / 2) + ',' + Math.round(y / 2);
+  const knoten  = new Map();          // Rasterzelle → [{ si, endet, p }]
   state.sections.forEach((s, i) => {
-    const k = cellKey(s.x0, s.y0);
-    const arr = startBuckets.get(k);
-    if (arr) arr.push(i); else startBuckets.set(k, [i]);
+    if (!s.bays.some(isBayVisible)) return;
+    const ende = sectionEnd(s);
+    [[false, { x: s.x0, y: s.y0 }], [true, ende]].forEach(([endet, p]) => {
+      const k = cellKey(p.x, p.y);
+      const arr = knoten.get(k);
+      if (arr) arr.push({ si: i, endet, p }); else knoten.set(k, [{ si: i, endet, p }]);
+    });
   });
 
-  state.sections.forEach((sec, si) => {
-    if (!sec.bays.some(isBayVisible)) return;
-    const end = sectionEnd(sec);
-    const dir = secVec(sec);
-    const out = outVec(dir, sec.flip);
-    const bx  = Math.round(end.x / 2), by = Math.round(end.y / 2);
+  const gesehen = new Set();
+  knoten.forEach((eintraege, k) => {
+    const [cx, cy] = k.split(',').map(Number);
+    // Nachbarzellen mitnehmen: ein Knoten kann durch das Runden auf der Grenze
+    // zweier Zellen liegen.
+    const partner = [];
     for (let ox = -1; ox <= 1; ox++) {
       for (let oy = -1; oy <= 1; oy++) {
-        const arr = startBuckets.get((bx + ox) + ',' + (by + oy));
-        if (!arr) continue;
-        for (const ni of arr) {
-          if (ni === si) continue;
-          const next = state.sections[ni];
-          if (!next.bays.some(isBayVisible)) continue;
-          if (Math.abs(next.x0 - end.x) >= 2 || Math.abs(next.y0 - end.y) >= 2) continue;
-          const nOut = outVec(secVec(next), next.flip);
-          const kind = eckArtGeometrisch(dir, nOut);
-          if (!kind) continue;                       // gerade Fortsetzung: keine Ecke
-          const c0 = { x: end.x, y: end.y };
-          const c1 = { x: end.x + out.dx * depth, y: end.y + out.dy * depth };
-          const c2 = { x: c1.x + nOut.dx * depth, y: c1.y + nOut.dy * depth };
-          const c3 = { x: end.x + nOut.dx * depth, y: end.y + nOut.dy * depth };
-          // `si`/`ni` = ein- und ausleitende Sektion der Ecke. Das Viereck ist
-          // bei der AUSSENECKE das Eckstück, das die Lücke zwischen beiden
-          // Gerüstbahnen schließt – bei der INNENECKE dieselbe Fläche als
-          // ÜBERLAPPUNG beider Bahnen. Grundlage für das Aufmaß, siehe
-          // eckenListe() und computeAufmass().
-          els.push({ type: 'corner', pts: [c0, c1, c2, c3], si, ni, kind });
-        }
+        const arr = knoten.get((cx + ox) + ',' + (cy + oy));
+        if (arr) partner.push(...arr);
       }
     }
+    eintraege.forEach(a => partner.forEach(b => {
+      if (a.si === b.si) return;
+      if (Math.abs(a.p.x - b.p.x) >= 2 || Math.abs(a.p.y - b.p.y) >= 2) return;
+      // Jede Ecke genau einmal: Paar + Ort als Schlüssel.
+      const paar = (a.si < b.si ? `${a.si}-${b.si}` : `${b.si}-${a.si}`) + '@'
+                 + cellKey((a.p.x + b.p.x) / 2, (a.p.y + b.p.y) / 2);
+      if (gesehen.has(paar)) return;
+
+      // Reihenfolge wie bisher: die EINLAUFENDE Sektion ist `si`, die
+      // ausleitende `ni`. Laufen beide gleich (Anfang/Anfang bzw. Ende/Ende),
+      // entscheidet der Index – festgehalten wird die Rolle in siEndet/niEndet.
+      const [ein, aus] = (a.endet && !b.endet) ? [a, b]
+                       : (!a.endet && b.endet) ? [b, a]
+                       : (a.si < b.si ? [a, b] : [b, a]);
+      const secEin = state.sections[ein.si], secAus = state.sections[aus.si];
+      const dirEin = secVec(secEin), dirAus = secVec(secAus);
+      const outEin = outVec(dirEin, secEin.flip), outAus = outVec(dirAus, secAus.flip);
+      // Anlaufrichtung = Richtung, mit der die Sektion IN den Knoten zeigt.
+      const anlauf = ein.endet ? dirEin : { dx: -dirEin.dx, dy: -dirEin.dy };
+      const kind = eckArtGeometrisch(anlauf, outAus);
+      if (!kind) return;                       // gerade Fortsetzung: keine Ecke
+      gesehen.add(paar);
+
+      const c0 = { x: ein.p.x, y: ein.p.y };
+      const c1 = { x: c0.x + outEin.dx * depth, y: c0.y + outEin.dy * depth };
+      const c2 = { x: c1.x + outAus.dx * depth, y: c1.y + outAus.dy * depth };
+      const c3 = { x: c0.x + outAus.dx * depth, y: c0.y + outAus.dy * depth };
+      // Das Viereck ist bei der AUSSENECKE das Eckstück, das die Lücke
+      // zwischen beiden Gerüstbahnen schließt – bei der INNENECKE dieselbe
+      // Fläche als ÜBERLAPPUNG beider Bahnen. Grundlage für das Aufmaß, siehe
+      // eckenListe() und computeAufmass().
+      els.push({ type: 'corner', pts: [c0, c1, c2, c3],
+                 si: ein.si, ni: aus.si,
+                 siEndet: ein.endet, niEndet: aus.endet, kind });
+    }));
   });
 
   return els;
+}
+
+/** Endet die Sektion `si` an dieser Ecke (statt dort zu beginnen)? Fehlen die
+ *  Angaben (ältere Daten), gilt die frühere Regel „si endet, ni beginnt". */
+function eckEndetHier(ecke, si) {
+  if (si === ecke.si) return ecke.siEndet !== false;
+  if (si === ecke.ni) return ecke.niEndet === true;
+  return false;
 }
 
 // ── SVG helpers ────────────────────────────────────────────────────────────
@@ -1844,6 +2041,39 @@ function renderSvg() {
     });
     g.appendChild(poly);
 
+    // ── Verbreiterungen ───────────────────────────────────────────────────
+    // Sie gehören zum Feld und werden deshalb direkt daran gezeichnet: die
+    // Modul-Abstützung gestrichelt (keine begehbare Lage), der Rahmen mit Rohr
+    // als Strebendreieck. Ein Tipp darauf öffnet dasselbe Feld-Sheet.
+    positions.forEach(pos => {
+      const meta = POS_BY_KEY[pos.cat];
+      if (!meta) return;
+      if (meta.feld) {
+        const ab = abstuetzPoly(el, pos, bayData);
+        if (!ab) return;
+        const p = svgEl('polygon', {
+          points: ptsStr(ab.pts), fill: meta.color, 'fill-opacity': 0.10,
+          stroke: meta.color, 'stroke-width': 2,
+          'stroke-dasharray': `${hs(9)},${hs(6)}`, cursor: 'pointer'
+        });
+        const t = svgEl('title', {});
+        t.textContent = `${meta.label} · ${abstuetzMassText(pos, bayData)}`;
+        p.appendChild(t);
+        p.addEventListener('click', ev => { ev.stopPropagation(); handleBayTap(el.si, el.bi); });
+        g.appendChild(p);
+      } else if (meta.strebe) {
+        const s = rahmenRohrLinien(el);
+        const line = (pts, w, dash) => svgEl('line', {
+          x1: pts[0].x, y1: pts[0].y, x2: pts[1].x, y2: pts[1].y,
+          stroke: meta.color, 'stroke-width': w, 'stroke-linecap': 'round',
+          'stroke-dasharray': dash || '', 'pointer-events': 'none'
+        });
+        g.appendChild(line(s.fuss, 1.4, `${hs(4)},${hs(3)}`));  // Feldkante zum Rahmen
+        g.appendChild(line(s.rohr, 2.2));                        // diagonales Rohr
+        g.appendChild(line(s.rahmen, 3.4));                      // Rahmen (Überstand)
+      }
+    });
+
     const labelRot = uprightDeg(el.ang);
 
     // ── Geometrie für Maß-Beschriftungen ──────────────────────────────────
@@ -1970,7 +2200,9 @@ function renderSvg() {
     if (positions.length) {
       const badgeFont = Math.max(depth * 0.22, 7);
       const lineH     = badgeFont * 1.45;
-      const startDist = depth * 0.5 + lineH * 0.85;   // knapp außerhalb der Außenkante
+      // Knapp außerhalb der Außenkante – bei einer Verbreiterung hinter DEREN
+      // Ausladung, sonst läge die Beschriftung auf der Abstützung.
+      const startDist = depth * 0.5 + verbreiterungAusladung(el, bayData) + lineH * 0.85;
       const maxBadgeW = el.len * PX_PER_M * 0.96;      // Badge nie breiter als das Feld
       positions.forEach((pos, i) => {
         const d  = startDist + i * lineH;
@@ -2099,6 +2331,52 @@ function renderSvg() {
         }
       });
     }
+  }
+
+  /* 4b. Außenecken – ebenfalls antippbar.
+     Hier entscheidet sich, ob die Gerüstlage um die Ecke HERUMLÄUFT: dann
+     bekommt das Feld an der Ecke eine Gerüsttiefe zugeschlagen. Bisher ging das
+     nur über eine gezeichnete Bordbretter-Linie – für einen einzelnen bekannten
+     Umlauf ein großer Umweg. Die Plakette zeigt „+", sobald ein Umlauf gilt. */
+  {
+    const aussen = els.filter(e => e.type === 'corner' && eckArtEffektiv(e) === 'aussen');
+    aussen.forEach(el => {
+      const secA = state.sections[el.si], secB = state.sections[el.ni];
+      if (!secA || !secB) return;
+      const key = eckKey(secA, secB);
+      const um  = [el.si, el.ni].filter(si => eckLaeuftUm(key, si));
+      const [q0, q1, q2, q3] = el.pts;
+      const cx = (q0.x + q1.x + q2.x + q3.x) / 4;
+      const cy = (q0.y + q1.y + q2.y + q3.y) / 4;
+      const R  = Math.min(hs(HANDLE_R * 0.8), depth * 0.34);
+
+      const hit = svgEl('circle', {
+        cx, cy, r: R * 1.6, fill: 'rgba(0,0,0,0.001)', style: 'cursor:pointer'
+      });
+      const tt = svgEl('title', {});
+      tt.textContent = um.length
+        ? `Außenecke: ${um.map(si => state.sections[si].name).join(' und ')} `
+          + `läuft um die Ecke (+ ${fmtQty(eckZuschlagWert())} m). Tippen zum Ändern.`
+        : 'Außenecke – tippen, wenn die Gerüstlage um die Ecke herumläuft '
+          + `(+ ${fmtQty(eckZuschlagWert())} m je Seite).`;
+      hit.appendChild(tt);
+      hit.addEventListener('click', ev => { ev.stopPropagation(); openEckSheet(key); });
+      g.appendChild(hit);
+
+      g.appendChild(svgEl('circle', {
+        cx, cy, r: R, fill: um.length ? '#1d7a4c' : 'rgba(255,255,255,0.85)',
+        stroke: um.length ? '#fff' : '#2c6fa8',
+        'stroke-width': hs(1.6), 'pointer-events': 'none'
+      }));
+      const sym = svgEl('text', {
+        x: cx, y: cy, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': R * 1.3, 'font-family': 'system-ui, sans-serif',
+        fill: um.length ? '#fff' : '#2c6fa8', 'font-weight': '800',
+        'pointer-events': 'none'
+      });
+      sym.textContent = um.length ? '+' : '⌐';
+      g.appendChild(sym);
+    });
   }
 
   // 5b. Move handles (orange ✥)
@@ -2473,10 +2751,16 @@ function beendeBordbrettZeichnen() {
   bordbrettModus  = false;
   bordbrettPunkte = [];
   invalidateEckenCache();
-  // Vorschlag: die Achse, auf der der größte Teil der Linie verläuft. Der
-  // Nutzer kann sie im Dialog jederzeit ändern.
-  const vorschlag = bordbrettAchsVorschlag(linie);
-  if (vorschlag) bordbrettZuordnen(linie, vorschlag);
+  // Vorgabe: die Linie wirkt auf ALLE Achsen, an denen sie entlangläuft – am
+  // Bau laufen die Bordbretter in einem Zug um das Gerüst. Läuft sie nur an
+  // einer Achse entlang, ist das dasselbe wie die frühere Zuordnung. Im Dialog
+  // lässt sich beides umstellen.
+  const betroffen = bordbrettBeruehrteAchsen(linie);
+  if (betroffen.length === 1) {
+    bordbrettZuordnen(linie, achsenListe()[betroffen[0]]);
+  } else if (betroffen.length > 1) {
+    bordbrettAufAlleAchsen(linie);
+  }
   renderAll();
   scheduleAutosave2d();
   updateBordbrettBar();
@@ -2518,7 +2802,8 @@ function renderBordbretter(g, hs) {
   });
 
   linien.forEach(linie => {
-    const zugeordnet = !!bordbrettAchse(linie, achsen);
+    const wirktAuf   = bordbrettAchsen(linie, achsen);
+    const zugeordnet = wirktAuf.length > 0;
     const farbe = zugeordnet ? '#0f8f8e' : '#c2691b';
 
     // Breite, unsichtbare Trefferfläche: die Linie selbst ist zu dünn zum
@@ -2528,8 +2813,9 @@ function renderBordbretter(g, hs) {
     });
     const tt = svgEl('title', {});
     tt.textContent = zugeordnet
-      ? `${bordbrettName(linie)} – zugeordnet. Tippen zum Ändern.`
-      : `${bordbrettName(linie)} – noch keiner Achse zugeordnet. Tippen zum Zuordnen.`;
+      ? `${bordbrettName(linie)} – wirkt auf ${wirktAuf.map(a => a.name).join(', ')}. `
+        + 'Tippen zum Ändern.'
+      : `${bordbrettName(linie)} – wirkt noch nicht. Tippen zum Zuordnen.`;
     hit.appendChild(tt);
     hit.addEventListener('click', ev => { ev.stopPropagation(); openBordbrettSheet(linie.id); });
     g.appendChild(hit);
@@ -2544,25 +2830,30 @@ function renderBordbretter(g, hs) {
       'pointer-events': 'none'
     }));
 
-    // Wirkung an den erkannten Ecken direkt anschreiben.
+    // Wirkung an den erkannten Ecken direkt anschreiben – je Ecke einmal.
     if (zugeordnet) {
-      bordbrettAuswertung(linie, achsen, ecken).enden.forEach(ende => {
-        if (!ende.ecke || !ende.delta) return;
-        // An Innenecken schreibt die Eck-Markierung ihr ±-Maß bereits an die
-        // beteiligten Felder – hier nicht ein zweites Mal danebenschreiben.
-        if (ende.ecke.art !== 'aussen') return;
-        const pts = ende.ecke.pts;
-        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-        const t = svgEl('text', {
-          x: cx, y: cy - hs(16), 'text-anchor': 'middle', 'dominant-baseline': 'middle',
-          'font-size': hs(13), 'font-family': 'system-ui, sans-serif',
-          fill: ende.delta < 0 ? '#b3402a' : '#1d7a4c', 'font-weight': '700',
-          stroke: '#fff', 'stroke-width': hs(3), 'paint-order': 'stroke',
-          'pointer-events': 'none'
+      const beschriftet = new Set();
+      bordbrettAuswertungen(linie, achsen, ecken).forEach(aus => {
+        aus.enden.forEach(ende => {
+          if (!ende.ecke || !ende.delta) return;
+          // An Innenecken schreibt die Eck-Markierung ihr ±-Maß bereits an die
+          // beteiligten Felder – hier nicht ein zweites Mal danebenschreiben.
+          if (ende.ecke.art !== 'aussen') return;
+          if (beschriftet.has(ende.ecke.key)) return;
+          beschriftet.add(ende.ecke.key);
+          const pts = ende.ecke.pts;
+          const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+          const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+          const t = svgEl('text', {
+            x: cx, y: cy - hs(16), 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+            'font-size': hs(13), 'font-family': 'system-ui, sans-serif',
+            fill: ende.delta < 0 ? '#b3402a' : '#1d7a4c', 'font-weight': '700',
+            stroke: '#fff', 'stroke-width': hs(3), 'paint-order': 'stroke',
+            'pointer-events': 'none'
+          });
+          t.textContent = (ende.delta < 0 ? '−' : '+') + fmtQty(Math.abs(ende.delta)) + ' m';
+          g.appendChild(t);
         });
-        t.textContent = (ende.delta < 0 ? '−' : '+') + fmtQty(Math.abs(ende.delta)) + ' m';
-        g.appendChild(t);
       });
     }
   });
@@ -3441,7 +3732,7 @@ function openEditSheet(si, bi) {
   const togglePos = key => {
     const i = bay.positions.findIndex(p => p.cat === key);
     if (i >= 0) bay.positions.splice(i, 1);
-    else bay.positions.push({ id: ++_bId, cat: key, qty: null, unit: defaultUnit(key) });
+    else bay.positions.push(mkPosition(key));
     buildPosDetails();
     requestRender();
   };
@@ -3466,8 +3757,66 @@ function openEditSheet(si, bi) {
   const posDetailWrap = document.createElement('div');
   posDetailWrap.className = 'pos-detail-list';
 
+  /* Modul-Abstützung: Eingabe wie bei einem normalen Feld – Länge, Breite und
+     Höhe. Leer gelassene Felder erben die Maße des Feldes (Platzhalter zeigt,
+     was dann gilt), damit die Abstützung sofort im Plan steht. */
+  const makeFeldPosRow = pos => {
+    const p = POS_BY_KEY[pos.cat];
+    const row = document.createElement('div');
+    row.className = 'pos-detail-row pos-feld-row';
+
+    const head = document.createElement('div');
+    head.className = 'pos-feld-head';
+    const name = document.createElement('span');
+    name.className = 'pos-detail-name';
+    name.textContent = p.label;
+    name.style.color = p.color;
+    const calc = document.createElement('span');
+    calc.className = 'pos-detail-calc';
+    const updateCalc = () => { calc.textContent = abstuetzMassText(pos, bay); };
+    head.appendChild(name); head.appendChild(calc);
+
+    const masse = document.createElement('div');
+    masse.className = 'pos-feld-masse';
+    [['Länge',  'fLen',    () => bay.len],
+     ['Breite', 'fBreite', () => state.depth],
+     ['Höhe',   'fHoehe',  () => bayHoehe(bay)]].forEach(([lbl, key, fallback]) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'height-field';
+      const lab = document.createElement('span');
+      lab.className = 'height-label';
+      lab.textContent = lbl + ' (m)';
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.className = 'height-inp';
+      inp.min = '0'; inp.step = '0.05'; inp.inputMode = 'decimal';
+      const fb = fallback();
+      inp.placeholder = fb != null ? fmtQty(fb) : '–';
+      inp.value = pos[key] == null || pos[key] === '' ? '' : pos[key];
+      inp.addEventListener('input', () => {
+        const v = parseFloat(inp.value);
+        pos[key] = (inp.value === '' || isNaN(v) || v <= 0) ? null : +v.toFixed(2);
+        updateCalc();
+        syncWarnBanner();
+        requestRender();
+      });
+      wrap.appendChild(lab); wrap.appendChild(inp);
+      masse.appendChild(wrap);
+    });
+
+    const hint = document.createElement('p');
+    hint.className = 'pdf-sheet-note';
+    hint.textContent = 'Wird gestrichelt neben dem Feld gezeichnet – sie ist eine '
+                     + 'Abstützung, keine begehbare Lage. Leere Felder übernehmen die '
+                     + 'Maße des Gerüstfeldes.';
+
+    updateCalc();
+    row.appendChild(head); row.appendChild(masse); row.appendChild(hint);
+    return row;
+  };
+
   const makePosDetailRow = pos => {
     const p = POS_BY_KEY[pos.cat];
+    if (p.feld) return makeFeldPosRow(pos);
     const row = document.createElement('div');
     row.className = 'pos-detail-row';
 
@@ -4192,6 +4541,22 @@ function openEckSheet(key) {
   zuRow.className = 'eck-choice-row';
   sheet.appendChild(zuRow);
 
+  // ── Umlauf bei Außenecke ────────────────────────────────────────────────
+  // „Läuft die Lage um die Ecke herum?" – je Seite eigenständig, weil das am
+  // Bau auch einseitig vorkommt. Nach DIN zählt die Ecke bei beiden Seiten.
+  const umLabel = document.createElement('div');
+  umLabel.className = 'sheet-section-label';
+  umLabel.textContent = 'Läuft das Gerüst um die Ecke?';
+  sheet.appendChild(umLabel);
+
+  const umHint = document.createElement('p');
+  umHint.className = 'pdf-sheet-note';
+  sheet.appendChild(umHint);
+
+  const umRow = document.createElement('div');
+  umRow.className = 'eck-choice-row';
+  sheet.appendChild(umRow);
+
   const actRow = document.createElement('div');
   actRow.className = 'sheet-actions';
   const okBtn = document.createElement('button');
@@ -4236,7 +4601,51 @@ function openEckSheet(key) {
     zuLabel.style.display = istInnen ? '' : 'none';
     zuHint.style.display  = istInnen ? '' : 'none';
     zuRow.style.display   = istInnen ? '' : 'none';
-    if (!istInnen) return;
+    umLabel.style.display = istInnen ? 'none' : '';
+    umHint.style.display  = istInnen ? 'none' : '';
+    umRow.style.display   = istInnen ? 'none' : '';
+
+    if (!istInnen) {
+      const wert = eckZuschlagWert();
+      const ausLinie = [e.si, e.ni].some(si => bordbrettDecktEcke(e.key, si));
+      umHint.textContent = 'Läuft die Gerüstlage um die Ecke herum, gehört die '
+        + `Ecklänge (${fmtQty(wert)} m) zum Feld an der Ecke. Nach DIN 18451 `
+        + 'zählt eine Außenecke bei beiden angrenzenden Seiten.'
+        + (ausLinie ? ' Für mindestens eine Seite ergibt sich das bereits aus '
+                    + 'einer gezeichneten Bordbretter-Linie.' : '');
+      umRow.replaceChildren();
+      [e.si, e.ni].forEach(si => {
+        const sec = state.sections[si];
+        if (!sec) return;
+        const an   = eckLaeuftUm(e.key, si);
+        const fest = bordbrettDecktEcke(e.key, si);
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'eck-choice';
+        b.classList.toggle('active', an);
+        const t1 = document.createElement('strong');
+        t1.textContent = `${sec.name} läuft um die Ecke`;
+        const t2 = document.createElement('span');
+        t2.className = 'eck-choice-sub';
+        t2.textContent = an
+          ? `+ ${fmtQty(wert)} m am Feld an der Ecke`
+            + (fest ? ' · aus der gezeichneten Bordbretter-Linie' : ' · antippen zum Aufheben')
+          : 'antippen, wenn die Lage hier um die Ecke geführt wird';
+        b.appendChild(t1); b.appendChild(t2);
+        b.addEventListener('click', () => {
+          // Was aus einer gezeichneten Linie folgt, wird auch dort geändert –
+          // sonst stünden zwei Quellen gegeneinander.
+          if (fest) {
+            showToast('Ergibt sich aus der gezeichneten Bordbretter-Linie – '
+                    + 'dort ändern');
+            return;
+          }
+          setEckUmlauf(e.key, sec.id, !an);
+          renderAll(); scheduleAutosave2d(); sync();
+        });
+        umRow.appendChild(b);
+      });
+      return;
+    }
 
     const bbLinie = e.bordbrettId ? bordbrettById(e.bordbrettId) : null;
     zuHint.textContent = e.quelle === 'bordbrett'
@@ -4323,13 +4732,15 @@ function openBordbrettSheet(id) {
   const note = document.createElement('p');
   note.className = 'pdf-sheet-note';
   note.textContent = 'Die Linie folgt den Bordbrettern am Rand der Gerüstlage. '
-    + 'Ordnen Sie sie einer Achse zu – die Eckenkorrektur rechnet das Programm '
-    + 'dann selbst: Innenecke − Gerüsttiefe, Außenecke + Gerüsttiefe.';
+    + 'Sie wirkt auf jede Achse, an der sie entlangläuft – die Eckenkorrektur '
+    + 'rechnet das Programm selbst: Innenecke − Gerüsttiefe, Außenecke '
+    + '+ Gerüsttiefe. Auf eine einzelne Achse lässt sie sich weiterhin '
+    + 'beschränken.';
   sheet.appendChild(note);
 
   const achsLabel = document.createElement('div');
   achsLabel.className = 'sheet-section-label';
-  achsLabel.textContent = 'Achse zuordnen';
+  achsLabel.textContent = 'Worauf wirkt die Linie?';
   sheet.appendChild(achsLabel);
 
   const achsRow = document.createElement('div');
@@ -4362,14 +4773,14 @@ function openBordbrettSheet(id) {
   actRow.appendChild(delBtn); actRow.appendChild(okBtn);
   sheet.appendChild(actRow);
 
-  /** Aufmaßlänge einer Achse, WENN die Linie ihr zugeordnet wäre. Dafür wird
-   *  die Zuordnung kurz probeweise gesetzt und danach wiederhergestellt – so
+  /** Aufmaßlänge einer Achse, WENN die Linie so eingestellt wäre. Dafür wird
+   *  die Einstellung kurz probeweise gesetzt und danach wiederhergestellt – so
    *  stimmt die angezeigte Länge garantiert mit dem PDF überein. */
-  const probe = (linie, achse) => {
-    const vorher = linie.achseSecId;
-    bordbrettZuordnen(linie, achse);
-    const a = aufmassAchsen().find(x => x.idx === achse.idx);
-    linie.achseSecId = vorher;
+  const probe = (linie, achse, idx) => {
+    const vorher = { achseSecId: linie.achseSecId, modus: linie.modus };
+    if (achse) bordbrettZuordnen(linie, achse); else bordbrettAufAlleAchsen(linie);
+    const a = aufmassAchsen().find(x => x.idx === idx);
+    linie.achseSecId = vorher.achseSecId; linie.modus = vorher.modus;
     invalidateEckenCache();
     return a ? a.m.laenge : null;
   };
@@ -4378,15 +4789,18 @@ function openBordbrettSheet(id) {
     const linie = bordbrettById(id);
     if (!linie) { closeSheet(); return; }
     const achsen  = achsenListe();
+    const modus   = bordbrettWirkung(linie);
     const aktuell = bordbrettAchse(linie, achsen);
+    const wirktAuf = bordbrettAchsen(linie, achsen);
 
     hdr.textContent = `${bordbrettName(linie)} · ${fmtQty(bordbrettLaenge(linie))} m gezeichnet`;
 
-    // ── Achsen zur Auswahl ────────────────────────────────────────────────
+    // ── Wirkungsbereich zur Auswahl ───────────────────────────────────────
     // Angeboten werden die Achsen, an denen die Linie tatsächlich entlangläuft –
     // sonst stünden bei großen Zeichnungen dutzende belangloser Achsen im
-    // Dialog.
-    const beruehrt = bordbrettBeruehrteAchsen(linie);
+    // Dialog. Vorne steht „alle": Bordbretter laufen am Bau in einem Zug um das
+    // Gerüst, und dann sollen auch alle berührten Achsen korrigiert werden.
+    const beruehrt = bordbrettBeruehrteAchsen(linie, achsen);
     if (aktuell && !beruehrt.includes(aktuell.idx)) beruehrt.unshift(aktuell.idx);
 
     achsRow.replaceChildren();
@@ -4397,40 +4811,42 @@ function openBordbrettSheet(id) {
                     + 'löschen und näher an den Feldkanten neu zeichnen.';
       achsRow.appendChild(p);
     }
-    beruehrt.forEach(i => {
-      const achse = achsen[i];
-      if (!achse) return;
+
+    const wahl = (titel, unter, aktiv, onClick) => {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'eck-choice bordbrett-achs';
-      b.classList.toggle('active', !!aktuell && aktuell.idx === achse.idx);
-      const t1 = document.createElement('strong');
-      t1.textContent = achse.name;
+      b.classList.toggle('active', aktiv);
+      const t1 = document.createElement('strong'); t1.textContent = titel;
       const t2 = document.createElement('span');
-      t2.className = 'eck-choice-sub';
-      const len = probe(linie, achse);
-      t2.textContent = `${achse.bays.length} Feld${achse.bays.length === 1 ? '' : 'er'} `
-                     + `·  Aufmaß ${len != null ? fmtQty(len) + ' m' : '–'}`;
+      t2.className = 'eck-choice-sub'; t2.textContent = unter;
       b.appendChild(t1); b.appendChild(t2);
       b.addEventListener('click', () => {
-        bordbrettZuordnen(linie, achse);
+        onClick();
         renderAll(); scheduleAutosave2d(); sync();
       });
       achsRow.appendChild(b);
+      return b;
+    };
+
+    if (beruehrt.length > 1) {
+      wahl('Alle Achsen entlang der Linie',
+           beruehrt.map(i => achsen[i] && achsen[i].name).filter(Boolean).join(', '),
+           modus === 'auto', () => bordbrettAufAlleAchsen(linie));
+    }
+    beruehrt.forEach(i => {
+      const achse = achsen[i];
+      if (!achse) return;
+      const len = probe(linie, achse, achse.idx);
+      wahl(beruehrt.length > 1 ? 'Nur ' + achse.name : achse.name,
+           `${achse.bays.length} Feld${achse.bays.length === 1 ? '' : 'er'} `
+           + `·  Aufmaß ${len != null ? fmtQty(len) + ' m' : '–'}`,
+           modus === 'achse' && !!aktuell && aktuell.idx === achse.idx,
+           () => bordbrettZuordnen(linie, achse));
     });
-    if (aktuell) {
-      const off = document.createElement('button');
-      off.type = 'button'; off.className = 'eck-choice bordbrett-achs';
-      const o1 = document.createElement('strong');
-      o1.textContent = 'Zuordnung aufheben';
-      const o2 = document.createElement('span');
-      o2.className = 'eck-choice-sub';
-      o2.textContent = 'Linie bleibt als Notiz erhalten, wirkt aber nicht aufs Aufmaß';
-      off.appendChild(o1); off.appendChild(o2);
-      off.addEventListener('click', () => {
-        bordbrettZuordnen(linie, null);
-        renderAll(); scheduleAutosave2d(); sync();
-      });
-      achsRow.appendChild(off);
+    if (modus !== 'aus') {
+      wahl('Linie wirkt nicht',
+           'Bleibt als Notiz in der Zeichnung, ändert aber kein Aufmaß',
+           false, () => bordbrettZuordnen(linie, null));
     }
 
     // ── Verlauf & Wirkung ─────────────────────────────────────────────────
@@ -4442,57 +4858,68 @@ function openBordbrettSheet(id) {
       verlauf.appendChild(d);
     };
 
-    if (!aktuell) {
-      zeile('Noch keiner Achse zugeordnet – die Linie wirkt erst danach aufs '
-          + 'Aufmaß.', 'neutral');
+    if (!wirktAuf.length) {
+      zeile('Wirkt derzeit auf keine Achse – oben eine Achse (oder „alle") '
+          + 'wählen.', 'neutral');
     } else {
-      const aus = bordbrettAuswertung(linie, achsen);
       const rollen = bordbrettEckRollen();
       const seiteTxt = { start: 'Achsanfang', ende: 'Achsende' };
-      aus.enden.forEach(e => {
-        if (!e.ecke) {
-          if (e.zustand !== 'buendig' && e.zustand !== 'unklar') {
-            zeile(`${seiteTxt[e.seite]}: hier trifft keine andere Achse an – `
-                + 'keine Eckenkorrektur.', 'neutral');
+      const gezeigt = new Set();
+      bordbrettAuswertungen(linie, achsen).forEach(aus => {
+        aus.enden.forEach(e => {
+          if (!e.ecke) {
+            if (e.zustand !== 'buendig' && e.zustand !== 'unklar') {
+              zeile(`${aus.achse.name}, ${seiteTxt[e.seite]}: hier trifft keine `
+                  + 'andere Achse an – keine Eckenkorrektur.', 'neutral');
+            }
+            return;
           }
-          return;
-        }
-        const nameSi = state.sections[e.ecke.si] ? state.sections[e.ecke.si].name : '?';
-        const nameNi = state.sections[e.ecke.ni] ? state.sections[e.ecke.ni].name : '?';
-        const artTxt = e.ecke.art === 'innen' ? 'Innenecke' : 'Außenecke';
-        if (!e.rolle) {
-          zeile(`${artTxt} ${nameSi}/${nameNi} am ${seiteTxt[e.seite]}: `
-              + (e.zustand === 'buendig'
-                 ? 'die Linie endet bündig mit der Achse – keine Korrektur.'
-                 : `die Linie endet ${fmtQty(Math.abs(e.roh))} m `
-                   + `${e.roh < 0 ? 'vor' : 'hinter'} dem Achsende und passt damit `
-                   + `nicht zur Gerüsttiefe (${fmtQty(state.depth)} m) – keine `
-                   + 'Korrektur. Bitte die Linie an der Feldkante nachziehen.'),
-            e.zustand === 'buendig' ? 'neutral' : 'warn');
-          return;
-        }
-        const konflikt = (rollen.get(e.ecke.key) || {}).konflikt;
-        const sec = state.sections[e.achsSi];
-        zeile(e.ecke.art === 'innen'
-          ? (e.rolle === 'durchlaufend'
-              ? `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} läuft durch → `
-                + `letztes Feld vor der Ecke − ${fmtQty(Math.abs(e.delta))} m`
-              : `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} füllt die Ecke `
-                + `aus → Feld an der Ecke + ${fmtQty(Math.abs(e.delta))} m`)
-          : `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} läuft um die Ecke → `
-            + `Feld an der Ecke + ${fmtQty(Math.abs(e.delta))} m`,
-          e.delta < 0 ? 'minus' : 'plus');
-        if (konflikt) {
-          zeile('An dieser Innenecke widersprechen sich zwei Bordbretter-Linien. '
-              + 'Es gilt die zuerst gezeichnete – über das Eck-Symbol in der '
-              + 'Zeichnung lässt sich die Zuordnung festlegen.', 'warn');
-        }
+          const nameSi = state.sections[e.ecke.si] ? state.sections[e.ecke.si].name : '?';
+          const nameNi = state.sections[e.ecke.ni] ? state.sections[e.ecke.ni].name : '?';
+          const artTxt = e.ecke.art === 'innen' ? 'Innenecke' : 'Außenecke';
+          if (!e.rolle) {
+            zeile(`${artTxt} ${nameSi}/${nameNi} am ${seiteTxt[e.seite]} von `
+                + `${aus.achse.name}: `
+                + (e.zustand === 'buendig'
+                   ? 'die Linie endet bündig mit der Achse – keine Korrektur.'
+                   : `die Linie endet ${fmtQty(Math.abs(e.roh))} m `
+                     + `${e.roh < 0 ? 'vor' : 'hinter'} dem Achsende und passt damit `
+                     + `nicht zur Gerüsttiefe (${fmtQty(state.depth)} m) – keine `
+                     + 'Korrektur. Bitte die Linie an der Feldkante nachziehen.'),
+              e.zustand === 'buendig' ? 'neutral' : 'warn');
+            return;
+          }
+          const rolle = rollen.get(e.ecke.key) || {};
+          const sec = state.sections[e.achsSi];
+          // An einer Innenecke, die diese Linie beidseitig streift, entscheidet
+          // weiter der Nutzer bzw. der Vorschlag – das muss der Dialog sagen,
+          // sonst stünde hier eine Wirkung, die gar nicht eintritt.
+          const innenOffen = e.ecke.art === 'innen' && rolle.durchLinieId !== linie.id;
+          const txt = e.ecke.art === 'innen'
+            ? (e.rolle === 'durchlaufend'
+                ? `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} läuft durch → `
+                  + `letztes Feld vor der Ecke − ${fmtQty(Math.abs(e.delta))} m`
+                : `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} füllt die Ecke `
+                  + `aus → Feld an der Ecke + ${fmtQty(Math.abs(e.delta))} m`)
+            : `${artTxt} ${nameSi}/${nameNi}: ${sec ? sec.name : '?'} läuft um die Ecke → `
+              + `Feld an der Ecke + ${fmtQty(Math.abs(e.delta))} m`;
+          if (gezeigt.has(txt)) return;
+          gezeigt.add(txt);
+          zeile(txt, e.delta < 0 ? 'minus' : 'plus');
+          if (innenOffen) {
+            zeile('Diese Linie läuft an beiden Achsen der Innenecke entlang – '
+                + 'welche durchläuft, ist eine Planungsentscheidung. Es gilt die '
+                + 'Festlegung am Eck-Symbol in der Zeichnung.', 'neutral');
+          }
+          if (rolle.konflikt) {
+            zeile('An dieser Innenecke widersprechen sich zwei Bordbretter-Linien. '
+                + 'Es gilt die zuerst gezeichnete – über das Eck-Symbol in der '
+                + 'Zeichnung lässt sich die Zuordnung festlegen.', 'warn');
+          }
+        });
+        const m = aufmassAchsen().find(x => x.idx === aus.achse.idx);
+        if (m) zeile(`${aus.achse.name}: ${m.rechenweg} = ${fmtQty(m.m.laenge)} m`, 'summe');
       });
-
-      const m = aufmassAchsen().find(x => x.idx === aktuell.idx);
-      if (m) {
-        zeile(`${aktuell.name}: ${m.rechenweg} = ${fmtQty(m.m.laenge)} m`, 'summe');
-      }
     }
     zeile(`Korrekturwert = Gerüsttiefe ${fmtQty(state.depth)} m`
         + (aufmassRules().innenecke.wert != null || aufmassRules().eckzuschlag.wert != null
@@ -5024,6 +5451,14 @@ function openBulkPosSheet(catKey, bays) {
     const per = posMeters(d, first) != null
       ? `je Feld z. B. ${fmtQty(posMeters(d, first))} m (${fmtQty(first.len)} m Feldlänge)`
       : (effQty(d, first) != null ? `je Feld ${qtyLabel(d, first)}` : '');
+    // Modul-Abstützung: hier zählt keine Menge, sondern die Maße. Jedes Feld
+    // bekommt zunächst die Maße SEINES Feldes; feinjustiert wird im Feld-Sheet.
+    if (POS_BY_KEY[catKey] && POS_BY_KEY[catKey].feld) {
+      preview.classList.remove('warn');
+      preview.textContent = `Maße je Feld zunächst wie das Feld selbst `
+        + `(z. B. ${abstuetzMassText(d, first)}) – im Feld-Sheet änderbar.`;
+      return;
+    }
     preview.textContent = missing
       ? `⚠ ${missing} Feld${missing === 1 ? '' : 'er'} ohne Menge – bitte Wert bzw. Lagen angeben.`
       : (mCount ? `${per}  ·  gesamt ${fmtQty(meters)} m über ${bays.length} Felder`
@@ -6040,10 +6475,16 @@ function aggregatePositions(bays) {
         ? 'Konsole ' + (pos.typ || '') + (billing === 'meter' ? ' (m)' : ' (Lagen)')
         : p.label;
       const a = agg[key] || (agg[key] = {
-        color: p.color, label, n: 0, lagen: 0, qtyByUnit: {}, meters: 0,
+        color: p.color, label, n: 0, lagen: 0, qtyByUnit: {}, meters: 0, masse: {},
         sort: POSITIONS.findIndex(x => x.key === pos.cat)
       });
       a.n++;
+      // Bauteile mit eigenen Maßen (Modul-Abstützung) werden nach Maß gezählt –
+      // „3 Stk" allein sagt bei ihnen nichts aus.
+      if (p.feld) {
+        const t = abstuetzMassText(pos, bay);
+        a.masse[t] = (a.masse[t] || 0) + 1;
+      }
       if (p.konsole) {
         if (billing === 'lagen') {
           const lg = (pos.lagen == null || pos.lagen === 'alle' || pos.lagen === '') ? 0 : (parseInt(pos.lagen, 10) || 0);
@@ -6064,11 +6505,13 @@ function aggregatePositions(bays) {
   return Object.values(agg).sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label));
 }
 
-/** Mengen-Zelle einer aggregierten Position: Lagen + Mengen je Einheit. */
+/** Mengen-Zelle einer aggregierten Position: Lagen + Mengen je Einheit. Bei
+ *  Bauteilen mit eigenen Maßen (Modul-Abstützung) stehen dort die Maße. */
 function aggQtyText(a) {
   const parts = [];
   if (a.lagen) parts.push(a.lagen === 1 ? '1 Lage' : a.lagen + ' Lagen');
   UNIT_DEFS.forEach(([u, lbl]) => { if (a.qtyByUnit[u]) parts.push(fmtQty(a.qtyByUnit[u]) + ' ' + lbl); });
+  Object.entries(a.masse || {}).forEach(([txt, n]) => parts.push(`${n}× ${txt}`));
   return parts.join(' · ') || '–';
 }
 
@@ -6399,9 +6842,13 @@ function aufmassRuleText() {
     parts.push(`Innenecke ± ${fmtQty(innenEckWert())} m `
              + '(durchlaufende Achse −, ausfüllende Achse +)');
   }
-  if (bordbretterListe().some(l => l.achseSecId != null)) {
+  if (bordbretterListe().some(l => bordbrettWirkung(l) !== 'aus')) {
     parts.push('Ecken nach dem gezeichneten Verlauf der Bordbretter '
              + `(± Gerüsttiefe ${fmtQty(state.depth)} m)`);
+  }
+  if (Object.values(state.ecken || {}).some(w => w && w.umlauf && w.umlauf.length)) {
+    parts.push('Außenecken, an denen die Lage laut Festlegung um die Ecke läuft, '
+             + `+ ${fmtQty(eckZuschlagWert())} m am Feld an der Ecke`);
   }
   return parts.join('   ·   ');
 }
@@ -6488,6 +6935,7 @@ function normalizeBordbretter() {
       id: String(l.id || ('bb' + (i + 1))),
       name: (l.name != null && String(l.name).trim()) || '',
       achseSecId: (l.achseSecId === '' || l.achseSecId == null) ? null : l.achseSecId,
+      modus: bordbrettWirkung(l),
       punkte: l.punkte
         .filter(p => p && isFinite(p.x) && isFinite(p.y))
         .map(p => ({ x: +p.x, y: +p.y }))
@@ -6500,9 +6948,26 @@ function normalizeBordbretter() {
   return state.bordbretter;
 }
 
+/* Wirkungsbereich einer Linie:
+     'auto'   – sie wirkt auf JEDE Achse, an der sie entlangläuft. Vorgabe für
+                neu gezeichnete Linien: Bordbretter laufen am Bau in einem Zug
+                um das ganze Gerüst, und dann sollen auch alle berührten Achsen
+                ihre Eckenkorrektur bekommen – vorher wirkte eine Linie nur auf
+                die eine Achse, der sie zugeordnet war.
+     'achse'  – nur auf die zugeordnete Achse (`achseSecId`).
+     'aus'    – die Linie ist nur eine Notiz und wirkt gar nicht.            */
+const BB_MODI = ['auto', 'achse', 'aus'];
+
 function mkBordbrett(punkte) {
-  return { id: 'bb' + (++_bbId), name: '', achseSecId: null,
+  return { id: 'bb' + (++_bbId), name: '', achseSecId: null, modus: 'auto',
            punkte: punkte.map(p => ({ x: p.x, y: p.y })) };
+}
+
+/** Wirkungsbereich einer Linie. Ältere Linien kennen `modus` nicht: sie wirkten
+ *  genau dann, wenn sie einer Achse zugeordnet waren – das bleibt so. */
+function bordbrettWirkung(linie) {
+  if (BB_MODI.includes(linie.modus)) return linie.modus;
+  return linie.achseSecId != null ? 'achse' : 'aus';
 }
 
 function bordbrettById(id) {
@@ -6581,14 +7046,15 @@ function bordbrettSnap(p, toleranz, els) {
   return punkt || kante || { x: p.x, y: p.y, art: 'frei', dist: Infinity };
 }
 
-/** Sektionsindex des Feldes, an dessen Kante der Punkt am nächsten liegt. */
+/** Feld, an dessen Kante der Punkt am nächsten liegt – mit Abstand.
+ *  @returns {{si:number, dist:number}|null} */
 function bordbrettSektionAn(p, bayEls) {
   let best = null;
   bayEls.forEach(el => {
     const d = abstandZuPolygonrand(p, el.pts);
-    if (!best || d < best.d) best = { d, si: el.si };
+    if (!best || d < best.dist) best = { dist: d, si: el.si };
   });
-  return best ? best.si : null;
+  return best;
 }
 
 /** Gesamtlänge der gezeichneten Linie in m. */
@@ -6607,7 +7073,9 @@ function roheEcken() {
     .map(c => {
       const a = state.sections[c.si], b = state.sections[c.ni];
       if (!a || !b) return null;
-      return { key: eckKey(a, b), si: c.si, ni: c.ni, art: eckArtEffektiv(c), pts: c.pts };
+      return { key: eckKey(a, b), si: c.si, ni: c.ni,
+               siEndet: c.siEndet, niEndet: c.niEndet,
+               art: eckArtEffektiv(c), pts: c.pts };
     })
     .filter(Boolean);
 }
@@ -6644,10 +7112,10 @@ const BB_TOL_BUENDIG = 0.30;   // Anteil der Gerüsttiefe
 const BB_TOL_ECKE    = 0.45;
 
 /**
- * Wertet eine gezeichnete Linie gegen ihre Achse aus.
+ * Wertet eine gezeichnete Linie gegen EINE Achse aus.
  *
  * Gemessen wird, WIE WEIT das Bordbrett über die rechnerischen Achsenden
- * hinaus- bzw. dahinter zurückbleibt. Dafür werden alle Linienpunkte auf die
+ * hinaus- bzw. dahinter zurückbleibt. Dafür werden die Linienpunkte auf die
  * Laufrichtung der Achse projiziert; die Über-/Unterlänge an beiden Enden
  * ergibt unmittelbar die Eckenkorrektur:
  *
@@ -6656,16 +7124,20 @@ const BB_TOL_ECKE    = 0.45;
  *   • − eine Gerüsttiefe  → an einer INNENECKE stößt die andere Bahn an
  *                           → letztes Feld vor der Ecke − Gerüsttiefe
  *
+ * Gewertet werden nur Punkte, die IN DER BAHN dieser Achse liegen (quer
+ * höchstens gut zwei Gerüsttiefen entfernt). Ohne diese Einschränkung
+ * verfälschte eine Linie, die um mehrere Wände herumläuft, ihre eigene
+ * Auswertung: die Punkte an der übernächsten Wand projizieren weit über das
+ * Achsende hinaus, und aus einer eindeutigen Ecke wurde „unklar".
+ *
  * Verglichen wird gegen die tatsächlich gezeichnete Gerüsttiefe; der ANGESETZTE
  * Wert kommt aus den Aufmaßregeln (dort standardmäßig ebenfalls die
  * Gerüsttiefe, aber überschreibbar).
  *
  * @returns {{achse, laenge:number, achsLaenge:number, enden:Array}}
  */
-function bordbrettAuswertung(linie, achsen, ecken) {
-  const liste  = achsen || achsenListe();
+function bordbrettAuswertungFuer(linie, achse, ecken) {
   const alleE  = ecken || roheEcken();
-  const achse  = bordbrettAchse(linie, liste);
   const laenge = bordbrettLaenge(linie);
   if (!achse) return { achse: null, laenge, achsLaenge: 0, enden: [] };
 
@@ -6674,11 +7146,17 @@ function bordbrettAuswertung(linie, achsen, ecken) {
     return { achse, laenge, achsLaenge: 0, enden: [] };
   }
 
-  const proj = p => (p.x - g.start.x) * g.d.dx + (p.y - g.start.y) * g.d.dy;
-  const ts   = linie.punkte.map(proj);
+  const tiefe = state.depth * PX_PER_M;
+  const proj  = p => (p.x - g.start.x) * g.d.dx + (p.y - g.start.y) * g.d.dy;
+  const quer  = p => (p.x - g.start.x) * -g.d.dy + (p.y - g.start.y) * g.d.dx;
+  const inBahn = tiefe > 0
+    ? linie.punkte.filter(p => Math.abs(quer(p)) <= tiefe * 2.2)
+    : linie.punkte;
+  if (inBahn.length < 2) return { achse, laenge, achsLaenge: +(g.laenge / PX_PER_M).toFixed(3), enden: [] };
+
+  const ts   = inBahn.map(proj);
   const tMin = Math.min(...ts), tMax = Math.max(...ts);
 
-  const tiefe   = state.depth * PX_PER_M;
   const ersteSi = achse.chain[0], letzteSi = achse.chain[achse.chain.length - 1];
 
   const zustandVon = roh => {
@@ -6689,12 +7167,18 @@ function bordbrettAuswertung(linie, achsen, ecken) {
     return 'unklar';
   };
 
-  const bauEnde = (seite, roh, ecke) => {
+  const bauEnde = (seite, roh, achsSi) => {
+    // Die Ecke an DIESEM Achsende: dort ist die Sektion dieser Achse mit genau
+    // der passenden Rolle beteiligt (am Achsende endet sie, am Achsanfang
+    // beginnt sie).
+    const endet = seite === 'ende';
+    const ecke  = alleE.find(e =>
+      (e.si === achsSi && eckEndetHier(e, achsSi) === endet) ||
+      (e.ni === achsSi && eckEndetHier(e, achsSi) === endet)) || null;
     const zustand = zustandVon(roh);
     const e = {
-      seite, roh: +(roh / PX_PER_M).toFixed(3), zustand, ecke: ecke || null,
-      // Sektion DIESER Achse an der Ecke – dort greift die Korrektur.
-      achsSi: ecke ? (ecke.si === (seite === 'ende' ? letzteSi : ersteSi) ? ecke.si : ecke.ni) : null,
+      seite, roh: +(roh / PX_PER_M).toFixed(3), zustand, ecke,
+      achsSi: ecke ? achsSi : null,
       delta: 0, rolle: null
     };
     if (!ecke || zustand === 'buendig' || zustand === 'unklar') return e;
@@ -6716,70 +7200,118 @@ function bordbrettAuswertung(linie, achsen, ecken) {
   return {
     achse, laenge, achsLaenge: +(g.laenge / PX_PER_M).toFixed(3),
     enden: [
-      bauEnde('start', -tMin, alleE.find(e => e.ni === ersteSi)),
-      bauEnde('ende', tMax - g.laenge, alleE.find(e => e.si === letzteSi))
+      bauEnde('start', -tMin, ersteSi),
+      bauEnde('ende', tMax - g.laenge, letzteSi)
     ]
   };
 }
 
-/** Achse, der die Linie zugeordnet ist (oder null). */
+/** Auswertung je Achse, auf die die Linie wirkt (siehe bordbrettAchsen). */
+function bordbrettAuswertungen(linie, achsen, ecken) {
+  const alleE = ecken || roheEcken();
+  return bordbrettAchsen(linie, achsen).map(a => bordbrettAuswertungFuer(linie, a, alleE));
+}
+
+/** Auswertung für die Leitachse – die zugeordnete bzw. die erste betroffene.
+ *  Bleibt für Anzeige und Bestandscode die „eine" Auswertung der Linie. */
+function bordbrettAuswertung(linie, achsen, ecken) {
+  const liste = bordbrettAuswertungen(linie, achsen, ecken);
+  return liste[0] || { achse: null, laenge: bordbrettLaenge(linie), achsLaenge: 0, enden: [] };
+}
+
+/** Achse, der die Linie ausdrücklich zugeordnet ist (oder null). */
 function bordbrettAchse(linie, achsen) {
   if (linie.achseSecId == null) return null;
   const liste = achsen || achsenListe();
   return liste.find(a => a.secs.some(s => String(s.id) === String(linie.achseSecId))) || null;
 }
 
-/** Vorschlag: die Achse, an der der größte Teil der Linie entlangläuft. */
-function bordbrettAchsVorschlag(linie) {
-  const achsen = achsenListe();
-  const bayEls = computeLayout().filter(e => e.type === 'bay');
-  if (!bayEls.length) return null;
+/** Alle Achsen, auf die die Linie wirkt – je nach Wirkungsbereich (siehe
+ *  BB_MODI): die eine zugeordnete, alle berührten oder keine. */
+function bordbrettAchsen(linie, achsen) {
+  const liste = achsen || achsenListe();
+  const modus = bordbrettWirkung(linie);
+  if (modus === 'aus')   return [];
+  if (modus === 'achse') { const a = bordbrettAchse(linie, liste); return a ? [a] : []; }
+  return bordbrettBeruehrteAchsen(linie, liste).map(i => liste[i]).filter(Boolean);
+}
+
+/**
+ * Wie viel Linienlänge (Welt-px) verläuft entlang welcher Achse?
+ * Die Linie wird dafür in kurze Stücke zerlegt; jedes Stück zählt zu der Achse,
+ * an deren Feldkante es liegt. Stücke, die von jedem Feld weiter weg sind als
+ * eine Gerüsttiefe, zählen zu KEINER Achse – sonst würde eine quer über den Hof
+ * gezogene Linie irgendeiner Achse zugeschlagen.
+ * @returns {Map<number, number>} Achsindex → Länge in px
+ */
+function bordbrettAchsAnteile(linie, achsen, bayEls) {
+  const liste = achsen || achsenListe();
+  const els   = bayEls || computeLayout().filter(e => e.type === 'bay');
   const proAchse = new Map();
+  if (!els.length) return proAchse;
   const pts = linie.punkte || [];
   const schritt = Math.max(state.depth * PX_PER_M * 0.4, 10);
+  const maxAbstand = Math.max(state.depth * PX_PER_M * 1.0, 25);
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i], b = pts[i + 1];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const n = Math.max(2, Math.ceil(len / schritt));
     for (let k = 0; k < n; k++) {
       const t = (k + 0.5) / n;
-      const si = bordbrettSektionAn({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, bayEls);
-      if (si == null) continue;
-      const idx = achseVonSektion(achsen, si);
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      const treffer = bordbrettSektionAn(p, els);
+      if (!treffer || treffer.dist > maxAbstand) continue;
+      const idx = achseVonSektion(liste, treffer.si);
       if (idx < 0) continue;
       proAchse.set(idx, (proAchse.get(idx) || 0) + len / n);
     }
   }
+  return proAchse;
+}
+
+/** Vorschlag: die Achse, an der der größte Teil der Linie entlangläuft. */
+function bordbrettAchsVorschlag(linie, achsen) {
+  const liste = achsen || achsenListe();
   let best = null;
-  proAchse.forEach((len, idx) => { if (!best || len > best.len) best = { idx, len }; });
-  return best ? achsen[best.idx] : null;
+  bordbrettAchsAnteile(linie, liste).forEach((len, idx) => {
+    if (!best || len > best.len) best = { idx, len };
+  });
+  return best ? liste[best.idx] : null;
 }
 
-/** Achsen, an denen die Linie entlangläuft (Indizes, in Reihenfolge). */
-function bordbrettBeruehrteAchsen(linie) {
-  const achsen = achsenListe();
-  const bayEls = computeLayout().filter(e => e.type === 'bay');
+/**
+ * Achsen, an denen die Linie tatsächlich ENTLANGLÄUFT (Indizes, in
+ * Reihenfolge). Kurzes Streifen einer Nachbarachse an der Ecke zählt nicht:
+ * verlangt wird ein spürbares Stück – anderthalb Gerüsttiefen, bei kurzen
+ * Achsen mindestens 60 % ihrer Länge.
+ */
+function bordbrettBeruehrteAchsen(linie, achsen) {
+  const liste  = achsen || achsenListe();
+  const tiefe  = state.depth * PX_PER_M;
+  const anteile = bordbrettAchsAnteile(linie, liste);
   const out = [];
-  const pts = linie.punkte || [];
-  const schritt = Math.max(state.depth * PX_PER_M * 0.4, 10);
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const a = pts[i], b = pts[i + 1];
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    const n = Math.max(2, Math.ceil(len / schritt));
-    for (let k = 0; k < n; k++) {
-      const t = (k + 0.5) / n;
-      const si = bordbrettSektionAn({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, bayEls);
-      if (si == null) continue;
-      const idx = achseVonSektion(achsen, si);
-      if (idx >= 0 && !out.includes(idx)) out.push(idx);
-    }
-  }
-  return out;
+  anteile.forEach((len, idx) => {
+    const a = liste[idx];
+    if (!a) return;
+    const achsLen = a.bays.reduce((s, b) => s + b.len, 0) * PX_PER_M;
+    if (len >= Math.min(tiefe * 1.5, achsLen * 0.6)) out.push(idx);
+  });
+  return out.sort((x, y) => x - y);
 }
 
-/** Ordnet eine Linie einer Achse zu (achse === null hebt die Zuordnung auf). */
+/** Ordnet eine Linie einer Achse zu (achse === null → die Linie wirkt nicht
+ *  mehr; für „auf allen berührten Achsen" siehe bordbrettAufAlleAchsen). */
 function bordbrettZuordnen(linie, achse) {
   linie.achseSecId = achse ? achse.secs[0].id : null;
+  linie.modus = achse ? 'achse' : 'aus';
+  invalidateEckenCache();
+  return linie;
+}
+
+/** Die Linie wirkt auf jede Achse, an der sie entlangläuft. */
+function bordbrettAufAlleAchsen(linie) {
+  linie.achseSecId = null;
+  linie.modus = 'auto';
   invalidateEckenCache();
   return linie;
 }
@@ -6812,6 +7344,7 @@ function bordbrettEckRollen() {
     let r = map.get(e.key);
     if (!r) {
       r = { key: e.key, art: e.art, si: e.si, ni: e.ni,
+            siEndet: e.siEndet, niEndet: e.niEndet,
             durchSi: null, durchLinieId: null, aussenSis: [], konflikt: false };
       map.set(e.key, r);
     }
@@ -6819,17 +7352,40 @@ function bordbrettEckRollen() {
   };
 
   bordbretterListe().forEach(linie => {
-    const a = bordbrettAchse(linie, achsen);
-    if (!a) return;
-    bordbrettAuswertung(linie, achsen, ecken).enden.forEach(ende => {
-      if (!ende.ecke || !ende.rolle) return;
-      const r = hole(ende.ecke);
-      const gegenSi = ende.achsSi === ende.ecke.si ? ende.ecke.ni : ende.ecke.si;
-      if (ende.rolle === 'umlaufend') {
-        if (!r.aussenSis.includes(ende.achsSi)) r.aussenSis.push(ende.achsSi);
-        return;
-      }
-      const durch = ende.rolle === 'durchlaufend' ? ende.achsSi : gegenSi;
+    /* Eine Linie kann mehrere Achsen betreffen (Bordbretter laufen um das
+       ganze Gerüst). An einer AUSSENECKE ist das eindeutig und addiert sich –
+       nach DIN zählt sie ohnehin bei beiden Seiten.
+
+       An einer INNENECKE dagegen sieht der gezeichnete Verlauf für BEIDE
+       angrenzenden Achsen gleich aus (die Linie schneidet die Ecke ab): jede
+       für sich gelesen hieße „ich laufe durch". Wer dort durchläuft, ist eine
+       Planungsentscheidung. Sagt dieselbe Linie es für beide Achsen, hält sie
+       sich deshalb heraus – dann gilt weiter die Wahl des Nutzers bzw. der
+       Vorschlag. Läuft die Linie nur an EINER der beiden Achsen entlang, ist
+       ihre Aussage eindeutig und wird übernommen.                          */
+    const innenStimmen = new Map();     // eckKey → Set der genannten durchSi
+    bordbrettAuswertungen(linie, achsen, ecken).forEach(aus => {
+      if (!aus.achse) return;
+      aus.enden.forEach(ende => {
+        if (!ende.ecke || !ende.rolle) return;
+        const r = hole(ende.ecke);
+        const gegenSi = ende.achsSi === ende.ecke.si ? ende.ecke.ni : ende.ecke.si;
+        if (ende.rolle === 'umlaufend') {
+          if (!r.aussenSis.includes(ende.achsSi)) r.aussenSis.push(ende.achsSi);
+          return;
+        }
+        const durch = ende.rolle === 'durchlaufend' ? ende.achsSi : gegenSi;
+        const set = innenStimmen.get(ende.ecke.key) || new Set();
+        set.add(durch);
+        innenStimmen.set(ende.ecke.key, set);
+      });
+    });
+
+    innenStimmen.forEach((set, key) => {
+      if (set.size !== 1) return;               // widersprüchlich → nicht werten
+      const durch = [...set][0];
+      const r = map.get(key);
+      if (!r) return;
       if (r.durchSi != null) { if (r.durchSi !== durch) r.konflikt = true; return; }
       r.durchSi = durch;
       r.durchLinieId = linie.id;
@@ -6843,6 +7399,32 @@ function bordbrettEckRollen() {
 function bordbrettDecktEcke(key, si) {
   const r = bordbrettEckRollen().get(key);
   return !!r && r.aussenSis.includes(si);
+}
+
+/**
+ * Läuft die Gerüstlage der Sektion `si` an dieser AUSSENECKE um die Ecke herum?
+ *
+ * Zwei Quellen, gleichwertig:
+ *   • eine gezeichnete Bordbretter-Linie, die dort herumläuft, ODER
+ *   • die Festlegung des Nutzers direkt an der Ecke (Eck-Dialog).
+ *
+ * Die zweite Quelle gibt es, weil das Zeichnen einer Linie für einen einzelnen
+ * bekannten Umlauf ein großer Umweg ist – der Zuschlag von einer Gerüsttiefe
+ * muss auch mit zwei Tipps zu setzen sein.
+ */
+function eckLaeuftUm(key, si) {
+  if (bordbrettDecktEcke(key, si)) return true;
+  const sec = state.sections[si];
+  const umlauf = eckWahl(key).umlauf;
+  return !!(sec && Array.isArray(umlauf) && umlauf.some(id => String(id) === String(sec.id)));
+}
+
+/** Umlauf einer Seite an einer Außenecke ein-/ausschalten. */
+function setEckUmlauf(key, secId, an) {
+  const cur = (eckWahl(key).umlauf || []).map(String).filter(id => id !== String(secId));
+  if (an) cur.push(String(secId));
+  setEckWahl(key, { umlauf: cur.length ? cur : null });
+  invalidateEckenCache();
 }
 
 /* ── Ecken: Erkennung + Entscheidung des Nutzers ───────────────────────────── */
@@ -6869,6 +7451,7 @@ function setEckWahl(key, patch) {
   const cur = { ...eckWahl(key), ...patch };
   if (cur.typ === 'auto' || cur.typ == null) delete cur.typ;
   if (cur.durch == null) delete cur.durch;
+  if (!cur.umlauf || !cur.umlauf.length) delete cur.umlauf;
   if (Object.keys(cur).length) state.ecken[key] = cur;
   else delete state.ecken[key];
 }
@@ -6969,6 +7552,7 @@ function eckenListeBerechnen() {
 
     return {
       key, si: c.si, ni: c.ni, pts: c.pts,
+      siEndet: c.siEndet, niEndet: c.niEndet,
       art, artAuto: c.kind,
       typBestaetigt: w.typ === 'aussen' || w.typ === 'innen',
       durchSi,
@@ -7039,20 +7623,23 @@ function eckKorrekturen() {
   if (r.innenecke.aktiv && innenWert > 0) {
     eckenListe().forEach(e => {
       if (e.art !== 'innen') return;
-      merke(eckFeldVon(e.durchSi, e.durchSi === e.si), -innenWert,
+      merke(eckFeldVon(e.durchSi, eckEndetHier(e, e.durchSi)), -innenWert,
             { key: e.key, art: 'innen', rolle: 'durchlaufend', wert: -innenWert });
-      merke(eckFeldVon(e.fuellSi, e.fuellSi === e.si), +innenWert,
+      merke(eckFeldVon(e.fuellSi, eckEndetHier(e, e.fuellSi)), +innenWert,
             { key: e.key, art: 'innen', rolle: 'ausfuellend', wert: +innenWert });
     });
   }
 
   const eckWert = eckZuschlagWert();
   if (eckWert > 0) {
-    bordbrettEckRollen().forEach(rolle => {
-      if (rolle.art !== 'aussen') return;
-      rolle.aussenSis.forEach(si => {
-        merke(eckFeldVon(si, si === rolle.si), +eckWert,
-              { key: rolle.key, art: 'aussen', rolle: 'umlaufend', wert: +eckWert });
+    // Außenecken, um die die Lage tatsächlich herumläuft – gezeichnet oder am
+    // Eck-Dialog festgelegt (siehe eckLaeuftUm).
+    eckenListe().forEach(e => {
+      if (e.art !== 'aussen') return;
+      [e.si, e.ni].forEach(si => {
+        if (!eckLaeuftUm(e.key, si)) return;
+        merke(eckFeldVon(si, eckEndetHier(e, si)), +eckWert,
+              { key: e.key, art: 'aussen', rolle: 'umlaufend', wert: +eckWert });
       });
     });
   }
@@ -7156,7 +7743,7 @@ function computeAufmass(bays) {
       [c.si, c.ni].forEach(i => {
         const sec = state.sections[i];
         if (!sec || !sec.bays.some(b => ids.has(b.id))) return;
-        if (bordbrettDecktEcke(c.key, i)) return;
+        if (eckLaeuftUm(c.key, i)) return;   // schon feldgenau erfasst
         ecken++;
       });
     });
@@ -7205,7 +7792,6 @@ function computeAufmass(bays) {
 function aufmassAchsen() {
   const korr   = eckKorrekturen();
   const ecken  = eckenListe();          // einmal ermitteln, nicht je Achse
-  const rollenBB = bordbrettEckRollen();
   const linien = bordbretterListe();
   const achsen = achsenListe();
   return achsen.map(a => {
@@ -7220,19 +7806,16 @@ function aufmassAchsen() {
     const inChain = new Set(a.chain);
     const rollen = [];
     ecken.forEach(e => {
-      if (e.art !== 'innen') return;
-      if (inChain.has(e.durchSi))      rollen.push('durchlaufend');
-      else if (inChain.has(e.fuellSi)) rollen.push('ausfüllend');
+      if (e.art === 'innen') {
+        if (inChain.has(e.durchSi))      rollen.push('durchlaufend');
+        else if (inChain.has(e.fuellSi)) rollen.push('ausfüllend');
+      } else if ([e.si, e.ni].some(si => inChain.has(si) && eckLaeuftUm(e.key, si))) {
+        rollen.push('um die Außenecke');
+      }
     });
-    rollenBB.forEach(rb => {
-      if (rb.art !== 'aussen') return;
-      if (rb.aussenSis.some(si => inChain.has(si))) rollen.push('um die Außenecke');
-    });
-    // Zugeordnete Bordbretter-Linien dieser Achse.
-    const bb = linien.filter(l => {
-      const ach = bordbrettAchse(l, achsen);
-      return ach && ach.idx === a.idx;
-    });
+    // Bordbretter-Linien, die auf diese Achse wirken.
+    const bb = linien.filter(l =>
+      bordbrettAchsen(l, achsen).some(ach => ach.idx === a.idx));
     return { ...a, m, rechenweg: teile.join(' + '), rollen,
              bordbretter: bb, hoehen: aufmassNachHoehe(a.bays, korr) };
   });
@@ -7240,8 +7823,9 @@ function aufmassAchsen() {
 
 /**
  * Aufstellung der Bordbretter-Linien für Dialog und PDF: was gezeichnet wurde,
- * welcher Achse es zugeordnet ist, welche Ecken daraus folgen und wie sich das
- * auf die Aufmaßlänge auswirkt.
+ * auf welche Achsen es wirkt, welche Ecken daraus folgen und wie sich das auf
+ * die Aufmaßlänge auswirkt. Eine Linie kann über mehrere Achsen laufen – dann
+ * steht jede mit ihrer Wirkung darin.
  */
 function bordbretterAufstellung() {
   const achsen  = achsenListe();
@@ -7249,34 +7833,41 @@ function bordbretterAufstellung() {
   const achsMass = aufmassAchsen();
   const r = aufmassRules();
   return bordbretterListe().map(linie => {
-    const aus = bordbrettAuswertung(linie, achsen, ecken);
-    const m   = aus.achse ? achsMass.find(a => a.idx === aus.achse.idx) : null;
+    const alle = bordbrettAuswertungen(linie, achsen, ecken).filter(a => a.achse);
     // Eine Innenecken-Korrektur greift nur, solange die Regel eingeschaltet
     // ist – sonst stünde im PDF eine Zahl, mit der gar nicht gerechnet wurde.
     const wirksam = e => !!e.rolle && (e.ecke.art === 'aussen' || r.innenecke.aktiv);
-    const texte = [], hinweise = [];
-    let korrektur = 0;
-    aus.enden.forEach(e => {
-      if (!e.ecke) return;
-      const art = e.ecke.art === 'innen' ? 'Innenecke' : 'Außenecke';
-      const nSi = state.sections[e.ecke.si], nNi = state.sections[e.ecke.ni];
-      const bez = `${art} ${nSi ? nSi.name : '?'}/${nNi ? nNi.name : '?'}`;
-      if (!wirksam(e)) {
-        hinweise.push(e.rolle
-          ? `${bez}: Regel abgeschaltet`
-          : `${bez}: Verlauf ohne eindeutigen Bezug – keine Korrektur`);
-        return;
-      }
-      korrektur += e.delta;
-      texte.push(`${bez} ${e.delta < 0 ? '−' : '+'} ${fmtQty(Math.abs(e.delta))} m`);
+    const texte = [], hinweise = [], namen = [];
+    let korrektur = 0, aufmass = null;
+    alle.forEach(aus => {
+      namen.push(aus.achse.name);
+      const m = achsMass.find(a => a.idx === aus.achse.idx);
+      if (m) aufmass = (aufmass || 0) + m.m.laenge;
+      aus.enden.forEach(e => {
+        if (!e.ecke) return;
+        const art = e.ecke.art === 'innen' ? 'Innenecke' : 'Außenecke';
+        const nSi = state.sections[e.ecke.si], nNi = state.sections[e.ecke.ni];
+        const bez = `${art} ${nSi ? nSi.name : '?'}/${nNi ? nNi.name : '?'}`;
+        if (!wirksam(e)) {
+          hinweise.push(e.rolle
+            ? `${bez}: Regel abgeschaltet`
+            : `${bez}: Verlauf ohne eindeutigen Bezug – keine Korrektur`);
+          return;
+        }
+        korrektur += e.delta;
+        texte.push(`${bez} ${e.delta < 0 ? '−' : '+'} ${fmtQty(Math.abs(e.delta))} m`);
+      });
     });
+    const erste = alle[0];
     return {
       linie, name: bordbrettName(linie),
-      achse: aus.achse ? aus.achse.name : null,
-      laenge: aus.laenge, achsLaenge: aus.achsLaenge,
-      ecken: texte, hinweise,
+      achse: namen.length ? namen.join(', ') : null,
+      achsen: namen,
+      laenge: bordbrettLaenge(linie),
+      achsLaenge: erste ? erste.achsLaenge : 0,
+      ecken: [...new Set(texte)], hinweise: [...new Set(hinweise)],
       korrektur: +korrektur.toFixed(2),
-      aufmass: m ? m.m.laenge : null
+      aufmass: aufmass != null ? +aufmass.toFixed(2) : null
     };
   });
 }
@@ -7294,8 +7885,20 @@ function bordbretterAufstellung() {
 
 // Papier & Maßstab
 const PDF_MARGIN       = 12;     // mm Seitenrand
-const PDF_MM_PER_M_MIN = 11;     // mind. 11 mm je Meter (≈ 1:91) – Baustellen-lesbar
 const PDF_MM_PER_M_MAX = 45;     // höchstens 45 mm je Meter (≈ 1:22)
+
+/* Maßstabsstufen für die Blatteinteilung, von „gewünscht" nach „gerade noch
+   zumutbar". Ein zusätzliches Blatt kostet beim Lesen mehr als ein etwas
+   kleinerer Maßstab: verkleinert wird deshalb stufenweise – aber nur so weit,
+   wie es tatsächlich ein Blatt spart (siehe pdfPlanPages).
+
+   Die Schriftgrößen sind in Punkt festgelegt und schrumpfen NICHT mit; die
+   Felder rücken lediglich enger zusammen. Bei 8 mm je Meter (≈ 1:125) ist ein
+   2,57-m-Feld noch 21 mm lang – genug für Maß, Feldname und die Bauteil-Badges,
+   ohne dass die Beschriftung ins Nachbarfeld läuft. Weiter herunter zu gehen
+   spart in der Praxis kaum noch Blätter, drängt die Beschriftungen aber
+   spürbar zusammen.                                                          */
+const PDF_MM_PER_M_STEPS = [11, 9, 8];
 
 // Höhe der wiederkehrenden Seitenelemente (mm)
 const PDF_HEADER_H = 17;   // Kopfzeile mit Projekt/Blattangabe
@@ -7440,6 +8043,20 @@ function pdfFitFont(doc, str, maxMM, pref, min) {
   const w = doc.getTextWidth(str);
   const fs = w <= maxMM ? pref : Math.max(min, pref * maxMM / w);
   doc.setFontSize(fs);
+  return fs;
+}
+
+/** Wie pdfFitFont, aber für eine PILLE: gemessen wird die Pille samt Rand
+ *  (siehe pdfPill), nicht nur der Text. Ohne das ragte jede Pille um ihren
+ *  Innenrand über das Feld hinaus und berührte die Pille des Nachbarfeldes. */
+function pdfFitPill(doc, str, maxMM, pref, min) {
+  let fs = pdfFitFont(doc, str, maxMM, pref, min);
+  const pillW = () => doc.getTextWidth(str) + fs * 0.352778 * 0.8;
+  const w = pillW();
+  if (w > maxMM && fs > min) {
+    fs = Math.max(min, fs * maxMM / w);
+    doc.setFontSize(fs);
+  }
   return fs;
 }
 
@@ -7797,6 +8414,38 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     pdfPoly(doc, el.pts.map(P), 'FD');
   });
 
+  // 3a. Verbreiterungen: Modul-Abstützungen gestrichelt (keine begehbare Lage),
+  //     „Rahmen mit Rohr" als Strebendreieck. Sie gehören in den Plan, weil sie
+  //     die Konstruktion verändern – nicht nur eine Menge in der Tabelle sind.
+  bayEls.forEach(el => {
+    const bay = state.sections[el.si].bays[el.bi];
+    (bay.positions || []).forEach(pos => {
+      const meta = POS_BY_KEY[pos.cat];
+      if (!meta) return;
+      const col = pdfCol(theme, pdfHex(meta.color));
+      if (meta.feld) {
+        const ab = abstuetzPoly(el, pos, bay);
+        if (!ab) return;
+        doc.setDrawColor(...col); doc.setLineWidth(0.45);
+        if (doc.setLineDashPattern) doc.setLineDashPattern([1.4, 1.0], 0);
+        drawClipped(ab.pts, 'D');
+        if (doc.setLineDashPattern) doc.setLineDashPattern([], 0);
+      } else if (meta.strebe) {
+        const s = rahmenRohrLinien(el);
+        doc.setDrawColor(...col);
+        const seg = (pts, w) => {
+          const c = clipSeg(pts[0].x, pts[0].y, pts[1].x, pts[1].y);
+          if (!c) return;
+          doc.setLineWidth(w);
+          const a = XY(c[0], c[1]), b = XY(c[2], c[3]);
+          doc.line(a.x, a.y, b.x, b.y);
+        };
+        seg(s.rohr, 0.5);
+        seg(s.rahmen, 0.8);
+      }
+    });
+  });
+
   // 3b. Bordbretter-Linien: der gezeichnete Verlauf der Lagenkante. Er gehört
   //     in den Plan, weil die Eckenkorrektur im Aufmaß genau daraus abgeleitet
   //     ist – ohne ihn stünde im Dokument eine Zahl ohne Beleg.
@@ -7902,7 +8551,7 @@ function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
     const lblBg = absch ? pdfCol(theme, pdfHex(absch.color)) : theme.accent;
     const label = bayLabel(state.sections[el.si], el.bi);
     doc.setFont('helvetica', 'bold');
-    const lblFs = pdfFitFont(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
+    const lblFs = pdfFitPill(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
     const lblFsMM = lblFs * 0.352778;
     const lblD  = depthMM / 2 + lblFsMM;
     const lblCx = c.x - ox * lblD, lblCy = c.y - oy * lblD;
@@ -7915,29 +8564,52 @@ function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
     const lines = [];
     const hL = bay.hL != null ? bay.hL.toFixed(2).replace('.', ',') : null;
     const hR = bay.hR != null ? bay.hR.toFixed(2).replace('.', ',') : null;
+    const hStil = {
+      fill: pdfCol(theme, [240, 249, 243]), stroke: pdfCol(theme, [31, 122, 61]),
+      col: pdfCol(theme, [22, 92, 45]), fs: PDF_FS_H
+    };
     if (hL || hR) {
-      lines.push({
-        text: hL && hR ? (hL === hR ? 'h ' + hL : hL + ' | ' + hR) : 'h ' + (hL || hR),
-        fill: pdfCol(theme, [240, 249, 243]), stroke: pdfCol(theme, [31, 122, 61]),
-        col: pdfCol(theme, [22, 92, 45]), fs: PDF_FS_H
-      });
+      const beide = hL && hR && hL !== hR;
+      const zusammen = beide ? hL + ' | ' + hR : 'h ' + (hL || hR);
+      // Zwei verschiedene Höhen ergeben eine lange Pille. Passt sie nicht in
+      // die Feldbreite, werden zwei kurze daraus („L …" / „R …") – lieber
+      // übereinander als in das Nachbarfeld hinein.
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(PDF_FS_H);
+      const passt = doc.getTextWidth(zusammen) + PDF_FS_H * 0.352778 * 0.8 <= maxTxt;
+      if (beide && !passt) {
+        lines.push({ text: 'L ' + hL, ...hStil });
+        lines.push({ text: 'R ' + hR, ...hStil });
+      } else {
+        lines.push({ text: zusammen, ...hStil });
+      }
     }
     (bay.positions || []).forEach(pos => {
       const meta = POS_BY_KEY[pos.cat];
       const col  = pdfCol(theme, pdfHex((meta && meta.color) || '#333333'));
-      lines.push({ text: posBadge(pos, bay), fill: [255, 255, 255], stroke: col, col, fs: PDF_FS_BADGE });
+      lines.push({ text: posBadge(pos, bay), kurz: posBadgeKurz(pos),
+                   fill: [255, 255, 255], stroke: col, col, fs: PDF_FS_BADGE });
     });
 
-    let dist = depthMM / 2;
+    // Bei einer Verbreiterung beginnt der Stapel hinter deren Ausladung – sonst
+    // läge die Beschriftung auf der gezeichneten Abstützung.
+    let dist = depthMM / 2 + verbreiterungAusladung(el, bay) * s;
     lines.forEach(ln => {
       doc.setFont('helvetica', 'bold');
-      const fs = pdfFitFont(doc, ln.text, maxTxt, ln.fs, 5.5);
+      // Passt die Beschriftung selbst in der kleinsten Schrift nicht in die
+      // Feldbreite, wird auf die Kurzform ausgewichen – die Menge steht in den
+      // Aufmaß-Tabellen, ein in das Nachbarfeld ragender Badge nirgends.
+      let text = ln.text;
+      if (ln.kurz && ln.kurz !== text) {
+        doc.setFontSize(5.5);
+        if (doc.getTextWidth(text) + 5.5 * 0.352778 * 0.8 > maxTxt) text = ln.kurz;
+      }
+      const fs = pdfFitPill(doc, text, maxTxt, ln.fs, 5.5);
       const fsMM = fs * 0.352778;
       const h  = fsMM * 1.5;
       dist += h * 0.62;
       const cx = c.x + ox * dist, cy = c.y + oy * dist;
-      out.push({ text: ln.text, cx, cy, rot, fs, fill: ln.fill, stroke: ln.stroke, col: ln.col,
-                 rect: mkRect(cx, cy, doc.getTextWidth(ln.text) + fsMM * 0.8, h, rot) });
+      out.push({ text, cx, cy, rot, fs, fill: ln.fill, stroke: ln.stroke, col: ln.col,
+                 rect: mkRect(cx, cy, doc.getTextWidth(text) + fsMM * 0.8, h, rot) });
       dist += h * 0.48;
     });
   });
@@ -7980,22 +8652,117 @@ function pdfDrawLocator(doc, bounds, win, box, theme, caption) {
 }
 
 /**
+ * Teilt die Felder auf Blätter auf – in der Reihenfolge, in der ein Betrachter
+ * den Plan liest: REIHENWEISE VON OBEN NACH UNTEN, innerhalb einer Reihe VON
+ * LINKS NACH RECHTS.
+ *
+ * Ablauf:
+ *  1. REIHE (Band) bilden: das oberste noch freie Feld gibt die Oberkante vor;
+ *     die Reihe nimmt alles mit, was bei Blatthöhe vollständig darunter passt.
+ *  2. Innerhalb der Reihe von links nach rechts Blätter füllen: das am
+ *     weitesten links stehende freie Feld gibt die linke Blattkante vor, das
+ *     Blatt nimmt alles mit, was bei Blattbreite vollständig hineinpasst.
+ *  3. ZUSAMMENLEGEN: solange zwei Blätter zusammen noch auf EIN Blatt passen,
+ *     werden sie verschmolzen. Das räumt die typischen Reste ab (etwa ein
+ *     einzelnes Feld, das durch die Reihenbildung allein übrig blieb).
+ *
+ * Damit landen so viele Felder wie möglich auf einem Blatt, und die Aufteilung
+ * bleibt nachvollziehbar: Blatt 2 steht rechts neben Blatt 1, nicht irgendwo.
+ *
+ * @param {Array<{el:Object,b:Object}>} boxes  Felder mit ihrer Hüllbox
+ * @returns {Array<{reihe:number, els:Array, b:Object}>}
+ */
+function pdfPlanGroups(boxes, useW, useH) {
+  const huelle = list => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    list.forEach(o => {
+      minX = Math.min(minX, o.b.minX); maxX = Math.max(maxX, o.b.maxX);
+      minY = Math.min(minY, o.b.minY); maxY = Math.max(maxY, o.b.maxY);
+    });
+    return { minX, minY, maxX, maxY };
+  };
+
+  const offen = boxes.slice().sort((a, b) => (a.b.minY - b.b.minY) || (a.b.minX - b.b.minX));
+  const gruppen = [];
+  let reihe = 0;
+  while (offen.length) {
+    // ── 1. Reihe von oben ──────────────────────────────────────────────────
+    const oben = offen[0].b.minY;
+    const inReihe = [], darunter = [];
+    offen.forEach((o, i) =>
+      (i === 0 || o.b.maxY <= oben + useH ? inReihe : darunter).push(o));
+    offen.length = 0; offen.push(...darunter);
+
+    // ── 2. Reihe von links nach rechts auf Blätter verteilen ───────────────
+    inReihe.sort((a, b) => (a.b.minX - b.b.minX) || (a.b.minY - b.b.minY));
+    while (inReihe.length) {
+      const links = inReihe[0].b.minX;
+      const aufsBlatt = [], rest = [];
+      inReihe.forEach((o, i) =>
+        (i === 0 || o.b.maxX <= links + useW ? aufsBlatt : rest).push(o));
+      gruppen.push({ reihe, els: aufsBlatt, b: huelle(aufsBlatt) });
+      inReihe.length = 0; inReihe.push(...rest);
+    }
+    reihe++;
+  }
+
+  // ── 3. Zusammenlegen, was gemeinsam auf ein Blatt passt ──────────────────
+  for (let wieder = true; wieder;) {
+    wieder = false;
+    for (let i = 0; i < gruppen.length && !wieder; i++) {
+      for (let j = i + 1; j < gruppen.length; j++) {
+        const a = gruppen[i].b, b = gruppen[j].b;
+        const v = { minX: Math.min(a.minX, b.minX), minY: Math.min(a.minY, b.minY),
+                    maxX: Math.max(a.maxX, b.maxX), maxY: Math.max(a.maxY, b.maxY) };
+        if (v.maxX - v.minX > useW || v.maxY - v.minY > useH) continue;
+        gruppen[i] = { reihe: Math.min(gruppen[i].reihe, gruppen[j].reihe),
+                       els: gruppen[i].els.concat(gruppen[j].els), b: v };
+        gruppen.splice(j, 1);
+        wieder = true;
+        break;
+      }
+    }
+  }
+
+  // Leserichtung wiederherstellen: Reihe für Reihe von links nach rechts.
+  gruppen.sort((a, b) => (a.reihe - b.reihe) || (a.b.minX - b.b.minX) || (a.b.minY - b.b.minY));
+  return gruppen;
+}
+
+/** Kurzbeschreibung der Felder eines Blattes für die Kopfzeile, z. B.
+ *  „Felder A1 – A9". Aufgezählt wird in Leserichtung (links → rechts), damit
+ *  die Angabe zur Anordnung auf dem Blatt passt. */
+function pdfBlattFelder(els) {
+  const namen = els
+    .map(el => ({ el, b: elBBox(el) }))
+    .sort((a, b) => (a.b.minX - b.b.minX) || (a.b.minY - b.b.minY))
+    .map(o => bayLabel(state.sections[o.el.si], o.el.bi));
+  if (!namen.length) return 'keine Felder';
+  if (namen.length === 1) return 'Feld ' + namen[0];
+  if (namen.length === 2) return `Felder ${namen[0]}, ${namen[1]}`;
+  return `Felder ${namen[0]} – ${namen[namen.length - 1]}`;
+}
+
+/**
  * Ermittelt die Papierseiten-Aufteilung des Plans.
  *
  * Grundsätze der Aufteilung:
+ *  • So WENIGE Blätter wie möglich. Ein Gerüst, das bei noch zumutbarem
+ *    Maßstab auf ein Blatt passt, bekommt genau ein Blatt – ein zweites Blatt
+ *    wiegt beim Lesen schwerer als ein etwas kleinerer Maßstab. Deshalb wird
+ *    der Maßstab stufenweise verkleinert (siehe PDF_MM_PER_M_STEPS) und nur so
+ *    weit, wie es tatsächlich Blätter spart.
+ *  • Aufgeteilt wird in LESERICHTUNG: reihenweise von oben nach unten, in der
+ *    Reihe von links nach rechts (siehe pdfPlanGroups) – nicht Feld für Feld
+ *    nach Nähe, wie es die frühere Fassung tat.
  *  • EIN gemeinsamer Maßstab für alle Planseiten – nur so lassen sich die
  *    Blätter nebeneinanderlegen und Längen von Blatt zu Blatt vergleichen.
- *  • ALLE Ausschnitte sind gleich groß und liegen auf einem festen Raster.
- *    Blatt 2 schließt damit exakt an Blatt 1 an (früher war jeder Ausschnitt
- *    die Hüllbox seiner Felder – die Blätter passten nicht zusammen).
- *  • Zugeordnet wird über den Feldmittelpunkt, und jeder Ausschnitt ist um die
- *    größte Feldausdehnung größer als sein Rasterfeld. Dadurch liegt jedes
- *    Feld vollständig auf genau einem Blatt – nie angeschnitten.
+ *  • ALLE Ausschnitte sind gleich groß; jedes Feld liegt vollständig auf genau
+ *    einem Blatt – nie angeschnitten.
  *  • Zusätzlich wird notiert, welche FREMDEN Felder in den Ausschnitt ragen;
  *    die zeichnet pdfDrawPlan blass als Anschluss-Kontext (Blattschnitt).
  *
- * @returns {{pages:Array, bounds:Object|null, scale:number, tiled:boolean,
- *            cols:number, rows:number}}
+ * @returns {{pages:Array, bounds:Object|null, scale:number, tiled:boolean}}
  */
 function pdfPlanPages(layout, availW, availH) {
   const bayEls = layout.filter(e => e.type === 'bay');
@@ -8010,95 +8777,70 @@ function pdfPlanPages(layout, availW, availH) {
     w: bounds.w + pad * 2,   h: bounds.h + pad * 2
   };
 
-  const sMin = PDF_MM_PER_M_MIN / PX_PER_M;
-  const sMax = PDF_MM_PER_M_MAX / PX_PER_M;
-  const sFit = Math.min(availW / full.w, availH / full.h);
+  const sMax  = PDF_MM_PER_M_MAX / PX_PER_M;
+  const stufen = PDF_MM_PER_M_STEPS.map(mm => mm / PX_PER_M);
+  const sKlein = stufen[stufen.length - 1];
+  const sFit  = Math.min(availW / full.w, availH / full.h);
 
-  // Passt alles bei lesbarem Maßstab auf eine Seite → genau eine Planseite.
-  if (sFit >= sMin) {
-    return { pages: [{ win: full, els: bayEls, ghosts: [], col: 0, row: 0 }],
+  // Passt alles auf EIN Blatt – notfalls in der kleinsten Maßstabsstufe?
+  // Dann genau eine Planseite. Ein einziges Blatt ist der übersichtlichste
+  // Plan, den es gibt; der Maßstab wird dafür bewusst kleiner genommen.
+  if (sFit >= sKlein) {
+    return { pages: [{ win: full, cbox: full, els: bayEls, ghosts: [] }],
              bounds: full, scale: Math.min(sFit, sMax), tiled: false, cols: 1, rows: 1 };
   }
 
-  const boxes = bayEls.map(el => {
-    const b = elBBox(el);
-    return { el, b };
+  const boxes = bayEls.map(el => ({ el, b: elBBox(el) }));
+
+  /* Für jede Maßstabsstufe die Aufteilung ermitteln und die mit den WENIGSTEN
+     Blättern nehmen. Bei Gleichstand gewinnt die erste (größte) Stufe – kleiner
+     wird der Maßstab also nur, wo er wirklich ein Blatt spart. */
+  let best = null;
+  stufen.forEach(s0 => {
+    // Nutzbarer Bereich OHNE den Rand, der rings um den Inhalt frei bleiben
+    // soll. Ohne diesen Abzug ragte der Plan um bis zu zwei Randbreiten in die
+    // Fußzeile.
+    const w0 = availW / s0, h0 = availH / s0;
+    const useW = Math.max(w0 - 2 * pad, w0 * 0.5);
+    const useH = Math.max(h0 - 2 * pad, h0 * 0.5);
+    const gruppen = pdfPlanGroups(boxes, useW, useH);
+    if (!best || gruppen.length < best.gruppen.length) best = { gruppen, s0 };
   });
-
-  /* Blätter greedy in Leserichtung füllen (oben-links zuerst).
-     Ein starres Raster über die Gesamtausdehnung zu legen wäre einfacher,
-     verschwendet bei ring- oder U-förmigen Gerüsten aber massiv Papier: die
-     Mitte ist leer, trotzdem entstünde für jede Rasterzelle ein Blatt. Beim
-     greedy Füllen wandert stattdessen ein Blattfenster über die tatsächlich
-     belegten Bereiche und nimmt jeweils alles mit, was VOLLSTÄNDIG hineinpasst
-     – dadurch bleibt garantiert kein Feld angeschnitten, und leere Bereiche
-     kosten keine Seite. */
-  const w0 = availW / sMin, h0 = availH / sMin;    // Fenster bei Mindestmaßstab
-  // Nutzbarer Bereich OHNE den Rand, der rings um den Inhalt frei bleiben soll.
-  // Nur so passt später Inhalt + Rand garantiert auf das Blatt; ohne diesen
-  // Abzug ragte der Plan um bis zu zwei Randbreiten in die Fußzeile.
-  const useW = Math.max(w0 - 2 * pad, w0 * 0.5);
-  const useH = Math.max(h0 - 2 * pad, h0 * 0.5);
-
-  const order = boxes.slice().sort((a, b) =>
-    (a.b.minY - b.b.minY) || (a.b.minX - b.b.minX));
-
-  const taken  = new Set();
-  const groups = [];
-  for (const start of order) {
-    if (taken.has(start.el)) continue;
-    const wx = start.b.minX, wy = start.b.minY;
-    const els = [];
-    for (const o of order) {
-      if (taken.has(o.el)) continue;
-      if (o.b.minX >= wx && o.b.maxX <= wx + useW &&
-          o.b.minY >= wy && o.b.maxY <= wy + useH) { els.push(o); taken.add(o.el); }
-    }
-    groups.push(els);
-  }
 
   // Gemeinsamer Maßstab für ALLE Blätter: so groß wie möglich, aber so, dass
   // der Inhalt jedes Blattes noch vollständig passt. Ein einheitlicher Maßstab
   // ist Voraussetzung dafür, dass sich Längen von Blatt zu Blatt vergleichen
   // lassen.
+  const gruppen = best.gruppen;
   let maxW = 0, maxH = 0;
-  const bbox = g => {
-    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-    g.forEach(o => {
-      mnX = Math.min(mnX, o.b.minX); mxX = Math.max(mxX, o.b.maxX);
-      mnY = Math.min(mnY, o.b.minY); mxY = Math.max(mxY, o.b.maxY);
-    });
-    return { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY,
-             cx: (mnX + mxX) / 2, cy: (mnY + mxY) / 2 };
-  };
-  const bbs = groups.map(bbox);
-  bbs.forEach(b => {
-    maxW = Math.max(maxW, b.maxX - b.minX + 2 * pad);
-    maxH = Math.max(maxH, b.maxY - b.minY + 2 * pad);
+  gruppen.forEach(g => {
+    maxW = Math.max(maxW, g.b.maxX - g.b.minX + 2 * pad);
+    maxH = Math.max(maxH, g.b.maxY - g.b.minY + 2 * pad);
   });
   const scale = Math.min(sMax,
-    Math.max(sMin, Math.min(availW / Math.max(maxW, 1), availH / Math.max(maxH, 1))));
+    Math.max(best.s0, Math.min(availW / Math.max(maxW, 1), availH / Math.max(maxH, 1))));
   const winW = availW / scale;
   const winH = availH / scale;
 
-  const pages = groups.map((g, i) => {
-    const b   = bbs[i];
-    const win = { minX: b.cx - winW / 2, minY: b.cy - winH / 2, w: winW, h: winH };
+  const pages = gruppen.map(g => {
+    const cx = (g.b.minX + g.b.maxX) / 2, cy = (g.b.minY + g.b.maxY) / 2;
+    const win = { minX: cx - winW / 2, minY: cy - winH / 2, w: winW, h: winH };
     // Hüllbox des tatsächlichen Blattinhalts – die Blattübersicht setzt ihre
     // Blattnummer dorthin, wo auch wirklich etwas steht.
-    const cbox = { minX: b.minX - pad, minY: b.minY - pad,
-                   w: (b.maxX - b.minX) + 2 * pad, h: (b.maxY - b.minY) + 2 * pad };
-    const own = new Set(g.map(o => o.el));
+    const cbox = { minX: g.b.minX - pad, minY: g.b.minY - pad,
+                   w: (g.b.maxX - g.b.minX) + 2 * pad, h: (g.b.maxY - g.b.minY) + 2 * pad };
+    const own = new Set(g.els.map(o => o.el));
     // Anschluss-Felder: liegen sichtbar im Ausschnitt, gehören aber zu einem
     // anderen Blatt – sie werden blass als Kontext gezeichnet.
     const ghosts = boxes.filter(o =>
       !own.has(o.el) &&
       o.b.maxX > win.minX && o.b.minX < win.minX + win.w &&
       o.b.maxY > win.minY && o.b.minY < win.minY + win.h).map(o => o.el);
-    return { win, cbox, els: g.map(o => o.el), ghosts };
+    return { win, cbox, els: g.els.map(o => o.el), ghosts, reihe: g.reihe };
   });
 
-  return { pages, bounds: full, scale, tiled: true };
+  return { pages, bounds: full, scale, tiled: true,
+           reihen: pages.reduce((n, p) => Math.max(n, p.reihe + 1), 0) };
 }
 
 let pdfBusy    = false;
@@ -8580,7 +9322,9 @@ async function buildPdfDocument(themeName) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
       const oCaption = doc.splitTextToSize(
         `${plan.pages.length} Planblätter   ·   ${scaleTxt} auf allen Blättern   ·   `
-        + `gestrichelt: Blattgrenzen   ·   Anschlussfelder der Nachbarblätter sind auf den `
+        + `Aufteilung von links nach rechts`
+        + (plan.reihen > 1 ? ', Reihe für Reihe von oben nach unten' : '')
+        + `   ·   gestrichelt: Blattgrenzen   ·   Anschlussfelder der Nachbarblätter sind auf den `
         + `Planblättern blassgrau dargestellt`, availW);
       const legendH = 3 + oCaption.length * 3.4;
       const oArea = { x: margin, y: oTop + 2, w: availW,
@@ -8627,8 +9371,11 @@ async function buildPdfDocument(themeName) {
     }
 
     plan.pages.forEach((pg, i) => {
+      // Auf dem Blatt steht, WELCHE Felder es zeigt – erst damit ist die
+      // Aufteilung nachvollziehbar und ein Blatt am Bau wiederfindbar.
       const sheet = plan.tiled
-        ? `Planblatt B${i + 1} von ${plan.pages.length}   ·   ${scaleTxt}`
+        ? `Planblatt B${i + 1} von ${plan.pages.length}   ·   ${pdfBlattFelder(pg.els)}`
+          + `   ·   ${scaleTxt}`
         : scaleTxt;
       let top = startPage({ kicker: 'Grundriss', sheet });
       top = pdfDrawLegend(ctx, top, legend);

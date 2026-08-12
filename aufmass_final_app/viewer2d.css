@@ -2298,3 +2298,38 @@ select,
   min-width: 6rem;
   accent-color: #2c6fa8;
 }
+
+/* ── Modul-Abstützung: Eingabe wie bei einem Feld (Länge/Breite/Höhe) ────────
+   Sie steht als eigener Block in der Positionsliste, weil sie – anders als die
+   übrigen Zusatzbauteile – keine Menge hat, sondern Maße. */
+.pos-feld-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.pos-feld-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+}
+.pos-feld-head .pos-detail-calc {
+  margin-left: auto;
+  color: #5b3ba8;
+}
+.pos-feld-masse {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  width: 100%;
+}
+.pos-feld-masse .height-label { color: #5b3ba8; }
+.pos-feld-masse .height-inp {
+  font-size: 1.05rem;
+  border-color: #ddd3f2;
+  background: #f8f5ff;
+  color: #2c1c52;
+}
+.pos-feld-masse .height-inp:focus { border-color: #7a4bd1; background: #fff; }
+.pos-feld-masse .height-inp::placeholder { color: #a99bc6; }
+.pos-feld-row .pdf-sheet-note { margin: 0; }
