@@ -60,6 +60,32 @@ node tests/r5-bordbretter.mjs      # Bordbretter-Linie zeichnen (Snapping an Fel
                                    # Aufmaß je Gerüsthöhe getrennt zusammengefasst
 ```
 
+Runde 6:
+
+```bash
+node tests/r6-blaetter-verbreiterung.mjs   # Blatteinteilung (so wenige Blätter wie möglich,
+                                           # links → rechts), Verbreiterungen (Rahmen mit Rohr,
+                                           # Modul-Abstützung), Ecken an gemeinsamen Feldanfängen,
+                                           # Bordbretter-Linie über mehrere Achsen
+```
+
+`r6` deckt drei Punkte ab:
+
+* **Blatteinteilung** – der Plan wird auf möglichst wenige Blätter verteilt und
+  in Leserichtung aufgeteilt (Reihe für Reihe von oben nach unten, in der Reihe
+  von links nach rechts). Ein Ring aus 40 Feldern kommt damit auf 2 statt 6
+  Blätter; was auf ein Blatt passt, bleibt auf einem. Der Maßstab wird dafür
+  stufenweise verkleinert (11 → 9 → 8 mm je Meter), aber nur so weit, wie es
+  ein Blatt spart – und die Beschriftungen dürfen sich dabei nicht überlagern.
+* **Verbreiterungen** – „Rahmen mit Rohr" (Strebendreieck an der offenen
+  Feldseite) und „Modul-Abstützung" (gestricheltes Zusatzfeld mit eigener
+  Länge/Breite/Höhe, leere Eingaben erben die Maße des Feldes).
+* **Ecken/Bordbretter** – eine Ecke wird auch dort erkannt, wo zwei Felder am
+  SELBEN Punkt beginnen oder enden (vorher fehlte dort die ±-Gerüsttiefe
+  komplett); eine Bordbretter-Linie wirkt auf alle Achsen, an denen sie
+  entlangläuft; ein Umlauf an einer Außenecke lässt sich direkt an der Ecke
+  festlegen (+ Gerüsttiefe je Seite), ohne eine Linie zu zeichnen.
+
 `r5` prüft das Testbeispiel bei 0,73 m Gerüsttiefe: eine Achse, deren
 Bordbretter-Linie durch eine Innenecke läuft, verliert am letzten Feld vor der
 Ecke 0,73 m (2,57 + 2,57 + (2,57 − 0,73) = 6,98 m); eine Achse, deren Linie um

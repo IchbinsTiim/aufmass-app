@@ -300,11 +300,14 @@ const persist = await page.evaluate(() => {
   normalizeState(); invalidateEckenCache();
   renderAll(); flushRender();
   return { anzahl: state.bordbretter.length,
-           achse: bordbrettAchse(state.bordbretter[0]).name,
+           wirkung: bordbrettWirkung(state.bordbretter[0]),
+           achsen: bordbrettAchsen(state.bordbretter[0]).map(a => a.name),
            laenge: aufmassAchsen()[0].m.laenge };
 });
-assert(persist.anzahl === 1 && persist.achse === 'A1 – A3' && Math.abs(persist.laenge - 6.98) < 0.005,
-  'Linie und Achszuordnung werden mit der Zeichnung gespeichert und wieder geladen');
+assert(persist.anzahl === 1 && persist.achsen.includes('A1 – A3')
+    && Math.abs(persist.laenge - 6.98) < 0.005,
+  `Linie und Wirkungsbereich werden gespeichert und wieder geladen `
+  + `(${persist.wirkung}: ${persist.achsen.join(', ')})`);
 
 // ══ 8. PDF übernimmt das Ergebnis ═════════════════════════════════════════
 const pdf = await page.evaluate(async () => {
