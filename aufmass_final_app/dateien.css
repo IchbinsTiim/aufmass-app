@@ -1,0 +1,712 @@
+/* ===========================================================================
+   Dateiübersicht – gemeinsames Aussehen beider Module
+   ---------------------------------------------------------------------------
+   Eine Komponente, zwei Module: die Akzentfarbe kommt aus `--accent` und
+   wechselt damit automatisch mit dem aktiven Modul (gelb im Aufmaß, cyan im
+   2D-Aufmaß). Sonst ist alles identisch – Abstände, Radien, Bewegung.
+   =========================================================================== */
+
+.dv {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 26px clamp(16px, 4vw, 40px) 96px;
+  animation: dv-auf var(--t-lang) var(--federnd) both;
+}
+
+@keyframes dv-auf {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Kopfzeile ───────────────────────────────────────────────────────────── */
+
+.dv-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.dv-eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.dv-titel {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4.4vw, 40px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  margin: 0;
+  color: var(--text);
+}
+
+.dv-sub {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.dv-head-aktionen {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── Knöpfe ──────────────────────────────────────────────────────────────── */
+
+.dv-btn {
+  min-height: var(--touch);
+  padding: 0 18px;
+  border-radius: var(--r-pille);
+  border: 1px solid transparent;
+  font-family: var(--font-text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform var(--t-kurz) var(--federnd),
+              background var(--t-kurz) ease,
+              box-shadow var(--t-kurz) ease;
+}
+
+.dv-btn:active { transform: scale(.96); }
+
+.dv-btn-primaer {
+  background: var(--accent);
+  color: var(--accent-kontrast);
+  box-shadow: 0 6px 18px -6px var(--accent);
+}
+
+.dv-btn-primaer:hover { filter: brightness(1.06); }
+
+.dv-btn-still {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--hairline);
+}
+
+.dv-btn-still:hover { background: var(--surface-hoch); }
+
+.dv-btn-icon {
+  width: var(--touch);
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* ── Werkzeugleiste ──────────────────────────────────────────────────────── */
+
+.dv-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.dv-suche-wrap {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+
+.dv-suche-icon {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted-schwach);
+  font-size: 17px;
+  pointer-events: none;
+}
+
+.dv-suche {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0 16px 0 40px;
+  border-radius: var(--r-pille);
+  border: 1px solid var(--hairline);
+  background: var(--surface-tief);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: 15px;
+}
+
+.dv-suche::placeholder { color: var(--muted-schwach); }
+.dv-suche:focus { outline: none; border-color: var(--accent-rand); background: var(--surface); }
+
+.dv-select {
+  min-height: var(--touch);
+  padding: 0 14px;
+  border-radius: var(--r-pille);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dv-ansicht-schalter {
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  border-radius: var(--r-pille);
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+}
+
+.dv-ansicht-btn {
+  width: 40px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--r-pille);
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background var(--t-kurz) ease, color var(--t-kurz) ease;
+}
+
+.dv-ansicht-btn.aktiv {
+  background: var(--accent-weich);
+  color: var(--accent);
+}
+
+/* ── Brotkrumen ──────────────────────────────────────────────────────────── */
+
+.dv-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+  min-height: 34px;
+}
+
+.dv-crumb {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border-radius: var(--r-pille);
+  cursor: pointer;
+  transition: background var(--t-kurz) ease, color var(--t-kurz) ease;
+}
+
+.dv-crumb:hover { background: var(--surface); color: var(--text); }
+.dv-crumb-aktiv { color: var(--text); background: var(--surface); }
+.dv-crumb-sep { color: var(--muted-schwach); font-size: 13px; }
+
+/* ── Abschnittstitel ─────────────────────────────────────────────────────── */
+
+.dv-abschnitt-titel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted-schwach);
+  margin: 0 0 12px;
+}
+
+/* ── Zuletzt bearbeitet ──────────────────────────────────────────────────── */
+
+.dv-zuletzt { margin-bottom: 28px; }
+
+.dv-zuletzt-reihe {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.dv-zuletzt-karte {
+  flex: 0 0 auto;
+  min-height: var(--touch);
+  padding: 10px 18px;
+  border-radius: var(--r-karte-klein);
+  background: linear-gradient(140deg, var(--surface-hoch), var(--surface));
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: transform var(--t-kurz) var(--federnd), border-color var(--t-kurz) ease;
+}
+
+.dv-zuletzt-karte:hover { transform: translateY(-2px); border-color: var(--accent-rand); }
+.dv-zuletzt-name { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.dv-zuletzt-zeit { font-size: 12px; color: var(--muted); }
+
+/* ── Ordner ──────────────────────────────────────────────────────────────── */
+
+.dv-ordner-block { margin-bottom: 28px; }
+
+.dv-ordner-gitter {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.dv-ordner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 12px 14px 16px;
+  border-radius: var(--r-karte-klein);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+  transition: transform var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) ease,
+              background var(--t-kurz) ease;
+}
+
+.dv-ordner:hover { transform: translateY(-2px); background: var(--surface-hoch); }
+
+.dv-ordner-icon {
+  flex: none;
+  width: 34px;
+  height: 27px;
+  border-radius: 5px 8px 8px 8px;
+  background: linear-gradient(160deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000));
+  position: relative;
+  opacity: .9;
+}
+
+.dv-ordner-icon::before {
+  content: '';
+  position: absolute;
+  top: -5px; left: 0;
+  width: 15px; height: 6px;
+  border-radius: 4px 4px 0 0;
+  background: inherit;
+}
+
+.dv-ordner-text { flex: 1; min-width: 0; }
+
+.dv-ordner-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dv-ordner-meta { font-size: 12px; color: var(--muted); }
+
+/* Ziel beim Ziehen */
+.dv-ablage-aktiv {
+  border-color: var(--accent) !important;
+  background: var(--accent-weich) !important;
+  box-shadow: 0 0 0 3px var(--accent-weich);
+}
+
+/* ── Dateikarten ─────────────────────────────────────────────────────────── */
+
+.dv-gitter {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: 14px;
+}
+
+.dv-karte {
+  position: relative;
+  border-radius: var(--r-karte);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--schatten-s);
+  transition: transform var(--t-normal) var(--federnd),
+              box-shadow var(--t-normal) ease,
+              border-color var(--t-normal) ease;
+}
+
+.dv-karte:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--schatten-m);
+  border-color: var(--hairline-stark);
+}
+
+.dv-karte:active { transform: scale(.985); }
+
+.dv-vorschau {
+  aspect-ratio: 16 / 9;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255,255,255,.05), transparent 60%),
+    var(--surface-tief);
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.dv-vorschau img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 10px;
+}
+
+.dv-vorschau-leer { font-size: 30px; opacity: .3; }
+
+.dv-karte-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.dv-karte-kopf {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.dv-karte-marken { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.dv-marke {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--r-pille);
+  background: var(--surface-hoch);
+  color: var(--muted);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.dv-marke-akzent { background: var(--accent-weich); color: var(--accent); border-color: var(--accent-rand); }
+.dv-marke-erfolg { color: var(--erfolg); border-color: rgba(61, 220, 151, .35); background: rgba(61, 220, 151, .12); }
+.dv-marke-ruhe   { color: var(--muted-schwach); }
+
+.dv-karte-menue {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: -4px -6px 0 0;
+  border: 0;
+  border-radius: var(--r-pille);
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-kurz) ease, color var(--t-kurz) ease;
+}
+
+.dv-karte-menue:hover { background: var(--surface-hoch); color: var(--text); }
+
+.dv-karte-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.dv-karte-ort {
+  font-size: 12px;
+  color: var(--muted-schwach);
+}
+
+.dv-karte-info { font-size: 13px; color: var(--muted); }
+
+/* Zusätzliche Marken der Karte (z. B. Verwendungszweck) – in der Listen-
+   ansicht bleiben sie weg, dort zählt die Zeile, nicht das Detail. */
+.dv-karte-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.dv-karte-kennzahlen {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: -.01em;
+}
+
+.dv-karte-zeit {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted-schwach);
+}
+
+/* ── Listenansicht ───────────────────────────────────────────────────────── */
+
+.dv-liste .dv-gitter { grid-template-columns: 1fr; gap: 8px; }
+
+.dv-liste .dv-karte {
+  flex-direction: row;
+  align-items: center;
+  border-radius: var(--r-karte-klein);
+}
+
+.dv-liste .dv-karte:hover { transform: none; background: var(--surface-hoch); }
+
+.dv-liste .dv-vorschau {
+  width: 88px;
+  flex: none;
+  aspect-ratio: auto;
+  align-self: stretch;
+  border-bottom: 0;
+  border-right: 1px solid var(--hairline);
+}
+
+.dv-liste .dv-karte-body {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+}
+
+.dv-liste .dv-karte-kopf { order: 3; margin-left: auto; }
+.dv-liste .dv-karte-name { order: 1; flex: 1 1 40%; -webkit-line-clamp: 1; font-size: 15px; }
+.dv-liste .dv-karte-ort  { order: 2; flex: 0 1 22%; }
+.dv-liste .dv-karte-info,
+.dv-liste .dv-karte-tags,
+.dv-liste .dv-karte-kennzahlen { display: none; }
+
+.dv-liste .dv-karte-zeit {
+  order: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  flex: 0 0 auto;
+  gap: 18px;
+}
+
+.dv-liste .dv-ordner-gitter { grid-template-columns: 1fr; }
+
+/* ── Leerzustand ─────────────────────────────────────────────────────────── */
+
+.dv-leer {
+  text-align: center;
+  padding: 64px 20px;
+  border-radius: var(--r-karte);
+  border: 1px dashed var(--hairline-stark);
+  background: rgba(255, 255, 255, .015);
+}
+
+.dv-leer-icon { font-size: 40px; opacity: .5; margin-bottom: 12px; }
+
+.dv-leer h2 {
+  font-family: var(--font-display);
+  font-size: 21px;
+  margin: 0 0 6px;
+  color: var(--text);
+}
+
+.dv-leer p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+
+/* ── Ziehen & Ablegen ────────────────────────────────────────────────────── */
+
+.dv-zieht { opacity: .35; }
+
+.dv-geist {
+  position: fixed;
+  z-index: 1400;
+  pointer-events: none;
+  opacity: .92;
+  transform-origin: top left;
+  box-shadow: var(--schatten-l);
+  border-radius: var(--r-karte);
+  overflow: hidden;
+  rotate: -1.5deg;
+}
+
+body.dv-zieht-laeuft { user-select: none; }
+
+/* ── Dialoge ─────────────────────────────────────────────────────────────── */
+
+.dv-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 11, 20, .62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity var(--t-normal) ease;
+}
+
+.dv-dialog-overlay.offen { opacity: 1; }
+
+.dv-dialog {
+  width: min(440px, 100%);
+  padding: 26px;
+  border-radius: 24px;
+  background: var(--surface);
+  border: 1px solid var(--hairline-stark);
+  box-shadow: var(--schatten-l);
+  transform: scale(.94) translateY(10px);
+  transition: transform var(--t-normal) var(--federnd);
+}
+
+.dv-dialog-overlay.offen .dv-dialog { transform: none; }
+
+.dv-dialog-titel {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.dv-dialog-text {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.dv-dialog-feld:not(:empty) { margin-bottom: 20px; }
+
+.dv-dialog-input {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0 16px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--hairline-stark);
+  background: var(--surface-tief);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: 16px;
+}
+
+.dv-dialog-input:focus { outline: none; border-color: var(--accent); }
+
+.dv-dialog-knoepfe {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dv-dialog-knoepfe-spalte { flex-direction: column-reverse; }
+
+.dv-dialog-btn {
+  min-height: var(--touch);
+  padding: 0 20px;
+  border-radius: var(--r-pille);
+  border: 1px solid var(--hairline);
+  background: var(--surface-hoch);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--t-kurz) var(--federnd), filter var(--t-kurz) ease;
+}
+
+.dv-dialog-btn:active { transform: scale(.97); }
+.dv-dialog-btn.primaer { background: var(--accent); color: var(--accent-kontrast); border-color: transparent; }
+.dv-dialog-btn.gefahr  { background: var(--gefahr); color: #1a0a0a; border-color: transparent; }
+.dv-dialog-btn.still:hover { background: var(--surface-tief); }
+
+/* ── Toast mit Aktion ────────────────────────────────────────────────────── */
+
+.dv-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  z-index: 1600;
+  transform: translate(-50%, 24px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 12px 12px 20px;
+  border-radius: var(--r-pille);
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline-stark);
+  box-shadow: var(--schatten-l);
+  color: var(--text);
+  font-size: 14.5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-normal) ease, transform var(--t-normal) var(--federnd);
+}
+
+.dv-toast.offen { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+
+.dv-toast-text { flex: 1; }
+
+.dv-toast-btn {
+  flex: none;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: var(--r-pille);
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-kontrast);
+  font-family: var(--font-text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ── Tablet / schmale Fenster ────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .dv { padding: 18px 16px 90px; }
+  .dv-head { align-items: flex-start; }
+  .dv-head-aktionen { width: 100%; }
+  .dv-btn-primaer { flex: 1; }
+  .dv-gitter { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .dv-liste .dv-karte-ort,
+  .dv-liste .dv-karte-zeit span:first-child { display: none; }
+}
+
+/* ── Backup-Hinweis in der Übersicht ────────────────────────────────────────
+   Das Banner stammt aus dem Aufmaß-Modul und sitzt jetzt innerhalb der
+   Übersicht, direkt unter der Kopfzeile. */
+
+.dv .backup-reminder {
+  margin: 0 0 16px;
+  border-radius: var(--r-karte-klein);
+}
+
+/* Die Dateiübersicht des 2D-Moduls braucht oben etwas mehr Luft: dort sitzt
+   die Umschalter-Pille direkt über der Seite. */
+#td-homeScreen .dv { padding-top: 30px; }

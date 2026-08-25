@@ -152,7 +152,7 @@ async function lauf(root, hash) {
 }
 
 const alt = await lauf(ALT_ROOT, 'viewer2d.html');
-const neu = await lauf(NEU_ROOT, 'index.html#/2d');
+const neu = await lauf(NEU_ROOT, 'index.html#/2d/editor');
 
 let abweichungen = 0;
 function pruefe(name, a, b) {

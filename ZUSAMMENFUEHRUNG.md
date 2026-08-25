@@ -9,6 +9,12 @@ Einstiegspunkt ist `aufmass_final_app/index.html`.
 #/2d          Modul 2 – 2D-Aufmaß: Gerüst zeichnen & PDF erzeugen
 ```
 
+> **Hinweis:** Seit der Dateiverwaltung führt die Modulauswahl zunächst in die
+> **Dateiübersicht** des Moduls; die Editoren liegen auf `#/aufmass/editor`
+> bzw. `#/2d/editor`. Speicherung, Ordner, Papierkorb und der Dokument-
+> Lebenszyklus sind in **`DATEIVERWALTUNG.md`** beschrieben. Die unten
+> aufgeführten Funktionslisten beider Module gelten unverändert weiter.
+
 Deep-Link, Neuladen und der Zurück-Button des Browsers landen immer in der
 richtigen Ansicht. Der Modul-Umschalter (Pille oben links) ist überall sichtbar
 und trägt die Farbe des aktiven Moduls.

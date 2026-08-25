@@ -6,10 +6,10 @@
 
 // Speicher-Schlüssel: liegen zentral in core.js (Namensraum geruest.aufmass.*).
 // `GK.aktuellesProjekt` teilen sich beide Module – so wissen Aufmaß und
-// 2D-Aufmaß, welche Projektakte (inkl. 2D-Zeichnung) gerade bearbeitet wird,
-// und greifen auf dieselbe Projektliste zu.
-const STORAGE_KEY = GK.projekte;
-const FOLDERS_STORAGE_KEY = GK.ordner;
+// 2D-Aufmaß, welche Projektakte (inkl. 2D-Zeichnung) gerade bearbeitet wird.
+// Die Projekte selbst liegen seit der Dateiverwaltung im Dokumentenspeicher
+// (store.js); die früheren Schlüssel `geruest.aufmass.projekte`/`.ordner`
+// bleiben dort nur noch als Sicherung des Standes vor der Umstellung liegen.
 
 // Backup-Erinnerung: alles liegt nur in localStorage (kein Cloud-Sync) – bei
 // Gerätewechsel/-defekt wäre sonst alles weg. Erinnert sanft an einen
@@ -29,15 +29,6 @@ const PROJECT_STATUS_LABEL = {
 let projects = [];
 let folders = [];
 let currentProjectId = null;
-
-// Aktueller Filter-/Sortier-/Suchzustand der Projektübersicht (nur UI-Zustand,
-// nicht persistiert).
-let overviewState = {
-  search: '',
-  folderId: '',       // '' = alle, '__none__' = ohne Ordner, sonst Ordner-ID
-  status: '',          // '' = alle
-  sort: 'geaendert'    // 'geaendert' | 'name'
-};
 
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
@@ -105,31 +96,34 @@ function migrateProjectMeta(p) {
   return p;
 }
 
+// Die Projektliste liegt seit der Dateiverwaltung im Dokumentenspeicher
+// (store.js, IndexedDB) statt in localStorage. Für den restlichen Code dieser
+// Datei ändert sich nichts: `projects` bleibt ein Array der bekannten
+// Projektdatensätze – es sind dieselben (lebenden) Objekte, die im Speicher
+// unter `dokument.data` hängen. Wer hier hineinschreibt, schreibt direkt in
+// das Dokument; `saveProjects()` sorgt für das Wegschreiben.
 function loadProjects() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    projects = raw ? JSON.parse(raw) : [];
-    projects.forEach(migrateProjectMeta);
-  } catch (_) {
-    projects = [];
-  }
+  projects = Speicher.datenListe();
+  projects.forEach(migrateProjectMeta);
 }
 
-function saveProjects() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+/** Schreibt das geänderte Projekt weg. `projektId` benennt, welches – ohne
+ *  Angabe das gerade geöffnete. Nur dieses eine bekommt einen neuen
+ *  Änderungszeitstempel; die übrigen Dokumente bleiben unangetastet, damit
+ *  nicht bei jedem Autosave die ganze Liste als „gerade geändert" gilt. */
+function saveProjects(projektId) {
+  Speicher.uebernimmDaten(projects, projektId !== undefined ? projektId : currentProjectId);
 }
 
 function loadFolders() {
-  try {
-    const raw = localStorage.getItem(FOLDERS_STORAGE_KEY);
-    folders = raw ? JSON.parse(raw) : [];
-  } catch (_) {
-    folders = [];
-  }
+  // Ordner leben jetzt je Modul im Speicher und können verschachtelt sein.
+  // Diese flache Sicht bleibt für den Altcode (Ordnername zu einer ID) gültig.
+  folders = Speicher.ordner('aufmass').map(o => ({ id: o.id, name: o.name, parentId: o.parentId }));
 }
 
 function saveFolders() {
-  localStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+  // Ordneränderungen laufen unmittelbar über den Speicher – hier ist nichts
+  // mehr zu tun. Die Funktion bleibt, weil Altcode sie aufruft.
 }
 
 function getCurrentProject() {
@@ -503,117 +497,18 @@ function showScreen(id) {
 }
 
 // ============================================================
-//  Startseite - Projektübersicht (Ordner, Suche, Filter, Vorschau)
+//  Startseite - Dateiübersicht des Moduls
 // ============================================================
+// Die Übersicht selbst kommt aus dateien.js und ist in beiden Modulen
+// dieselbe Komponente. Hier steht nur, womit sie für das Aufmaß-Modul
+// bestückt wird: Beschriftungen, Marken (Typ/Status), Kennzahlen und die
+// modulspezifischen Zusatzaktionen.
 
-function matchesSearch(proj, q) {
-  if (!q) return true;
-  const hay = [
-    getProjectName(proj),
-    proj.anschrift?.bauherr || '',
-    proj.anschrift?.strasse || '', proj.anschrift?.nummer || '',
-    proj.anschrift?.plz || '', proj.anschrift?.ort || ''
-  ].join(' ').toLowerCase();
-  return hay.includes(q.toLowerCase());
-}
 
-function getFilteredSortedProjects() {
-  let list = projects.filter(p => {
-    if (overviewState.folderId === '__none__' && p.folderId) return false;
-    if (overviewState.folderId && overviewState.folderId !== '__none__' && p.folderId !== overviewState.folderId) return false;
-    if (overviewState.status && p.status !== overviewState.status) return false;
-    if (!matchesSearch(p, overviewState.search)) return false;
-    return true;
-  });
-  if (overviewState.sort === 'name') {
-    list = list.sort((a, b) => getProjectName(a).localeCompare(getProjectName(b), 'de'));
-  } else {
-    list = list.sort((a, b) => (b.geaendert || '').localeCompare(a.geaendert || ''));
-  }
-  return list;
-}
 
-function renderFolderBar() {
-  const bar = document.getElementById('folderBar');
-  if (!bar) return;
-  bar.innerHTML = '';
 
-  const makeChip = (label, folderId, count) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'folder-chip' + (overviewState.folderId === folderId ? ' active' : '');
-    btn.innerHTML = `${label} <span class="folder-chip-count">${count}</span>`;
-    btn.addEventListener('click', () => {
-      overviewState.folderId = folderId;
-      renderProjectOverview();
-    });
-    return btn;
-  };
 
-  bar.appendChild(makeChip('Alle Projekte', '', projects.length));
-  bar.appendChild(makeChip('Ohne Ordner', '__none__', projects.filter(p => !p.folderId).length));
 
-  folders.forEach(f => {
-    const count = projects.filter(p => p.folderId === f.id).length;
-    const chip = makeChip(f.name, f.id, count);
-    chip.addEventListener('dblclick', () => renameFolderPrompt(f.id));
-    bar.appendChild(chip);
-  });
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'folder-chip folder-chip-add';
-  addBtn.textContent = '+ Ordner';
-  addBtn.addEventListener('click', createFolderPrompt);
-  bar.appendChild(addBtn);
-
-  if (overviewState.folderId && overviewState.folderId !== '__none__') {
-    const folder = getFolder(overviewState.folderId);
-    if (folder) {
-      const manageBtn = document.createElement('button');
-      manageBtn.type = 'button';
-      manageBtn.className = 'folder-chip folder-chip-manage';
-      manageBtn.title = 'Ordner umbenennen/löschen';
-      manageBtn.textContent = '✎';
-      manageBtn.addEventListener('click', () => openFolderManageMenu(folder, manageBtn));
-      bar.appendChild(manageBtn);
-    }
-  }
-}
-
-function createFolderPrompt() {
-  const name = prompt('Name des neuen Ordners (z. B. 2026, Firma Müller, Abgeschlossen):');
-  if (!name || !name.trim()) return;
-  folders.push({ id: genId('folder'), name: name.trim() });
-  saveFolders();
-  renderProjectOverview();
-}
-
-function renameFolderPrompt(folderId) {
-  const folder = getFolder(folderId);
-  if (!folder) return;
-  const name = prompt('Ordner umbenennen:', folder.name);
-  if (!name || !name.trim()) return;
-  folder.name = name.trim();
-  saveFolders();
-  renderProjectOverview();
-}
-
-function deleteFolderPrompt(folderId) {
-  const folder = getFolder(folderId);
-  if (!folder) return;
-  const count = projects.filter(p => p.folderId === folderId).length;
-  const msg = count > 0
-    ? `Ordner "${folder.name}" löschen? ${count} Projekt(e) darin werden in "Ohne Ordner" verschoben.`
-    : `Ordner "${folder.name}" löschen?`;
-  if (!confirm(msg)) return;
-  projects.forEach(p => { if (p.folderId === folderId) p.folderId = null; });
-  folders = folders.filter(f => f.id !== folderId);
-  saveProjects();
-  saveFolders();
-  if (overviewState.folderId === folderId) overviewState.folderId = '';
-  renderProjectOverview();
-}
 
 function closeFloatingMenu() {
   document.getElementById('floatingMenu')?.remove();
@@ -669,44 +564,8 @@ function openFloatingMenu(anchorEl, items) {
   });
 }
 
-function openFolderManageMenu(folder, anchorEl) {
-  openFloatingMenu(anchorEl, [
-    { label: 'Ordner umbenennen', onClick: () => renameFolderPrompt(folder.id) },
-    { label: 'Ordner löschen', danger: true, onClick: () => deleteFolderPrompt(folder.id) }
-  ]);
-}
 
-function openMoveToFolderMenu(proj, anchorEl) {
-  const items = [
-    { label: (!proj.folderId ? '✓ ' : '') + 'Ohne Ordner', active: !proj.folderId, onClick: () => moveProjectToFolder(proj.id, null) }
-  ];
-  folders.forEach(f => {
-    items.push({
-      label: (proj.folderId === f.id ? '✓ ' : '') + f.name,
-      active: proj.folderId === f.id,
-      onClick: () => moveProjectToFolder(proj.id, f.id)
-    });
-  });
-  items.push('---');
-  items.push({ label: '+ Neuer Ordner…', onClick: () => {
-    const name = prompt('Name des neuen Ordners:');
-    if (!name || !name.trim()) return;
-    const folder = { id: genId('folder'), name: name.trim() };
-    folders.push(folder);
-    saveFolders();
-    moveProjectToFolder(proj.id, folder.id);
-  } });
-  openFloatingMenu(anchorEl, items);
-}
 
-function moveProjectToFolder(projectId, folderId) {
-  const proj = projects.find(p => p.id === projectId);
-  if (!proj) return;
-  proj.folderId = folderId;
-  saveProjects();
-  renderProjectOverview();
-  showToast(folderId ? 'In Ordner verschoben' : 'Ordner entfernt');
-}
 
 function openStatusMenu(proj, anchorEl) {
   openFloatingMenu(anchorEl, PROJECT_STATUS.map(s => ({
@@ -715,123 +574,120 @@ function openStatusMenu(proj, anchorEl) {
     onClick: () => {
       proj.status = s;
       proj.geaendert = new Date().toISOString().slice(0, 10);
-      saveProjects();
+      saveProjects(proj.id);
       renderProjectOverview();
     }
   })));
 }
 
-function renameProjectPrompt(proj) {
-  const name = prompt('Projekt umbenennen:', getProjectName(proj));
-  if (name === null) return;
-  proj.name = name.trim();
-  proj.geaendert = new Date().toISOString().slice(0, 10);
-  saveProjects();
-  renderProjectOverview();
-}
+// ── Aufbau der Dateiübersicht ───────────────────────────────────────────────
 
-function duplicateProject(proj) {
-  const copy = JSON.parse(JSON.stringify(proj));
-  copy.id = genId('proj');
-  copy.name = (getProjectName(proj) + ' (Kopie)').trim();
-  const today = new Date().toISOString().slice(0, 10);
-  copy.erstellt = today;
-  copy.geaendert = today;
-  copy.status = 'in_bearbeitung';
-  projects.push(copy);
-  saveProjects();
-  renderProjectOverview();
-  showToast('Projekt dupliziert');
-}
+let aufmassBrowser = null;
 
-function deleteProjectFromOverview(proj) {
-  if (!confirm(`Projekt "${getProjectName(proj)}" wirklich löschen?`)) return;
-  projects = projects.filter(p => p.id !== proj.id);
-  saveProjects();
-  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === proj.id) {
-    localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
-  }
-  renderProjectOverview();
-  showToast('Projekt gelöscht');
-}
+/** Baut die gemeinsame Dateiübersicht einmalig auf und versorgt sie mit allem,
+ *  was für dieses Modul typisch ist. Die frühere Projektübersicht (Ordner-
+ *  Chips, Status-Filter, Karten, ⋯-Menü) geht darin vollständig auf. */
+function initDateiuebersicht() {
+  const host = document.getElementById('projectGrid');
+  if (!host || aufmassBrowser) return;
 
-function openProjectActionMenu(proj, anchorEl) {
-  openFloatingMenu(anchorEl, [
-    { label: 'Öffnen', onClick: () => requestOpenProject(proj) },
-    { label: 'Öffnen mit…', onClick: () => requestOpenProjectMitAuswahl(proj) },
-    { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
-    { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
-    { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
-    { label: 'Status ändern…', onClick: () => openStatusMenu(proj, anchorEl) },
-    '---',
-    { label: 'Löschen', danger: true, onClick: () => deleteProjectFromOverview(proj) }
-  ]);
-}
+  aufmassBrowser = Dateibrowser.erstelle({
+    modul: 'aufmass',
+    host,
+    eyebrow: 'Modul 1 · Aufmaß',
+    titel: 'Projekte',
+    wurzelName: 'Alle Projekte',
+    dateienTitel: 'Projekte',
+    neuLabel: '+ Neues Projekt',
+    leerIcon: '📋',
+    leerTitel: 'Noch keine Projekte',
+    leerText: 'Legen Sie Ihr erstes Projekt an – Anschrift, Hausseiten und Positionen folgen Schritt für Schritt.',
+    thumbnails: false,
+    statusFilter: true,
 
-function createProjectCard(proj) {
-  const card = document.createElement('div');
-  card.className = 'project-card2';
-  const typ = proj.geruesttyp || 'fassade';
-  const seitenAnzahl = (proj.seiten || []).length;
-  const bauherr = proj.anschrift?.bauherr || '';
-  const addrParts = [
-    [proj.anschrift?.strasse, proj.anschrift?.nummer].filter(Boolean).join(' '),
-    [proj.anschrift?.plz, proj.anschrift?.ort].filter(Boolean).join(' ')
-  ].filter(Boolean).join(', ');
-  const stats2d = get2dStats(proj);
-  const statsParts = [seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : '')];
-  if (proj.zeichnung2d) {
-    statsParts.push(stats2d.felder + ' Feld' + (stats2d.felder !== 1 ? 'er' : ''));
-    statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
-  }
-  const vzList = Array.isArray(proj.technik?.verwendungszweck) ? proj.technik.verwendungszweck : [];
+    // Status eines Dokuments für den Filter der Übersicht
+    status: dok => (dok.data && dok.data.status) || 'in_bearbeitung',
 
-  card.innerHTML = `
-    <div class="project-card2-top">
-      <span class="project-card2-badge ${typ}">${getTypeBadge(typ)}</span>
-      <span class="project-card2-status status-${proj.status}">${PROJECT_STATUS_LABEL[proj.status] || ''}</span>
-      <button type="button" class="project-card2-menu-btn" aria-label="Aktionen">⋯</button>
-    </div>
-    <div class="project-card2-name">${getProjectName(proj)}</div>
-    ${bauherr ? `<div class="project-card2-line">${bauherr}</div>` : ''}
-    ${addrParts ? `<div class="project-card2-line project-card2-addr">${addrParts}</div>` : ''}
-    ${proj.anschrift?.telefon ? `<div class="project-card2-line">${proj.anschrift.telefon}</div>` : ''}
-    ${vzList.length ? `<div class="project-card2-vz">${vzList.map(v => `<span class="project-card2-vz-tag">${v}</span>`).join('')}</div>` : ''}
-    <div class="project-card2-stats">${statsParts.join(' · ')}</div>
-    <div class="project-card2-dates">Erstellt ${fmtDate(proj.erstellt)} · Geändert ${fmtDate(proj.geaendert)}</div>
-  `;
+    // Zusätzlich zum Dateinamen wird über Bauherr und Anschrift gesucht –
+    // genau wie in der bisherigen Projektübersicht.
+    suchfelder: dok => {
+      const a = (dok.data && dok.data.anschrift) || {};
+      return [a.bauherr || '', a.strasse || '', a.nummer || '', a.plz || '', a.ort || ''];
+    },
 
-  card.querySelector('.project-card2-menu-btn').addEventListener('click', ev => {
-    ev.stopPropagation();
-    openProjectActionMenu(proj, ev.currentTarget);
+    // Typ- und Statusmarke wie auf der bisherigen Projektkarte
+    karteMarken: dok => {
+      const d = dok.data || {};
+      const typ = d.geruesttyp || 'fassade';
+      const status = d.status || 'in_bearbeitung';
+      const stilFuerStatus = { abgeschlossen: 'dv-marke-erfolg', archiviert: 'dv-marke-ruhe' };
+      return `<span class="dv-marke dv-marke-akzent">${escHtml(getTypeBadge(typ))}</span>` +
+             `<span class="dv-marke ${stilFuerStatus[status] || ''}">${escHtml(PROJECT_STATUS_LABEL[status] || '')}</span>`;
+    },
+
+    // Bauherr, Anschrift, Verwendungszweck und Kennzahlen – der Karteninhalt
+    // der bisherigen Übersicht, nur im neuen Raster.
+    karteZusatz: dok => {
+      const d = dok.data || {};
+      const a = d.anschrift || {};
+      const adresse = [
+        [a.strasse, a.nummer].filter(Boolean).join(' '),
+        [a.plz, a.ort].filter(Boolean).join(' ')
+      ].filter(Boolean).join(', ');
+      const seiten = (d.seiten || []).length;
+      const teile = [seiten + ' Seite' + (seiten !== 1 ? 'n' : '')];
+      if (d.zeichnung2d) {
+        const st = get2dStats(d);
+        teile.push(st.felder + ' Feld' + (st.felder !== 1 ? 'er' : ''));
+        teile.push(fmtNum(st.flaeche) + ' m²');
+      }
+      const vz = Array.isArray(d.technik?.verwendungszweck) ? d.technik.verwendungszweck : [];
+      return (a.bauherr ? `<div class="dv-karte-info">${escHtml(a.bauherr)}</div>` : '') +
+             (adresse ? `<div class="dv-karte-info">${escHtml(adresse)}</div>` : '') +
+             (vz.length ? `<div class="dv-karte-tags">${vz.map(v =>
+                `<span class="dv-marke">${escHtml(v)}</span>`).join('')}</div>` : '') +
+             `<div class="dv-karte-kennzahlen">${escHtml(teile.join(' · '))}</div>`;
+    },
+
+    // „Öffnen mit …" und „Status ändern …" – aus dem bisherigen ⋯-Menü
+    zusatzAktionen: dok => [
+      { label: 'Öffnen mit …', onClick: () => requestOpenProjectMitAuswahl(dok.data) },
+      { label: 'Status ändern …', onClick: () => {
+          const anker = document.querySelector(`[data-dok-id="${dok.id}"] .dv-karte-menue`) || document.body;
+          openStatusMenu(dok.data, anker);
+        } }
+    ],
+
+    mehrAktionen: () => [
+      { label: 'Alle Projekte sichern (Backup)', onClick: exportAllProjectsBackup }
+    ],
+
+    neuAktion: createNewProject,
+    oeffnen: dok => openProject(dok.data.id),
+    nachAenderung: () => { loadProjects(); loadFolders(); Shell.aktualisiereHub(); }
   });
-  card.addEventListener('click', () => requestOpenProject(proj));
-  return card;
+
+  // Der Primärknopf trägt die bisherige ID weiter – daran hängen der
+  // Leerzustand, alte Verknüpfungen und die Tests.
+  const neuBtn = host.querySelector('[data-dv="neu"]');
+  if (neuBtn) neuBtn.id = 'newProjectBtn';
 }
 
+/** Zeichnet die Dateiübersicht neu (Name blieb erhalten: an dieser Stelle
+ *  stand früher die Projektübersicht). */
 function renderProjectOverview() {
-  const gridEl    = document.getElementById('projectGrid');
-  const emptyEl   = document.getElementById('emptyState');
-  const noResEl   = document.getElementById('noResultsState');
-  if (!gridEl) return;
-
-  renderFolderBar();
+  initDateiuebersicht();
+  loadProjects();
+  loadFolders();
+  if (aufmassBrowser) aufmassBrowser.rendere();
   renderBackupReminder();
-
-  gridEl.innerHTML = '';
-
-  if (projects.length === 0) {
-    emptyEl.classList.remove('hidden');
-    noResEl.classList.add('hidden');
-    return;
-  }
-  emptyEl.classList.add('hidden');
-
-  const list = getFilteredSortedProjects();
-  noResEl.classList.toggle('hidden', list.length > 0);
-
-  list.forEach(proj => gridEl.appendChild(createProjectCard(proj)));
 }
+
+
+
+
+
+
 
 // ============================================================
 //  Projekt erstellen / öffnen
@@ -855,13 +711,16 @@ function requestOpenProjectMitAuswahl(proj) {
   openProject(proj.id);
 }
 
-function createNewProject() {
+/** Ein leerer Projektdatensatz im bestehenden Format. Beide Module legen
+ *  darüber neue Dokumente an – ein Dokument ist immer eine Baustelle, egal ob
+ *  sie im Aufmaß oder in der Zeichnung begonnen wurde. */
+function leererProjektdatensatz(name) {
   const today = new Date().toISOString().slice(0, 10);
-  const proj = {
+  return {
     id: genId('proj'),
-    name: '',
+    name: name || '',
     status: 'in_bearbeitung',
-    folderId: (overviewState.folderId && overviewState.folderId !== '__none__') ? overviewState.folderId : null,
+    folderId: null,
     erstellt: today,
     geaendert: today,
     anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
@@ -873,8 +732,16 @@ function createNewProject() {
     zusatzpositionen: [],
     zeichnung2d: null
   };
-  projects.push(proj);
-  saveProjects();
+}
+
+function createNewProject() {
+  const proj = leererProjektdatensatz();
+  // Ein neues Projekt landet in dem Ordner, der gerade offen ist.
+  const ordnerId = aufmassBrowser ? aufmassBrowser.zustand.ordnerId : null;
+  proj.folderId = ordnerId;
+  const dok = Speicher.neu({ modul: 'aufmass', ordnerId, data: proj });
+  Speicher.merkeGeoeffnet(dok.id, 'aufmass');
+  loadProjects();
   requestOpenProject(proj);
 }
 
@@ -914,7 +781,50 @@ function openProject(projectId, opts) {
   renderZusatzpositionen(proj.zusatzpositionen || []);
   update2dSummary(proj);
   updateSummary();
-  if (!opts || !opts.keepScreen) showScreen('projectScreen');
+
+  // Stand beim Öffnen festhalten: „Verwerfen" im Verlassen-Dialog stellt genau
+  // diesen Zustand wieder her. Ab hier gilt das Dokument als unverändert.
+  aufmassStandBeimOeffnen = JSON.stringify(proj);
+  aufmassSchmutzig = false;
+
+  const dok = Speicher.dokZuDaten(projectId);
+  if (dok) Speicher.merkeGeoeffnet(dok.id, 'aufmass');
+
+  if (!opts || !opts.keepScreen) {
+    showScreen('projectScreen');
+    // Die Projektakte hat eine eigene Adresse – Neuladen und Zurück-Taste
+    // finden dadurch wieder hierher zurück.
+    if (typeof Shell !== 'undefined') Shell.gehe('#/aufmass/editor');
+  }
+}
+
+// ── Ungespeicherte Änderungen ───────────────────────────────────────────────
+// Autosave schreibt laufend mit, damit nie etwas verloren geht. Trotzdem gilt
+// ein Dokument als „ungespeichert", solange nach der letzten Änderung nicht
+// bewusst auf „Speichern" getippt wurde – beim Verlassen wird dann gefragt,
+// ob die Änderungen bleiben oder verworfen werden sollen.
+
+let aufmassStandBeimOeffnen = null;
+let aufmassSchmutzig = false;
+// Einmal-Freigabe: der hauseigene „Zurück"-Weg speichert selbst und braucht
+// keinen Dialog. Nötig, weil der Klick anschließend noch den Autosave des
+// Projektbildschirms auslöst und die Änderungsmarke sonst sofort wiederkäme.
+let aufmassOhneRueckfrage = false;
+
+/** Stellt den Stand beim Öffnen wieder her (Antwort „Verwerfen"). */
+function verwirfAufmassAenderungen() {
+  if (!aufmassStandBeimOeffnen || !currentProjectId) return;
+  const alt = JSON.parse(aufmassStandBeimOeffnen);
+  const idx = projects.findIndex(p => p.id === currentProjectId);
+  if (idx < 0) return;
+  // Inhalt ersetzen statt Objekt austauschen: der Speicher hält denselben
+  // Verweis, das Dokument bleibt also dasselbe.
+  const ziel = projects[idx];
+  Object.keys(ziel).forEach(k => delete ziel[k]);
+  Object.assign(ziel, alt);
+  saveProjects();
+  aufmassSchmutzig = false;
+  openProject(currentProjectId, { keepScreen: true });
 }
 
 function setProjectStatus(status) {
@@ -1175,6 +1085,9 @@ function saveCurrentProject() {
   collectProjectFromForm(proj);
   document.getElementById('projectScreenTitle').textContent = getProjectName(proj);
   saveProjects();
+  // Bewusst gespeichert: ab hier gibt es beim Verlassen nichts mehr zu fragen.
+  aufmassStandBeimOeffnen = JSON.stringify(proj);
+  aufmassSchmutzig = false;
   showToast('Gespeichert');
 }
 
@@ -1185,6 +1098,7 @@ function saveCurrentProject() {
 let autosaveTimer = null;
 function scheduleAutosave() {
   if (!currentProjectId) return;
+  aufmassSchmutzig = true;
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     autosaveTimer = null;
@@ -1206,17 +1120,30 @@ function flushAutosave() {
   saveProjects();
 }
 
-function deleteCurrentProject() {
+async function deleteCurrentProject() {
   if (!currentProjectId) return;
-  if (!confirm('Dieses Projekt wirklich löschen?')) return;
-  projects = projects.filter(p => p.id !== currentProjectId);
-  saveProjects();
-  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === currentProjectId) {
+  const dok = Speicher.dokZuDaten(currentProjectId);
+  const ok = await DvDialog.bestaetige({
+    titel: 'Dieses Projekt löschen?',
+    hinweis: `Es wandert in den Papierkorb und lässt sich dort ${Speicher.PAPIERKORB_TAGE} Tage lang wiederherstellen.`,
+    ok: 'In den Papierkorb'
+  });
+  if (!ok) return;
+  const id = currentProjectId;
+  if (dok) Speicher.inPapierkorb(dok.id);
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === id) {
     localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
   }
   currentProjectId = null;
-  renderProjectOverview();
-  showScreen('homeScreen');
+  aufmassSchmutzig = false;
+  aufmassStandBeimOeffnen = null;
+  loadProjects();
+  goToOverview();
+  dvToast('Gelöscht', { label: 'Rückgängig', onClick: () => {
+    if (dok) Speicher.wiederherstellen(dok.id);
+    loadProjects();
+    renderProjectOverview();
+  } });
 }
 
 // ============================================================
@@ -3099,7 +3026,9 @@ function exportAllProjectsBackup() {
 function renderBackupReminder() {
   const host = document.getElementById('homeScreen');
   if (!host) return;
-  const content = host.querySelector('main.screen-content');
+  // Der Hinweis gehört in die Übersicht selbst (unter die Kopfzeile), nicht
+  // quer über die volle Fensterbreite.
+  const content = host.querySelector('#projectGrid .dv') || host.querySelector('main.screen-content');
   let banner = document.getElementById('backupReminderBanner');
   if (!content) return;
 
@@ -3119,7 +3048,9 @@ function renderBackupReminder() {
     banner = document.createElement('div');
     banner.id = 'backupReminderBanner';
     banner.className = 'backup-reminder';
-    content.prepend(banner);
+    const kopf = content.querySelector('.dv-head');
+    if (kopf && kopf.nextSibling) content.insertBefore(banner, kopf.nextSibling);
+    else content.prepend(banner);
   }
   const msg = lastTs === null
     ? 'Noch kein Backup erstellt.'
@@ -3161,14 +3092,19 @@ function handleImportFile(e) {
       const data = JSON.parse(evt.target.result);
       if (!data.seiten) { alert('Unbekanntes Dateiformat.'); return; }
       migrateProjectMeta(data);
-      const existing = projects.findIndex(p => p.id === data.id);
-      if (existing >= 0) {
-        projects[existing] = data;
+      const vorhanden = projects.findIndex(p => p.id === data.id);
+      if (vorhanden >= 0) {
+        // Bestehendes Dokument aktualisieren: Inhalt ersetzen, Hülle behalten.
+        const ziel = projects[vorhanden];
+        Object.keys(ziel).forEach(k => delete ziel[k]);
+        Object.assign(ziel, data);
+        saveProjects(data.id);
       } else {
-        data.id = genId('proj');
-        projects.push(data);
+        const ordnerId = aufmassBrowser ? aufmassBrowser.zustand.ordnerId : null;
+        data.folderId = ordnerId;
+        Speicher.neu({ modul: 'aufmass', ordnerId, data });
+        loadProjects();
       }
-      saveProjects();
       openProject(data.id);
     } catch (err) {
       alert('Fehler beim Lesen der Datei: ' + err.message);
@@ -3185,6 +3121,7 @@ function handleImportFile(e) {
 function goToOverview() {
   renderProjectOverview();
   showScreen('homeScreen');
+  if (typeof Shell !== 'undefined') Shell.gehe('#/aufmass');
 }
 
 function open2dViewer() {
@@ -3193,14 +3130,17 @@ function open2dViewer() {
   flushAutosave();
   localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, proj.id);
   // Früher ein Seitenwechsel zu viewer2d.html – in der zusammengeführten App
-  // ein Routenwechsel innerhalb derselben Seite. Der 2D-Zeichner lädt beim
-  // Aktivieren die Zeichnung des verknüpften Projekts nach.
-  Shell.gehe('#/2d');
+  // ein Routenwechsel innerhalb derselben Seite. Der 2D-Zeichner öffnet dabei
+  // das Dokument dieses Projekts.
+  const dok = Speicher.dokZuDaten(proj.id);
+  if (dok && typeof ZweiDModul !== 'undefined') { ZweiDModul.oeffneDokument(dok.id); return; }
+  Shell.gehe('#/2d/editor');
 }
 
 function initApp() {
   loadProjects();
   loadFolders();
+  initDateiuebersicht();
 
   // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
   // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
@@ -3237,8 +3177,20 @@ function initApp() {
   // Projekt-Editor (#projectScreen, z. B. index.html). Auf reinen
   // Übersichtsseiten (z. B. start.html) fehlen sie – daher optional verknüpft,
   // ohne dass sich am bestehenden Verhalten dort etwas ändert, wo sie existieren.
+  // „Zurück" ist der hauseigene Weg aus der Projektakte heraus: er speichert
+  // und geht zurück. Deshalb fragt hier kein Dialog nach – gefragt wird nur,
+  // wer die Akte auf anderem Weg verlässt (Modulwechsel, Startbildschirm,
+  // Zurück-Taste des Browsers, Tab schließen).
   document.getElementById('backBtn')?.addEventListener('click', () => {
+    const proj = getCurrentProject();
+    if (proj) {
+      collectProjectFromForm(proj);
+      saveProjects();
+      aufmassStandBeimOeffnen = JSON.stringify(proj);
+    }
     flushAutosave();
+    aufmassSchmutzig = false;
+    aufmassOhneRueckfrage = true;
     goToOverview();
   });
 
@@ -3311,19 +3263,8 @@ function initApp() {
     });
   }
 
-  // Projektübersicht: Suche, Status-Filter, Sortierung
-  document.getElementById('searchInput')?.addEventListener('input', e => {
-    overviewState.search = e.target.value;
-    renderProjectOverview();
-  });
-  document.getElementById('statusFilterSelect')?.addEventListener('change', e => {
-    overviewState.status = e.target.value;
-    renderProjectOverview();
-  });
-  document.getElementById('sortSelect')?.addEventListener('change', e => {
-    overviewState.sort = e.target.value;
-    renderProjectOverview();
-  });
+  // Suche, Status-Filter, Sortierung und Ordner liegen jetzt in der
+  // gemeinsamen Dateiübersicht (dateien.js) und werden dort verknüpft.
 }
 
 // ============================================================
@@ -3349,17 +3290,26 @@ const AufmassModul = (() => {
       initApp();
     },
 
-    /** Modul wird sichtbar. Die Projektliste kann zwischenzeitlich vom
-     *  2D-Modul verändert worden sein (Zeichnung gespeichert) – deshalb neu
-     *  einlesen und die Kennzahlen der 2D-Zeichnung auffrischen. */
-    aktiviere() {
+    /** Modul wird sichtbar. `unter` sagt, welche der beiden Ansichten gemeint
+     *  ist: die Dateiübersicht oder die Projektakte. */
+    aktiviere(unter) {
       this.mount();
       loadProjects();
       loadFolders();
-      renderProjectOverview();
-      renderBackupReminder();
-      const proj = getCurrentProject();
-      if (proj) update2dSummary(proj);
+
+      const imEditor = unter === 'editor' && currentProjectId && getCurrentProject();
+      if (imEditor) {
+        // Die Zeichnung kann zwischenzeitlich im 2D-Modul verändert worden
+        // sein – die Kennzahlen im Projekt frisch stellen.
+        update2dSummary(getCurrentProject());
+        showScreen('projectScreen');
+      } else {
+        renderProjectOverview();
+        showScreen('homeScreen');
+        // Deep-Link auf die Projektakte ohne offenes Projekt (etwa nach einem
+        // Neustart): die Adresse wird auf die Übersicht zurückgestellt.
+        if (unter === 'editor' && typeof Shell !== 'undefined') Shell.gehe('#/aufmass');
+      }
     },
 
     /** Modul wird verlassen: gebündelte Autosave-Schreibvorgänge sofort
@@ -3375,13 +3325,60 @@ const AufmassModul = (() => {
       return gemountet && autosaveTimer !== null;
     },
 
+    /** Letzten Stand sofort wegschreiben (Tab schließt, Gerät sperrt). */
+    speichereJetzt() {
+      if (gemountet) flushAutosave();
+    },
+
+    /** Wird von der Shell gefragt, bevor die Projektakte verlassen wird.
+     *  Antwort: darf gewechselt werden? */
+    async darfVerlassen() {
+      if (!gemountet || !currentProjectId) return true;
+      if (aufmassOhneRueckfrage) { aufmassOhneRueckfrage = false; aufmassSchmutzig = false; return true; }
+      const proj = getCurrentProject();
+      if (!proj) return true;
+      collectProjectFromForm(proj);
+      if (!aufmassSchmutzig || JSON.stringify(proj) === aufmassStandBeimOeffnen) {
+        aufmassSchmutzig = false;
+        return true;
+      }
+      const wahl = await DvDialog.auswahl({
+        titel: 'Ungespeicherte Änderungen',
+        hinweis: `„${getProjectName(proj)}" wurde geändert. Was soll damit geschehen?`,
+        knoepfe: [
+          { id: 'abbrechen', label: 'Abbrechen' },
+          { id: 'verwerfen', label: 'Verwerfen', stil: 'gefahr' },
+          { id: 'speichern', label: 'Speichern', stil: 'primaer' }
+        ]
+      });
+      if (wahl === 'speichern') { saveCurrentProject(); return true; }
+      if (wahl === 'verwerfen') { verwirfAufmassAenderungen(); return true; }
+      return false;
+    },
+
     /** Öffnet ein Projekt direkt im Editor (vom Hub/Auswahldialog aus). */
     oeffneProjekt(id) {
       this.mount();
       openProject(id);
     },
 
-    /** Zurück zur Projektübersicht innerhalb des Moduls. */
+    /** Öffnet ein Dokument des Speichers im Editor. */
+    oeffneDokument(dokId) {
+      this.mount();
+      const dok = Speicher.dok(dokId);
+      if (!dok || !dok.data) return;
+      loadProjects();
+      Speicher.merkeGeoeffnet(dokId, 'aufmass');
+      openProject(dok.data.id);
+    },
+
+    /** Neues Projekt anlegen – jederzeit, auch aus einem offenen heraus. */
+    neuesDokument() {
+      this.mount();
+      createNewProject();
+    },
+
+    /** Zurück zur Dateiübersicht innerhalb des Moduls. */
     zeigeUebersicht() {
       this.mount();
       goToOverview();

@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="style.css?v=20260825" />
   <link rel="stylesheet" href="viewer2d.css?v=20260825" />
   <link rel="stylesheet" href="shell.css?v=20260825" />
+  <link rel="stylesheet" href="dateien.css?v=20260825" />
   <link rel="stylesheet" href="theme.css?v=20260825" />
 </head>
 <body data-modul="hub">
@@ -52,7 +53,7 @@
       <div class="hub-tiles">
 
         <!-- Kachel 1: Aufmaß -->
-        <a class="hub-tile" data-ziel="aufmass" href="#/aufmass">
+        <div class="hub-tile" data-ziel="aufmass" role="link" tabindex="0" aria-label="Modul Aufmaß öffnen">
           <div class="hub-tile-glow" aria-hidden="true"></div>
           <div class="hub-tile-body">
             <div class="hub-tile-text">
@@ -90,11 +91,14 @@
               </div>
             </div>
           </div>
-          <span class="hub-tile-go" aria-hidden="true">Öffnen →</span>
-        </a>
+          <div class="hub-tile-fuss">
+            <button type="button" class="hub-quick" id="hubQuickAufmass" hidden></button>
+            <span class="hub-tile-go" aria-hidden="true">Öffnen →</span>
+          </div>
+        </div>
 
         <!-- Kachel 2: 2D-Aufmaß -->
-        <a class="hub-tile" data-ziel="2d" href="#/2d">
+        <div class="hub-tile" data-ziel="2d" role="link" tabindex="0" aria-label="Modul 2D-Aufmaß öffnen">
           <div class="hub-tile-glow" aria-hidden="true"></div>
           <div class="hub-tile-body">
             <div class="hub-tile-text">
@@ -128,8 +132,11 @@
               </svg>
             </div>
           </div>
-          <span class="hub-tile-go" aria-hidden="true">Öffnen →</span>
-        </a>
+          <div class="hub-tile-fuss">
+            <button type="button" class="hub-quick" id="hubQuick2d" hidden></button>
+            <span class="hub-tile-go" aria-hidden="true">Öffnen →</span>
+          </div>
+        </div>
 
       </div>
 
@@ -147,44 +154,13 @@
        ══════════════════════════════════════════════════════════════════ -->
   <section id="am-root" class="view am-scope" data-view="aufmass" aria-label="Aufmaß">
 
-    <!-- Startseite: Projektübersicht -->
+    <!-- Startseite des Moduls: die gemeinsame Dateiübersicht.
+         `#projectGrid` ist der Wurzelknoten, in den `dateien.js` seine
+         Oberfläche schreibt (Suche, Ordner, Karten, Papierkorb). Die ID bleibt,
+         weil script.js und die Testhülle die Übersicht darüber finden. -->
     <div id="homeScreen" class="screen">
-      <header class="app-header">
-        <div class="header-title">
-          <h1>Aufmaß</h1>
-        </div>
-        <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
-      </header>
-      <main class="screen-content">
-
-        <div class="overview-toolbar">
-          <input type="search" id="searchInput" class="form-input overview-search" placeholder="Suche nach Name, Kunde, Adresse…" />
-          <select id="statusFilterSelect" class="form-input overview-select">
-            <option value="">Alle Status</option>
-            <option value="in_bearbeitung">In Bearbeitung</option>
-            <option value="abgeschlossen">Abgeschlossen</option>
-            <option value="archiviert">Archiviert</option>
-          </select>
-          <select id="sortSelect" class="form-input overview-select">
-            <option value="geaendert">Zuletzt geändert</option>
-            <option value="name">Alphabetisch</option>
-          </select>
-        </div>
-
-        <div class="folder-bar" id="folderBar"></div>
-
-        <div id="projectGrid" class="project-grid"></div>
-
-        <div id="emptyState" class="empty-state hidden">
-          <div class="empty-icon-box"></div>
-          <h2>Keine Projekte</h2>
-          <p>Tippen Sie auf &bdquo;+ Neues Projekt&ldquo; um zu beginnen.</p>
-        </div>
-        <div id="noResultsState" class="empty-state hidden">
-          <div class="empty-icon-box"></div>
-          <h2>Keine Treffer</h2>
-          <p>Keine Projekte für diese Suche/diesen Filter gefunden.</p>
-        </div>
+      <main class="screen-content screen-content-dateien">
+        <div id="projectGrid" class="dateien-host"></div>
       </main>
     </div>
 
@@ -450,9 +426,21 @@
        ══════════════════════════════════════════════════════════════════ -->
   <section id="td-root" class="view td-scope" data-view="2d" aria-label="2D-Aufmaß">
 
+    <!-- Ansicht 1: Dateiübersicht des 2D-Moduls (dieselbe Komponente wie im
+         Aufmaß-Modul, nur mit Vorschaubildern und eigenen Beschriftungen). -->
+    <div id="td-homeScreen" class="td-screen">
+      <main class="screen-content screen-content-dateien">
+        <div id="td-dateienHost" class="dateien-host"></div>
+      </main>
+    </div>
+
+    <!-- Ansicht 2: der Zeichner selbst – Markup unverändert. -->
+    <div id="td-editorScreen" class="td-screen">
+
     <header class="viewer-header">
-      <a href="#/" class="back-link">← Start</a>
+      <a href="#/2d" class="back-link">← Dateien</a>
       <h1>Gerüst 2D-Ansicht</h1>
+      <p class="td-dokname" id="td-dokName" hidden></p>
       <p>Tippen Sie auf ein Feld, um Maße, Höhen, Abschnitt und Drehung zu bearbeiten. Der violette&nbsp;↻ Griff am ausgewählten Feld dreht per Tipp um 90°, per Ziehen frei (am Rechner auch mit der Taste&nbsp;<kbd>R</kbd>). Ziehen Sie den orangenen Punkt, um ein Feld frei zu bewegen, oder tippen Sie auf einen blauen&nbsp;+ Button (links/rechts), um ein weiteres Feld anzufügen. Mit&nbsp;„📏&nbsp;Bordbrett“ zeichnen Sie die Kante der Gerüstlage in einem Zug nach – die Linie wirkt auf jede Achse, an der sie entlangläuft, und die Eckenkorrektur (±&nbsp;Gerüsttiefe) rechnet das Programm selbst. An einer Außenecke können Sie den Umlauf auch direkt am Eck-Symbol festlegen.</p>
     </header>
 
@@ -476,6 +464,11 @@
         <span class="warnings-readout hidden" id="warningsReadout" title="Felder mit fehlenden oder unvollständigen Angaben"></span>
       </div>
       <div class="tool-group actions">
+        <!-- Eine neue Zeichnung lässt sich jederzeit beginnen – auch mitten in
+             einer offenen Zeichnung. Der Zustand des alten Dokuments wird dabei
+             vollständig aufgeräumt (siehe schliesseDokument2d). -->
+        <button id="td-neueZeichnungBtn" class="secondary" title="Neue Zeichnung beginnen">＋ Neue&nbsp;Zeichnung</button>
+        <button id="td-dateienBtn" class="secondary" title="Zur Dateiübersicht">🗂 Dateien</button>
         <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
         <button id="undoBtn" class="secondary" title="Rückgängig (Strg/Cmd+Z)" disabled>↶</button>
         <button id="redoBtn" class="secondary" title="Wiederholen (Strg/Cmd+Umschalt+Z)" disabled>↷</button>
@@ -543,6 +536,8 @@
         </div>
       </div>
     </div>
+
+    </div><!-- /#td-editorScreen -->
   </section>
 
   <!-- Bay editor popup / Bottom-Sheets werden per JS an <body> gehängt -->
@@ -575,6 +570,8 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="core.js?v=20260825"></script>
+  <script src="store.js?v=20260825"></script>
+  <script src="dateien.js?v=20260825"></script>
   <script src="script.js?v=20260825"></script>
   <script src="viewer2d.js?v=20260825"></script>
   <script src="shell.js?v=20260825"></script>

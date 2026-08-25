@@ -648,18 +648,24 @@ let bulkHR          = null;
 // Projektliste (inkl. Ordner/Status/Adresse) mit script.js/index.html: die
 // Zeichnung wird direkt im Projektdatensatz gespeichert (zeichnung2d) statt
 // nur als lose Datei.
-const PROJECTS_STORAGE_KEY = GK.projekte;
 // CURRENT_PROJECT_STORAGE_KEY: siehe core.js (von beiden Modulen genutzt).
-let linkedProjectId = null;
+let linkedProjectId = null;      // ID des Projektdatensatzes (data.id)
+let aktuellesDok2d  = null;      // ID des Dokuments im Speicher (store.js)
 let autosave2dTimer = null;
 
+// Stand beim Öffnen – Grundlage für „Verwerfen" im Verlassen-Dialog.
+let zeichnungStandBeimOeffnen = null;
+// Änderungen seit dem letzten bewussten „Speichern"?
+let zeichnungSchmutzig = false;
+// Einmal-Freigabe für den hauseigenen Weg aus der Zeichnung heraus („Dateien"
+// bzw. „← Dateien"): dort wird gespeichert, gefragt wird nicht.
+let zeichnungOhneRueckfrage = false;
+
 function loadLinkedProjects() {
-  try {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (_) {
-    return [];
-  }
+  // Die Projektliste liegt seit der Dateiverwaltung im Dokumentenspeicher.
+  // Zurück kommen die lebenden Datensätze – wer hineinschreibt, schreibt in
+  // das Dokument selbst.
+  return Speicher.datenListe();
 }
 
 /** Lädt die Zeichnung des verknüpften Projekts (falls vorhanden) in `state`. */
@@ -670,6 +676,8 @@ function loadFromLinkedProject() {
   const proj = list.find(p => p.id === id);
   if (!proj) return;
   linkedProjectId = id;
+  const dok = Speicher.dokZuDaten(id);
+  aktuellesDok2d = dok ? dok.id : null;
 
   const projName = (proj.name && proj.name.trim()) ||
     [[proj.anschrift?.strasse, proj.anschrift?.nummer].filter(Boolean).join(' '),
@@ -696,26 +704,93 @@ function loadFromLinkedProject() {
   }
 }
 
-/** Schreibt die aktuelle Zeichnung in das verknüpfte Projekt (ohne Verzögerung). */
-function writeToLinkedProject() {
-  if (!linkedProjectId) return;
-  const list = loadLinkedProjects();
-  const idx = list.findIndex(p => p.id === linkedProjectId);
-  if (idx < 0) return;
-  list[idx].name = state.project || list[idx].name || '';
-  list[idx].zeichnung2d = {
+/** Die aktuelle Zeichnung als Datensatz – so, wie sie im Projekt landet. */
+function zeichnungAlsDaten() {
+  return {
     depth: state.depth, sections: state.sections,
     abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
     aufmass: aufmassRules(), ecken: state.ecken || {},
     grundriss: state.grundriss || null, bordbretter: state.bordbretter || [],
     _sId, _bId
   };
-  list[idx].geaendert = new Date().toISOString().slice(0, 10);
-  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+}
+
+/** Schreibt die aktuelle Zeichnung in das verknüpfte Projekt (ohne Verzögerung). */
+function writeToLinkedProject() {
+  if (!linkedProjectId) return;
+  const list = loadLinkedProjects();
+  const proj = list.find(p => p.id === linkedProjectId);
+  if (!proj) return;
+  proj.name = state.project || proj.name || '';
+  proj.zeichnung2d = zeichnungAlsDaten();
+  proj.geaendert = new Date().toISOString().slice(0, 10);
+
+  if (aktuellesDok2d) {
+    Speicher.umbenenne(aktuellesDok2d, proj.name);
+    Speicher.setzeVorschau(aktuellesDok2d, erzeugeVorschau2d());
+    Speicher.schreibe(aktuellesDok2d);
+  } else {
+    Speicher.uebernimmDaten(list, linkedProjectId);
+  }
+}
+
+// ── Vorschaubild (Thumbnail) der Zeichnung ─────────────────────────────────
+// Bewusst nicht die volle Zeichenfläche abgezogen: die trägt Beschriftungen,
+// Maßketten und Eck-Symbole und wäre als Miniatur sowohl unleserlich als auch
+// unnötig groß. Stattdessen ein schlanker Umriss aus den Feldern selbst –
+// wenige Kilobyte, sofort erkennbar, unabhängig von der Darstellung im Editor.
+
+const VORSCHAU_B = 320, VORSCHAU_H = 180, VORSCHAU_RAND = 12;
+
+/** @param zeichnung  optional: eine gespeicherte Zeichnung (`data.zeichnung2d`).
+ *  Ohne Angabe wird die gerade geöffnete Zeichnung abgebildet. */
+function erzeugeVorschau2d(zeichnung) {
+  const quelle = zeichnung || state;
+  const felder = [];
+  (quelle.sections || []).forEach(sec => {
+    const dir = secVec(sec), o = outVec(dir, sec.flip);
+    const tiefe = (quelle.depth || 0.73) * PX_PER_M;
+    let x = sec.x0, y = sec.y0;
+    (sec.bays || []).forEach(bay => {
+      const len = (bay.len || 0) * PX_PER_M;
+      // Vier Ecken des Feldes (Achse + Gerüsttiefe nach außen)
+      const p1 = { x, y };
+      const p2 = { x: x + dir.dx * len, y: y + dir.dy * len };
+      const p3 = { x: p2.x + o.dx * tiefe, y: p2.y + o.dy * tiefe };
+      const p4 = { x: p1.x + o.dx * tiefe, y: p1.y + o.dy * tiefe };
+      felder.push([p1, p2, p3, p4]);
+      x = p2.x; y = p2.y;
+    });
+  });
+  if (!felder.length) return null;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  felder.forEach(f => f.forEach(p => {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }));
+  const breite = Math.max(maxX - minX, 1), hoehe = Math.max(maxY - minY, 1);
+  const massstab = Math.min((VORSCHAU_B - 2 * VORSCHAU_RAND) / breite,
+                            (VORSCHAU_H - 2 * VORSCHAU_RAND) / hoehe);
+  const versatzX = (VORSCHAU_B - breite * massstab) / 2 - minX * massstab;
+  const versatzY = (VORSCHAU_H - hoehe * massstab) / 2 - minY * massstab;
+  const rund = n => Math.round(n * 10) / 10;
+
+  const pfad = felder.map(f =>
+    'M' + f.map(p => rund(p.x * massstab + versatzX) + ' ' + rund(p.y * massstab + versatzY)).join('L') + 'Z'
+  ).join('');
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VORSCHAU_B} ${VORSCHAU_H}">` +
+    `<path d="${pfad}" fill="#4CC9F0" fill-opacity=".22" stroke="#4CC9F0" stroke-width="1.6" ` +
+    `stroke-linejoin="round"/></svg>`;
+  // Data-URL statt Base64: bleibt lesbar, spart die Aufblähung um ein Drittel.
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 /** Schreibt die aktuelle Zeichnung (gebündelt) in das verknüpfte Projekt. */
 function scheduleAutosave2d() {
+  zeichnungSchmutzig = true;
   if (!linkedProjectId) return;
   if (autosave2dTimer) clearTimeout(autosave2dTimer);
   autosave2dTimer = setTimeout(() => {
@@ -6364,7 +6439,21 @@ function applyRect() {
 
 // ── Save / Load ────────────────────────────────────────────────────────────
 
+/** Schreibt die Zeichnung in ihr Dokument und markiert sie als gesichert.
+ *  Ab hier fragt der Verlassen-Dialog nicht mehr nach. */
+function speichereZeichnung() {
+  if (!aktuellesDok2d) return;
+  writeToLinkedProject();
+  zeichnungStandBeimOeffnen = JSON.stringify(zeichnungAlsDaten());
+  zeichnungSchmutzig = false;
+  syncBackLink();
+}
+
 function savePlan() {
+  // „Speichern" sichert zuerst das Dokument selbst und legt danach – wie
+  // bisher – zusätzlich eine JSON-Datei zum Mitnehmen ab.
+  speichereZeichnung();
+  showToast('Gespeichert');
   const payload = JSON.stringify({ version: 3, state, _sId, _bId });
   const blob = new Blob([payload], { type: 'application/json' });
   const a = document.createElement('a');
@@ -6407,10 +6496,21 @@ function onLoadFile(e) {
       _sId = d._sId || state.sections.length;
       _bId = d._bId || state.sections.flatMap(x => x.bays).length;
       normalizeState();
+      // Der Inhalt ist ein anderer: Rückgängig beginnt neu, sonst ließe sich
+      // in die vorherige Zeichnung „zurückspulen".
+      selectedSi = null; selectedBi = null;
+      bulkMode = false; bulkSelected.clear();
+      undoStack = []; redoStack = [];
+      lastUndoSnapshot = serializeUndoState();
+      updateUndoRedoButtons();
+      zeichnungSchmutzig = true;
       document.getElementById('projectName').value = state.project;
       document.getElementById('scaffDepth').value  = state.depth;
       autoFit = true;
+      invalidateEckenCache();
+      invalidateViewCaches();
       renderAll();
+      scheduleAutosave2d();
       updateZoomResetBtn();
     } catch { alert('Fehler beim Laden: Ungültige Datei.'); }
   };
@@ -10013,6 +10113,39 @@ function init() {
     if (v > 0) { state.depth = v; requestRender(); }
   });
 
+  // „Neue Zeichnung" ist bewusst auch mitten in einer offenen Zeichnung
+  // erreichbar – der Zustand des alten Dokuments wird dabei vollständig
+  // aufgeräumt (schliesseDokument2d) und die Adresse bleibt im Zeichner.
+  document.getElementById('td-neueZeichnungBtn')?.addEventListener('click', () => {
+    // Kein Rückfrage-Dialog: „Neue Zeichnung" ist eine Anlege-Aktion, keine
+    // Aufgabe-Aktion. Die laufende Zeichnung wird gesichert und bleibt als
+    // eigenes Dokument bestehen – genau das war bisher nicht möglich.
+    speichereZeichnung();
+    neueZeichnung2d(zweidBrowser ? zweidBrowser.zustand.ordnerId : null);
+    _vpCache = null;
+    fitCameraToContent();
+    applyCamera();
+    renderAllNow();
+    showToast('Neue Zeichnung begonnen');
+  });
+
+  // Wie „Zurück" im Aufmaß-Modul: der hauseigene Weg aus der Zeichnung heraus
+  // speichert und wechselt – ohne Rückfrage. Gefragt wird nur, wer die
+  // Zeichnung auf anderem Weg verlässt.
+  document.getElementById('td-dateienBtn')?.addEventListener('click', () => {
+    speichereZeichnung();
+    zeichnungOhneRueckfrage = true;
+    if (typeof Shell !== 'undefined') Shell.gehe('#/2d');
+  });
+
+  // Der „← Dateien"-Link in der Kopfzeile führt denselben Weg.
+  document.querySelector('#td-root .back-link')?.addEventListener('click', e => {
+    e.preventDefault();
+    speichereZeichnung();
+    zeichnungOhneRueckfrage = true;
+    if (typeof Shell !== 'undefined') Shell.gehe('#/2d');
+  });
+
   document.getElementById('savePlanBtn').addEventListener('click', savePlan);
   document.getElementById('loadPlanBtn').addEventListener('click', triggerLoad);
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
@@ -10145,33 +10278,288 @@ function init() {
 function syncBackLink() {
   const backLink = document.querySelector('#td-root .back-link');
   if (!backLink) return;
-  backLink.setAttribute('href', linkedProjectId ? '#/aufmass' : '#/');
-  backLink.textContent = linkedProjectId ? '← Aufmaß' : '← Start';
+  // Zurück führt immer in die Dateiübersicht dieses Moduls – von dort aus
+  // geht es weiter zu einer anderen Zeichnung oder zurück zum Start.
+  backLink.setAttribute('href', '#/2d');
+  backLink.textContent = '← Dateien';
+
+  const nameEl = document.getElementById('td-dokName');
+  if (!nameEl) return;
+  const dok = aktuellesDok2d ? Speicher.dok(aktuellesDok2d) : null;
+  if (dok) {
+    nameEl.hidden = false;
+    nameEl.textContent = Speicher.anzeigename(dok);
+  } else {
+    nameEl.hidden = false;
+    nameEl.textContent = 'Neue Zeichnung (noch nicht gespeichert)';
+  }
 }
 
-/** Setzt die Zeichnung auf „leer" zurück (Projektwechsel ohne Zeichnung). */
+// ============================================================================
+//  Dokument-Lebenszyklus des Zeichners
+// ============================================================================
+// Der Zeichner arbeitet immer an genau einem Dokument. Beim Öffnen entsteht ein
+// sauberer Zustand, beim Schließen wird restlos aufgeräumt – Zeichnung,
+// Auswahl, Mehrfachauswahl, Rückgängig-Stapel, Zwischenablage, Kamera,
+// Zeichenmodi und offene Dialoge. Genau daran scheiterte bisher das Anlegen
+// einer neuen Zeichnung: der Zustand des alten Dokuments blieb stehen.
+
+/** Setzt den kompletten Zustand des Zeichners auf „leer" zurück.
+ *  Vollständig heißt: es darf nichts aus dem vorherigen Dokument übrig
+ *  bleiben, was sich später in Zahlen, Auswahl oder Rückgängig zeigen könnte. */
 function resetState2d() {
   state = {
     project: '', depth: 0.73, abschnitte: [], hideUnassigned: false,
     aufmass: null, ecken: {}, grundriss: null, bordbretter: [], sections: []
   };
-  _sId = 0; _bId = 0;
+
+  // ID-Zähler
+  _sId = 0; _bId = 0; _aId = 0;
+
+  // Verknüpfung
   linkedProjectId = null;
+  aktuellesDok2d  = null;
+  zeichnungStandBeimOeffnen = null;
+  zeichnungSchmutzig = false;
+
+  // Auswahl und Mehrfachauswahl
+  selectedSi = null; selectedBi = null;
+  bulkMode = false; bulkSelected.clear();
+  bulkKonsTyp = KONSOLE_TYPES_2D[0];
+  bulkKonsLagen = '1'; bulkKonsBilling = 'lagen'; bulkKonsMeter = null;
+  bulkHL = null; bulkHR = null;
+
+  // Rückgängig / Wiederholen samt Zwischenablage
+  undoStack = []; redoStack = [];
+  lastUndoSnapshot = null;
+  if (undoSnapshotTimer) { clearTimeout(undoSnapshotTimer); undoSnapshotTimer = null; }
+  copiedBayData = null;
+
+  // Laufende Eingaben
+  addCtx = null; pendingDir = 'S'; pendingLen = null; addCtxDirFixed = false;
+  drag = null;
+
+  // Ausstehender Autosave des alten Dokuments
+  if (autosave2dTimer) { clearTimeout(autosave2dTimer); autosave2dTimer = null; }
+
+  // Kamera
+  camera = { cx: 200, cy: 150, scale: 1 };
+  autoFit = true;
+
+  invalidateEckenCache();
+  invalidateViewCaches();
+}
+
+/** Räumt auch die Oberfläche auf: offene Sheets, Zeichenmodi, Formularfelder. */
+function schliesseDokument2d() {
+  // Immer sichern, nicht nur einen noch ausstehenden Autosave abarbeiten:
+  // beim Schließen darf unter keinen Umständen etwas verloren gehen.
+  if (aktuellesDok2d) { flushAutosave2d(); writeToLinkedProject(); }
+  if (typeof closeSheet === 'function') closeSheet();
+  if (typeof closePhotosSheet === 'function') closePhotosSheet();
+  if (bordbrettModus) brichBordbrettZeichnenAb();
+  if (grundrissMessen) brichGrundrissMessungAb();
+  resetState2d();
+  const nameFeld  = document.getElementById('projectName');
+  const tiefeFeld = document.getElementById('scaffDepth');
+  if (nameFeld)  nameFeld.value  = '';
+  if (tiefeFeld) tiefeFeld.value = state.depth;
+  updateUndoRedoButtons();
+  updateBordbrettBar();
+}
+
+/** Übernimmt einen frisch geladenen Zustand als Ausgangspunkt: Rückgängig
+ *  beginnt hier, das Dokument gilt als unverändert. */
+function uebernimmAlsAusgangszustand() {
+  normalizeState();
+  undoStack = []; redoStack = [];
+  lastUndoSnapshot = serializeUndoState();
+  updateUndoRedoButtons();
+  zeichnungStandBeimOeffnen = JSON.stringify(zeichnungAlsDaten());
+  zeichnungSchmutzig = false;
+  const nameFeld  = document.getElementById('projectName');
+  const tiefeFeld = document.getElementById('scaffDepth');
+  if (nameFeld)  nameFeld.value  = state.project;
+  if (tiefeFeld) tiefeFeld.value = state.depth;
+  autoFit = true;
+  syncBackLink();
+}
+
+/** Öffnet ein Dokument aus dem Speicher im Zeichner. */
+function oeffneDokument2d(dokId) {
+  const dok = Speicher.dok(dokId);
+  if (!dok || !dok.data) return false;
+
+  schliesseDokument2d();
+
+  linkedProjectId = dok.data.id;
+  aktuellesDok2d  = dok.id;
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, dok.data.id);
+  Speicher.merkeGeoeffnet(dok.id, 'zweid');
+
+  const proj = dok.data;
+  const projName = Speicher.anzeigename(dok);
+  const z = proj.zeichnung2d;
+  if (z && Array.isArray(z.sections)) {
+    state.project    = projName || z.project || '';
+    state.depth      = z.depth || 0.73;
+    state.sections   = z.sections;
+    state.abschnitte = Array.isArray(z.abschnitte) ? z.abschnitte : [];
+    state.hideUnassigned = !!z.hideUnassigned;
+    state.aufmass    = z.aufmass || null;
+    state.ecken      = z.ecken || {};
+    state.grundriss  = z.grundriss || null;
+    state.bordbretter = Array.isArray(z.bordbretter) ? z.bordbretter : [];
+    _sId = z._sId || state.sections.length;
+    _bId = z._bId || state.sections.flatMap(sec => sec.bays || []).length;
+  } else {
+    state.project = projName || '';
+  }
+
+  uebernimmAlsAusgangszustand();
+  return true;
+}
+
+/** Legt eine neue, leere Zeichnung an – jederzeit, auch aus einer offenen
+ *  Zeichnung heraus. Das war bisher nicht möglich. */
+function neueZeichnung2d(ordnerId) {
+  schliesseDokument2d();
+  const daten = leererProjektdatensatz();
+  const dok = Speicher.neu({
+    modul: 'zweid',
+    name: 'Neue Zeichnung',
+    ordnerId: ordnerId || null,
+    data: daten
+  });
+  Speicher.merkeGeoeffnet(dok.id, 'zweid');
+  linkedProjectId = daten.id;
+  aktuellesDok2d  = dok.id;
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, daten.id);
+  state.project = 'Neue Zeichnung';
+  uebernimmAlsAusgangszustand();
+  return dok;
+}
+
+/** Stellt den Stand beim Öffnen wieder her (Antwort „Verwerfen"). */
+function verwirfZeichnungsAenderungen() {
+  if (!zeichnungStandBeimOeffnen || !aktuellesDok2d) return;
+  const z = JSON.parse(zeichnungStandBeimOeffnen);
+  state.depth      = z.depth;
+  state.sections   = z.sections || [];
+  state.abschnitte = z.abschnitte || [];
+  state.hideUnassigned = !!z.hideUnassigned;
+  state.aufmass    = z.aufmass || null;
+  state.ecken      = z.ecken || {};
+  state.grundriss  = z.grundriss || null;
+  state.bordbretter = z.bordbretter || [];
+  _sId = z._sId || 0; _bId = z._bId || 0;
   selectedSi = null; selectedBi = null;
   bulkMode = false; bulkSelected.clear();
   invalidateEckenCache();
   invalidateViewCaches();
+  normalizeState();
+  writeToLinkedProject();
+  undoStack = []; redoStack = [];
+  lastUndoSnapshot = serializeUndoState();
+  updateUndoRedoButtons();
+  zeichnungSchmutzig = false;
+  autoFit = true;
+  renderAll();
+}
+
+// ============================================================================
+//  Dateiübersicht des 2D-Moduls
+// ============================================================================
+// Dieselbe Komponente wie im Aufmaß-Modul (dateien.js) – nur mit Vorschau-
+// bildern der Zeichnungen und den Beschriftungen dieses Moduls.
+
+let zweidBrowser = null;
+
+/** Erzeugt Vorschaubilder für Zeichnungen, die noch keines haben – etwa
+ *  Projekte aus der Zeit vor der Dateiverwaltung. Läuft nur einmal je
+ *  Dokument; danach steckt das Bild im Dokument selbst. */
+function ergaenzeVorschauen2d() {
+  Speicher.liste('zweid').forEach(dok => {
+    if (dok.thumbnail) return;
+    const z = dok.data && dok.data.zeichnung2d;
+    if (!z || !Array.isArray(z.sections) || !z.sections.length) return;
+    const bild = erzeugeVorschau2d(z);
+    if (bild) Speicher.setzeVorschau(dok.id, bild);
+  });
+}
+
+function initDateiuebersicht2d() {
+  const host = document.getElementById('td-dateienHost');
+  if (!host || zweidBrowser) return;
+
+  zweidBrowser = Dateibrowser.erstelle({
+    modul: 'zweid',
+    host,
+    eyebrow: 'Modul 2 · 2D-Aufmaß',
+    titel: 'Zeichnungen',
+    wurzelName: 'Alle Zeichnungen',
+    dateienTitel: 'Zeichnungen',
+    neuLabel: '+ Neue Zeichnung',
+    leerIcon: '📐',
+    leerTitel: 'Noch keine Zeichnungen',
+    leerText: 'Beginnen Sie mit einer neuen Zeichnung – Felder, Achsen und Abschnitte entstehen dann auf der Zeichenfläche.',
+    thumbnails: true,
+
+    suchfelder: dok => {
+      const a = (dok.data && dok.data.anschrift) || {};
+      return [a.bauherr || '', a.strasse || '', a.ort || ''];
+    },
+
+    karteMarken: dok => {
+      const z = dok.data && dok.data.zeichnung2d;
+      const felder = z && Array.isArray(z.sections)
+        ? z.sections.reduce((n, sec) => n + ((sec.bays || []).length), 0) : 0;
+      return `<span class="dv-marke dv-marke-akzent">${felder} Feld${felder === 1 ? '' : 'er'}</span>`;
+    },
+
+    karteZusatz: dok => {
+      const z = dok.data && dok.data.zeichnung2d;
+      if (!z || !Array.isArray(z.sections)) {
+        return '<div class="dv-karte-kennzahlen">Noch nichts gezeichnet</div>';
+      }
+      let flaeche = 0;
+      z.sections.forEach(sec => (sec.bays || []).forEach(bay => {
+        const h = [bay.hL, bay.hR].filter(v => v != null && !isNaN(v) && v > 0);
+        if (h.length && bay.len) flaeche += bay.len * Math.min(...h);
+      }));
+      const abschnitte = Array.isArray(z.abschnitte) ? z.abschnitte.length : 0;
+      const teile = [geruestFmtNum(flaeche) + ' m²'];
+      if (abschnitte) teile.push(abschnitte + ' Abschnitt' + (abschnitte === 1 ? '' : 'e'));
+      teile.push('Tiefe ' + geruestFmtNum(z.depth || 0.73) + ' m');
+      return `<div class="dv-karte-kennzahlen">${teile.join(' · ')}</div>`;
+    },
+
+    zusatzAktionen: dok => [
+      { label: 'Im Aufmaß öffnen', onClick: () => {
+          if (typeof AufmassModul !== 'undefined') AufmassModul.oeffneDokument(dok.id);
+        } }
+    ],
+
+    neuAktion: () => ZweiDModul.neuesDokument(),
+    oeffnen: dok => ZweiDModul.oeffneDokument(dok.id),
+    nachAenderung: () => { if (typeof Shell !== 'undefined') Shell.aktualisiereHub(); }
+  });
+}
+
+/** Wechselt in den Zeichner (und stellt die Kamera richtig ein). */
+function zeigeZeichner() {
+  if (typeof Shell !== 'undefined') Shell.gehe('#/2d/editor');
 }
 
 // ============================================================================
 //  Modul-Schnittstelle zur Shell
 // ============================================================================
-// Früher startete der Zeichner selbst per DOMContentLoaded. Jetzt entscheidet
-// die Shell, wann aufgebaut (`mount`) und wann sichtbar geschaltet wird
-// (`aktiviere`). Der Aufbau passiert bewusst erst beim ersten Öffnen des
+// Die Shell entscheidet, wann aufgebaut (`mount`) und wann sichtbar geschaltet
+// wird (`aktiviere`). Der Aufbau passiert bewusst erst beim ersten Öffnen des
 // Moduls: die Kamera braucht eine sichtbare Zeichenfläche, um korrekt auf den
-// Inhalt einzupassen. Danach bleibt das Modul im Speicher – wer zeichnet, zum
-// Hub wechselt und zurückkommt, findet seine Zeichnung unverändert vor.
+// Inhalt einzupassen. Danach bleibt das Modul im Speicher – wer zeichnet, in
+// die Dateiübersicht wechselt und zurückkommt, findet seine Zeichnung
+// unverändert vor.
 
 const ZweiDModul = (() => {
   let gemountet = false;
@@ -10186,24 +10574,29 @@ const ZweiDModul = (() => {
       init();
     },
 
-    aktiviere() {
-      if (!gemountet) { this.mount(); return; }
+    aktiviere(unter) {
+      // Die Dateiübersicht kommt ohne den Zeichner aus – der wird erst
+      // aufgebaut, wenn wirklich gezeichnet wird. Die Kamera braucht dafür
+      // ohnehin eine sichtbare Zeichenfläche.
+      if (unter === 'dateien') {
+        initDateiuebersicht2d();
+        ergaenzeVorschauen2d();
+        if (zweidBrowser) zweidBrowser.rendere();
+        return;
+      }
 
-      // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
-      // gehört zu diesem Projekt eine andere Zeichnung.
-      const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) || null;
-      if (id !== linkedProjectId) {
-        flushAutosave2d();
-        resetState2d();
-        loadFromLinkedProject();
-        normalizeState();
-        undoStack = [];
-        redoStack = [];
-        lastUndoSnapshot = serializeUndoState();
-        updateUndoRedoButtons();
-        document.getElementById('projectName').value = state.project;
-        document.getElementById('scaffDepth').value  = state.depth;
-        autoFit = true;
+      const ersterAufbau = !gemountet;
+      this.mount();
+      initDateiuebersicht2d();
+
+      if (!ersterAufbau) {
+        // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
+        // gehört dazu eine andere Zeichnung.
+        const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) || null;
+        if (id && id !== linkedProjectId) {
+          const dok = Speicher.dokZuDaten(id);
+          if (dok) oeffneDokument2d(dok.id);
+        }
       }
 
       syncBackLink();
@@ -10227,6 +10620,52 @@ const ZweiDModul = (() => {
 
     hatUngespeicherte() {
       return gemountet && autosave2dTimer !== null;
+    },
+
+    speichereJetzt() {
+      if (gemountet) flushAutosave2d();
+    },
+
+    /** Vor dem Verlassen des Zeichners: Speichern / Verwerfen / Abbrechen. */
+    async darfVerlassen() {
+      if (!gemountet || !aktuellesDok2d) return true;
+      if (zeichnungOhneRueckfrage) { zeichnungOhneRueckfrage = false; zeichnungSchmutzig = false; return true; }
+      if (!zeichnungSchmutzig) return true;
+      if (JSON.stringify(zeichnungAlsDaten()) === zeichnungStandBeimOeffnen) {
+        zeichnungSchmutzig = false;
+        return true;
+      }
+      const dok = Speicher.dok(aktuellesDok2d);
+      const wahl = await DvDialog.auswahl({
+        titel: 'Ungespeicherte Änderungen',
+        hinweis: `„${dok ? Speicher.anzeigename(dok) : 'Die Zeichnung'}" wurde geändert. Was soll damit geschehen?`,
+        knoepfe: [
+          { id: 'abbrechen', label: 'Abbrechen' },
+          { id: 'verwerfen', label: 'Verwerfen', stil: 'gefahr' },
+          { id: 'speichern', label: 'Speichern', stil: 'primaer' }
+        ]
+      });
+      if (wahl === 'speichern') { speichereZeichnung(); return true; }
+      if (wahl === 'verwerfen') { verwirfZeichnungsAenderungen(); return true; }
+      return false;
+    },
+
+    /** Öffnet ein Dokument des Speichers im Zeichner. */
+    oeffneDokument(dokId) {
+      this.mount();
+      if (oeffneDokument2d(dokId)) zeigeZeichner();
+    },
+
+    /** Neue Zeichnung – jederzeit möglich, auch aus einer offenen heraus. */
+    neuesDokument() {
+      this.mount();
+      neueZeichnung2d(zweidBrowser ? zweidBrowser.zustand.ordnerId : null);
+      zeigeZeichner();
+    },
+
+    zeigeUebersicht() {
+      this.mount();
+      if (typeof Shell !== 'undefined') Shell.gehe('#/2d');
     }
   };
 })();
