@@ -1,0 +1,484 @@
+/* ===========================================================================
+   Shell: Ansichtswechsel, Modul-Umschalter, Startbildschirm (Hub)
+   ---------------------------------------------------------------------------
+   Alles hier gehört der Hülle, nicht den Modulen. Die Modul-Stylesheets
+   (style.css / viewer2d.css) werden davon nicht berührt.
+   =========================================================================== */
+
+html, body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-text);
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Ansichten ──────────────────────────────────────────────────────────────
+   Beide Module bleiben nach dem ersten Öffnen im Dokument; nur die aktive
+   Ansicht ist sichtbar. Deshalb bleibt beim Wechsel jeder Zustand erhalten. */
+
+.view { display: none; }
+.view.view--aktiv { display: block; }
+#hub-root.view--aktiv { display: flex; }
+
+/* Die Modulansichten bekommen oben Platz für die Umschalter-Pille. */
+body[data-modul="aufmass"] #am-root,
+body[data-modul="2d"] #td-root {
+  padding-top: calc(var(--touch) + 18px + env(safe-area-inset-top, 0px));
+  animation: view-auf var(--t-lang) var(--federnd) both;
+}
+
+/* Bewusst nur die Deckkraft, kein transform: das 2D-Modul misst beim
+   Sichtbarwerden seine Zeichenfläche, um die Kamera exakt einzupassen – ein
+   laufendes scale() würde diese Messung verfälschen (die Zeichnung säße nach
+   jedem Modulwechsel ein Stück daneben). Die räumliche Bewegung übernimmt der
+   Kachel-Übergang auf dem Startbildschirm. */
+@keyframes view-auf {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ===========================================================================
+   Modul-Umschalter – kompakte Pille oben links, immer sichtbar
+   =========================================================================== */
+
+.mod-switcher {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: calc(10px + env(safe-area-inset-left, 0px));
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: var(--r-pille);
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--schatten-m);
+  transition: box-shadow var(--t-normal) var(--federnd);
+}
+
+.mod-switcher-home {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--r-pille);
+  text-decoration: none;
+  flex: none;
+}
+
+.mod-switcher-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent-aufmass) 0 50%, var(--accent-2d) 50% 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .25) inset;
+  transition: transform var(--t-normal) var(--federnd);
+}
+.mod-switcher-home:hover .mod-switcher-mark { transform: rotate(-8deg) scale(1.08); }
+.mod-switcher-home:active .mod-switcher-mark { transform: scale(.94); }
+
+.mod-switcher-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+  border-left: 1px solid var(--hairline);
+}
+
+.mod-tab {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding: 0 16px;
+  border-radius: var(--r-pille);
+  font-family: var(--font-display);
+  font-size: .88rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--t-normal) var(--federnd), background var(--t-normal) var(--federnd);
+}
+
+.mod-tab:hover { color: var(--text); }
+.mod-tab:active { transform: scale(.97); }
+
+/* Weicher Farbwechsel: die aktive Zunge trägt die Modulfarbe. */
+.mod-tab[data-ziel="aufmass"].aktiv {
+  color: var(--accent-kontrast);
+  background: var(--accent-aufmass);
+}
+.mod-tab[data-ziel="2d"].aktiv {
+  color: var(--accent-kontrast);
+  background: var(--accent-2d);
+}
+
+/* Auf dem Startbildschirm liegt der Umschalter im Fluss der Seite. */
+body[data-modul="hub"] .mod-switcher { box-shadow: var(--schatten-s); }
+
+/* ===========================================================================
+   Startbildschirm (Hub)
+   =========================================================================== */
+
+#hub-root {
+  min-height: 100dvh;
+  flex-direction: column;
+  justify-content: center;
+  padding: calc(var(--touch) + 34px + env(safe-area-inset-top, 0px)) 20px 40px;
+  background:
+    radial-gradient(1100px 620px at 12% -8%,  rgba(255, 201, 60, .10), transparent 60%),
+    radial-gradient(1000px 640px at 92% 108%, rgba(76, 201, 240, .12), transparent 62%),
+    var(--bg-deep);
+}
+
+.hub-wrap {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.hub-head { margin-bottom: 30px; }
+
+.hub-eyebrow {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--muted-schwach);
+}
+
+.hub-title {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 6vw, 3.1rem);
+  font-weight: 700;
+  line-height: 1.06;
+  letter-spacing: -.025em;
+  color: var(--text);
+}
+
+.hub-sub {
+  margin: 0;
+  max-width: 48ch;
+  font-size: .96rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.hub-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Kachel ─────────────────────────────────────────────────────────────── */
+
+.hub-tile {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 22px;
+  border-radius: var(--r-karte);
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--schatten-m);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    transform var(--t-normal) var(--federnd),
+    box-shadow var(--t-normal) var(--federnd),
+    border-color var(--t-normal) var(--federnd);
+}
+
+.hub-tile:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--schatten-l);
+}
+.hub-tile:active { transform: translateY(-1px) scale(.995); }
+
+.hub-tile[data-ziel="aufmass"]:hover { border-color: rgba(255, 201, 60, .45); }
+.hub-tile[data-ziel="2d"]:hover      { border-color: rgba(76, 201, 240, .45); }
+
+/* Farbschimmer, der zur Modulfarbe gehört */
+.hub-tile-glow {
+  position: absolute;
+  inset: -40% -10% auto -10%;
+  height: 200px;
+  pointer-events: none;
+  opacity: .5;
+  transition: opacity var(--t-lang) var(--federnd);
+}
+.hub-tile[data-ziel="aufmass"] .hub-tile-glow {
+  background: radial-gradient(420px 180px at 16% 0%, rgba(255, 201, 60, .30), transparent 70%);
+}
+.hub-tile[data-ziel="2d"] .hub-tile-glow {
+  background: radial-gradient(420px 180px at 16% 0%, rgba(76, 201, 240, .30), transparent 70%);
+}
+.hub-tile:hover .hub-tile-glow { opacity: 1; }
+
+.hub-tile-body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.hub-tile-text { flex: 1 1 auto; min-width: 0; }
+
+.hub-tile-kicker {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 3px 9px;
+  border-radius: var(--r-pille);
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.hub-tile[data-ziel="aufmass"] .hub-tile-kicker {
+  color: var(--accent-aufmass);
+  background: rgba(255, 201, 60, .12);
+  border: 1px solid rgba(255, 201, 60, .28);
+}
+.hub-tile[data-ziel="2d"] .hub-tile-kicker {
+  color: var(--accent-2d);
+  background: rgba(76, 201, 240, .12);
+  border: 1px solid rgba(76, 201, 240, .28);
+}
+
+.hub-tile-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+.hub-tile[data-ziel="aufmass"] .hub-tile-title { color: var(--accent-aufmass); }
+.hub-tile[data-ziel="2d"]      .hub-tile-title { color: var(--accent-2d); }
+
+.hub-tile-desc {
+  margin: 0 0 10px;
+  font-size: .95rem;
+  color: var(--text);
+  opacity: .88;
+}
+
+.hub-tile-meta {
+  display: block;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .76rem;
+  color: var(--muted-schwach);
+}
+
+.hub-tile-go {
+  position: absolute;
+  right: 22px;
+  bottom: 18px;
+  font-family: var(--font-mono);
+  font-size: .76rem;
+  letter-spacing: .04em;
+  color: var(--muted);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity var(--t-normal) var(--federnd), transform var(--t-normal) var(--federnd);
+}
+.hub-tile:hover .hub-tile-go,
+.hub-tile:focus-visible .hub-tile-go { opacity: 1; transform: none; }
+
+/* ── Verspieltes Detail: lebendige Vorschau in den Kacheln ─────────────────
+   Genau hier – und nur hier – darf die Oberfläche spielen. Kachel 1 baut eine
+   Tabellenzeile auf, Kachel 2 zeichnet ein Gerüst Feld für Feld. */
+
+.hub-preview {
+  flex: 0 0 auto;
+  width: 240px;
+  border-radius: var(--r-karte-klein);
+  background: rgba(9, 15, 27, .55);
+  border: 1px solid var(--hairline);
+  padding: 12px;
+  overflow: hidden;
+}
+
+/* Kachel 1: Tabellenzeilen */
+.hub-preview-table { display: flex; flex-direction: column; gap: 5px; }
+
+.pv-row {
+  display: grid;
+  grid-template-columns: 1fr 46px 46px 52px;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 7px;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .66rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, .03);
+}
+
+.pv-head {
+  background: none;
+  color: var(--muted-schwach);
+  font-size: .6rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding-bottom: 0;
+}
+
+.pv-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-num  { text-align: right; color: var(--accent-aufmass); }
+.pv-head .pv-num, .pv-head .pv-c2, .pv-head .pv-c3, .pv-head .pv-c4 { text-align: right; color: inherit; }
+
+.pv-r1, .pv-r2, .pv-r3 {
+  animation: pv-zeile 5.4s var(--federnd) infinite;
+  opacity: 0;
+}
+.pv-r1 { animation-delay: .2s; }
+.pv-r2 { animation-delay: 1.0s; }
+.pv-r3 { animation-delay: 1.8s; }
+
+@keyframes pv-zeile {
+  0%             { opacity: 0; transform: translateY(6px); }
+  8%, 74%        { opacity: 1; transform: none; }
+  88%, 100%      { opacity: 0; transform: translateY(-4px); }
+}
+
+/* Kachel 2: Gerüst-Silhouette, Feld für Feld */
+.hub-preview-plan { padding: 10px; }
+.pv-svg { display: block; width: 100%; height: auto; }
+
+.pv-grid path {
+  stroke: rgba(255, 255, 255, .07);
+  stroke-width: 1;
+  fill: none;
+}
+
+.pv-bay {
+  fill: rgba(76, 201, 240, .16);
+  stroke: var(--accent-2d);
+  stroke-width: 1.6;
+  opacity: 0;
+  animation: pv-feld 6s var(--federnd) infinite;
+}
+.pv-b1 { animation-delay: .15s; }
+.pv-b2 { animation-delay: .45s; }
+.pv-b3 { animation-delay: .75s; }
+.pv-b4 { animation-delay: 1.05s; }
+.pv-b5 { animation-delay: 1.5s; }
+.pv-b6 { animation-delay: 1.8s; }
+
+@keyframes pv-feld {
+  0%        { opacity: 0; transform: scale(.9); }
+  6%, 78%   { opacity: 1; transform: none; }
+  92%, 100% { opacity: 0; }
+}
+
+.pv-eck {
+  fill: rgba(255, 201, 60, .22);
+  stroke: var(--accent-aufmass);
+  stroke-width: 1.4;
+  opacity: 0;
+  animation: pv-feld 6s var(--federnd) infinite;
+  animation-delay: 2.1s;
+}
+
+.pv-dim {
+  stroke: var(--muted-schwach);
+  stroke-width: 1;
+  stroke-dasharray: 160;
+  stroke-dashoffset: 160;
+  fill: none;
+  animation: pv-mass 6s var(--federnd) infinite;
+  animation-delay: 2.4s;
+}
+
+@keyframes pv-mass {
+  0%        { stroke-dashoffset: 160; }
+  14%, 78%  { stroke-dashoffset: 0; }
+  92%, 100% { stroke-dashoffset: 160; opacity: 0; }
+}
+
+.pv-dim-txt {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0;
+  animation: pv-feld 6s var(--federnd) infinite;
+  animation-delay: 2.6s;
+}
+
+/* Kachel wächst in die Modulansicht hinein (Shared-Element-Übergang). */
+.hub-tile-geist {
+  position: fixed;
+  z-index: 1200;
+  margin: 0;
+  pointer-events: none;
+  transform-origin: top left;
+}
+.hub-tile-startet { opacity: .35; }
+
+/* ── Fußzeile des Hubs ──────────────────────────────────────────────────── */
+
+.hub-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+  font-size: .8rem;
+  color: var(--muted-schwach);
+}
+.hub-foot b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.hub-foot-sep { opacity: .5; }
+
+.hub-foot-btn {
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: var(--r-pille);
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, .03);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--t-kurz) var(--federnd), border-color var(--t-kurz) var(--federnd);
+}
+.hub-foot-btn:hover { color: var(--text); border-color: var(--hairline-stark); }
+.hub-foot-btn:active { transform: scale(.97); }
+
+/* ── Handy ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .hub-tile-body { flex-direction: column; align-items: stretch; gap: 16px; }
+  .hub-preview   { width: 100%; }
+  .hub-tile-go   { position: static; display: block; margin-top: 14px; opacity: 1; transform: none; }
+  #hub-root      { justify-content: flex-start; }
+  .mod-tab       { padding: 0 12px; font-size: .82rem; }
+}
+
+@media (max-width: 380px) {
+  .hub-preview-table .pv-c4 { display: none; }
+  .pv-row { grid-template-columns: 1fr 44px 44px; }
+}

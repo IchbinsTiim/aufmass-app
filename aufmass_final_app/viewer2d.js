@@ -24,7 +24,7 @@ const FIELD_PRESETS = [0.73, 1.09, 1.57, 2.07, 2.57, 3.07];
 // Positionen werden in bay.positions[] gespeichert: { cat, ... }.
 
 // Konsolentypen (Breite in m) – übernommen aus der ersten Aufmaß-App (0/19/30/50/70/109 cm).
-const KONSOLE_TYPES = ['0,19', '0,30', '0,50', '0,70', '1,09'];
+const KONSOLE_TYPES_2D = ['0,19', '0,30', '0,50', '0,70', '1,09'];
 
 // Verfügbare Positions-Arten. `konsole:true` → mit Typ + Lagen, mehrfach möglich.
 // `unit` = voreingestellte Mengeneinheit ('m' | 'm2' | 'stgm' | 'stk' | 'lagen');
@@ -250,7 +250,7 @@ function posTitle(pos, bay) {
   if (!p) return '?';
   let base;
   if (p.konsole) {
-    base = 'Konsole ' + (pos.typ || KONSOLE_TYPES[0]) + ' · '
+    base = 'Konsole ' + (pos.typ || KONSOLE_TYPES_2D[0]) + ' · '
       + (isMeterBilling(pos) ? 'lfd. Meter' : lagenLabel(pos.lagen));
   }
   // Modul-Abstützung: sie zählt nicht in Metern, sondern hat wie ein Feld eigene
@@ -634,7 +634,7 @@ let copiedBayData = null;
 // zehn verstreuten Feldern liegt, aber jedes Feld eigene Höhen/Konsolen hat.
 let bulkMode        = false;
 const bulkSelected  = new Set();   // Set von bay.id
-let bulkKonsTyp     = KONSOLE_TYPES[0];
+let bulkKonsTyp     = KONSOLE_TYPES_2D[0];
 let bulkKonsLagen   = '1';
 let bulkKonsBilling = 'lagen';
 // Meterwert für Konsolen „in Metern" – null = je Feld die eigene Feldlänge.
@@ -648,8 +648,8 @@ let bulkHR          = null;
 // Projektliste (inkl. Ordner/Status/Adresse) mit script.js/index.html: die
 // Zeichnung wird direkt im Projektdatensatz gespeichert (zeichnung2d) statt
 // nur als lose Datei.
-const PROJECTS_STORAGE_KEY = 'aufmass_projects_v2';
-const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
+const PROJECTS_STORAGE_KEY = GK.projekte;
+// CURRENT_PROJECT_STORAGE_KEY: siehe core.js (von beiden Modulen genutzt).
 let linkedProjectId = null;
 let autosave2dTimer = null;
 
@@ -696,26 +696,41 @@ function loadFromLinkedProject() {
   }
 }
 
+/** Schreibt die aktuelle Zeichnung in das verknüpfte Projekt (ohne Verzögerung). */
+function writeToLinkedProject() {
+  if (!linkedProjectId) return;
+  const list = loadLinkedProjects();
+  const idx = list.findIndex(p => p.id === linkedProjectId);
+  if (idx < 0) return;
+  list[idx].name = state.project || list[idx].name || '';
+  list[idx].zeichnung2d = {
+    depth: state.depth, sections: state.sections,
+    abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
+    aufmass: aufmassRules(), ecken: state.ecken || {},
+    grundriss: state.grundriss || null, bordbretter: state.bordbretter || [],
+    _sId, _bId
+  };
+  list[idx].geaendert = new Date().toISOString().slice(0, 10);
+  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+}
+
 /** Schreibt die aktuelle Zeichnung (gebündelt) in das verknüpfte Projekt. */
 function scheduleAutosave2d() {
   if (!linkedProjectId) return;
   if (autosave2dTimer) clearTimeout(autosave2dTimer);
   autosave2dTimer = setTimeout(() => {
     autosave2dTimer = null;
-    const list = loadLinkedProjects();
-    const idx = list.findIndex(p => p.id === linkedProjectId);
-    if (idx < 0) return;
-    list[idx].name = state.project || list[idx].name || '';
-    list[idx].zeichnung2d = {
-      depth: state.depth, sections: state.sections,
-      abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
-      aufmass: aufmassRules(), ecken: state.ecken || {},
-      grundriss: state.grundriss || null, bordbretter: state.bordbretter || [],
-      _sId, _bId
-    };
-    list[idx].geaendert = new Date().toISOString().slice(0, 10);
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+    writeToLinkedProject();
   }, 700);
+}
+
+/** Führt einen ausstehenden Autosave sofort aus – beim Verlassen des Moduls,
+ *  damit der Wechsel zum Aufmaß-Modul nie eine Zeichnung verliert. */
+function flushAutosave2d() {
+  if (!autosave2dTimer) return;
+  clearTimeout(autosave2dTimer);
+  autosave2dTimer = null;
+  writeToLinkedProject();
 }
 
 // ── Projekt-Fotos ────────────────────────────────────────────────────────────
@@ -820,15 +835,7 @@ function setPhotoIncluded(id, included) {
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 
-let toastTimer = null;
-function showToast(msg) {
-  const el = document.getElementById('toastEl');
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.add('show');
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
-}
+// showToast() steht in core.js – identische Fassung, von beiden Modulen genutzt.
 
 // ── Rückgängig / Wiederholen ────────────────────────────────────────────────
 
@@ -977,7 +984,7 @@ function toggleShakeUndo() {
    Die Auswahl gilt gleichermaßen für „Einfügen" bei einem einzelnen Feld und
    für „auf Auswahl anwenden" bei der Mehrfachauswahl, damit derselbe Knopf
    überall dasselbe tut. Sie wird gemerkt.                                    */
-const PASTE_OPTS_KEY = 'av_2d_paste_opts_v1';
+const PASTE_OPTS_KEY = GK.einfuegenOptionen;
 const PASTE_FIELDS = [
   ['positionen', 'Zusatzbauteile', 'Alle Positionen inkl. Typ, Menge, Einheit und Lagen'],
   ['hoehen',     'Höhen',          'Höhe links und rechts'],
@@ -1075,7 +1082,7 @@ function buildPasteScopeRow(onChange) {
 // Netz, Dachfang, Treppenturm …) unter einem Namen dauerhaft sichern und per
 // Klick auf ein oder mehrere Felder anwenden – projektübergreifend in
 // localStorage, unabhängig vom flüchtigen Kopieren/Einfügen.
-const FAV_STORAGE_KEY = 'av_2d_favorites_v1';
+const FAV_STORAGE_KEY = GK.favoriten;
 
 function loadFavorites() {
   try { return JSON.parse(localStorage.getItem(FAV_STORAGE_KEY)) || []; }
@@ -1289,7 +1296,7 @@ function normalizeBay(bay) {
   if (bay.category && bay.category !== 'geruest' && POS_BY_KEY[bay.category]) {
     const pos = { id: ++_bId, cat: bay.category };
     if (bay.category === 'konsole') {
-      pos.typ = KONSOLE_TYPES[0];
+      pos.typ = KONSOLE_TYPES_2D[0];
       pos.lagen = '1';
     }
     bay.positions.push(pos);
@@ -3926,7 +3933,7 @@ function openEditSheet(si, bi) {
     // Typ-Auswahl
     const typeRow = document.createElement('div');
     typeRow.className = 'konsole-type-row';
-    KONSOLE_TYPES.forEach(typ => {
+    KONSOLE_TYPES_2D.forEach(typ => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'ktype-btn' + (pos.typ === typ ? ' active' : '');
@@ -4033,7 +4040,7 @@ function openEditSheet(si, bi) {
   addKonsBtn.type = 'button'; addKonsBtn.className = 'pos-add-konsole';
   addKonsBtn.textContent = '+ Konsole';
   addKonsBtn.addEventListener('click', () => {
-    bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES[0], lagen: '1', billing: 'lagen' });
+    bay.positions.push({ id: ++_bId, cat: 'konsole', typ: KONSOLE_TYPES_2D[0], lagen: '1', billing: 'lagen' });
     buildKonsole(); requestRender();
   });
 
@@ -5878,7 +5885,7 @@ function renderBulkBar() {
 
   const typRow = document.createElement('div');
   typRow.className = 'bulk-kons-typ-row';
-  KONSOLE_TYPES.forEach(typ => {
+  KONSOLE_TYPES_2D.forEach(typ => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'bulk-ktype-btn' + (bulkKonsTyp === typ ? ' active' : '');
@@ -7984,8 +7991,8 @@ const PDF_THEMES = {
   }
 };
 
-const PDF_THEME_KEY = 'av_2d_pdf_theme';
-const PDF_HIDDEN_KEY = 'av_2d_pdf_include_hidden';
+const PDF_THEME_KEY = GK.pdfDesign;
+const PDF_HIDDEN_KEY = GK.pdfMitAusgeblendeten;
 
 function pdfThemeName() {
   const n = localStorage.getItem(PDF_THEME_KEY);
@@ -9927,11 +9934,11 @@ async function buildPdfDocument(themeName) {
 
 // ── Device mode ────────────────────────────────────────────────────────────
 
-function getMode() { return localStorage.getItem('av_deviceMode'); }
+function getMode() { return localStorage.getItem(GK.geraetemodus); }
 
 function applyMode(m) {
   document.body.dataset.mode = m;
-  localStorage.setItem('av_deviceMode', m);
+  localStorage.setItem(GK.geraetemodus, m);
   const btn = document.getElementById('deviceToggleBtn');
   if (btn) btn.textContent = m === 'iphone' ? '📱' : '⬜';
 }
@@ -9980,10 +9987,9 @@ function init() {
   lastUndoSnapshot = serializeUndoState();
   document.getElementById('projectName').value = state.project;
   document.getElementById('scaffDepth').value  = state.depth;
-  if (linkedProjectId) {
-    const backLink = document.querySelector('.back-link');
-    if (backLink) backLink.setAttribute('href', 'index.html?resume=1');
-  }
+  // Der Rücksprung ins Aufmaß-Modul ist in der zusammengeführten App ein
+  // Routenwechsel; die Shell setzt das Ziel der Kopfzeile selbst.
+  syncBackLink();
 
   document.getElementById('addSectionBtn').addEventListener('click', () => {
     addCtx = null;
@@ -10010,7 +10016,9 @@ function init() {
   document.getElementById('savePlanBtn').addEventListener('click', savePlan);
   document.getElementById('loadPlanBtn').addEventListener('click', triggerLoad);
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
-  document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
+  // ID mit td-Präfix: „exportPdfBtn" gehört im zusammengeführten Dokument
+  // bereits dem Aufmaß-Modul (PDF des Angebots).
+  document.getElementById('td-exportPdfBtn').addEventListener('click', exportPdf);
 
   document.getElementById('photosBtn').addEventListener('click', openPhotosSheet);
   document.getElementById('photoFileInput').addEventListener('change', onPhotoFilesSelected);
@@ -10130,4 +10138,95 @@ function init() {
   renderAllNow();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+// ── Rücksprung-Ziel der Kopfzeile ──────────────────────────────────────────
+// Ist der Zeichner aus einem Projekt heraus geöffnet, führt der Pfeil zurück
+// in genau dieses Projekt; sonst auf den Startbildschirm.
+
+function syncBackLink() {
+  const backLink = document.querySelector('#td-root .back-link');
+  if (!backLink) return;
+  backLink.setAttribute('href', linkedProjectId ? '#/aufmass' : '#/');
+  backLink.textContent = linkedProjectId ? '← Aufmaß' : '← Start';
+}
+
+/** Setzt die Zeichnung auf „leer" zurück (Projektwechsel ohne Zeichnung). */
+function resetState2d() {
+  state = {
+    project: '', depth: 0.73, abschnitte: [], hideUnassigned: false,
+    aufmass: null, ecken: {}, grundriss: null, bordbretter: [], sections: []
+  };
+  _sId = 0; _bId = 0;
+  linkedProjectId = null;
+  selectedSi = null; selectedBi = null;
+  bulkMode = false; bulkSelected.clear();
+  invalidateEckenCache();
+  invalidateViewCaches();
+}
+
+// ============================================================================
+//  Modul-Schnittstelle zur Shell
+// ============================================================================
+// Früher startete der Zeichner selbst per DOMContentLoaded. Jetzt entscheidet
+// die Shell, wann aufgebaut (`mount`) und wann sichtbar geschaltet wird
+// (`aktiviere`). Der Aufbau passiert bewusst erst beim ersten Öffnen des
+// Moduls: die Kamera braucht eine sichtbare Zeichenfläche, um korrekt auf den
+// Inhalt einzupassen. Danach bleibt das Modul im Speicher – wer zeichnet, zum
+// Hub wechselt und zurückkommt, findet seine Zeichnung unverändert vor.
+
+const ZweiDModul = (() => {
+  let gemountet = false;
+
+  return {
+    id: '2d',
+    name: '2D-Aufmaß',
+
+    mount() {
+      if (gemountet) return;
+      gemountet = true;
+      init();
+    },
+
+    aktiviere() {
+      if (!gemountet) { this.mount(); return; }
+
+      // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
+      // gehört zu diesem Projekt eine andere Zeichnung.
+      const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) || null;
+      if (id !== linkedProjectId) {
+        flushAutosave2d();
+        resetState2d();
+        loadFromLinkedProject();
+        normalizeState();
+        undoStack = [];
+        redoStack = [];
+        lastUndoSnapshot = serializeUndoState();
+        updateUndoRedoButtons();
+        document.getElementById('projectName').value = state.project;
+        document.getElementById('scaffDepth').value  = state.depth;
+        autoFit = true;
+      }
+
+      syncBackLink();
+      // Die Zeichenfläche war ausgeblendet – gemessene Größen sind veraltet.
+      _vpCache = null;
+      if (autoFit) fitCameraToContent();
+      applyCamera();
+      renderAllNow();
+    },
+
+    deaktiviere() {
+      if (!gemountet) return;
+      flushAutosave2d();
+      // Offene Sheets/Overlays hängen am <body> und würden sonst über dem
+      // anderen Modul stehen bleiben.
+      closeSheet();
+      closePhotosSheet();
+      if (bordbrettModus) brichBordbrettZeichnenAb();
+      if (grundrissMessen) brichGrundrissMessungAb();
+    },
+
+    hatUngespeicherte() {
+      return gemountet && autosave2dTimer !== null;
+    }
+  };
+})();

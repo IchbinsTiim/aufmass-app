@@ -2,81 +2,13 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Aufmaß-App</title>
-  <link rel="stylesheet" href="style.css?v=20260812" />
+  <title>Gerüst-Suite</title>
+  <!-- Der frühere Startbildschirm ist jetzt der Hub der zusammengeführten
+       Anwendung (index.html#/). Diese Datei leitet alte Lesezeichen dorthin. -->
+  <meta name="robots" content="noindex" />
+  <script>location.replace('index.html#/');</script>
 </head>
 <body>
-
-  <!-- Projektübersicht (Hub): identische Übersicht wie in index.html – teilt
-       sich script.js/style.css mit der Aufmaß-App. Statt direkt in den
-       Aufmaß-Editor zu springen, fragt ein Auswahl-Dialog, ob "Aufmaß" oder
-       "2D-Aufmaß" geöffnet werden soll (siehe start.js). -->
-  <div id="homeScreen" class="screen">
-    <header class="app-header">
-      <div class="header-title">
-        <h1>Aufmaß-App</h1>
-      </div>
-      <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
-    </header>
-    <main class="screen-content">
-
-      <div class="overview-toolbar">
-        <input type="search" id="searchInput" class="form-input overview-search" placeholder="Suche nach Name, Kunde, Adresse…" />
-        <select id="statusFilterSelect" class="form-input overview-select">
-          <option value="">Alle Status</option>
-          <option value="in_bearbeitung">In Bearbeitung</option>
-          <option value="abgeschlossen">Abgeschlossen</option>
-          <option value="archiviert">Archiviert</option>
-        </select>
-        <select id="sortSelect" class="form-input overview-select">
-          <option value="geaendert">Zuletzt geändert</option>
-          <option value="name">Alphabetisch</option>
-        </select>
-      </div>
-
-      <div class="folder-bar" id="folderBar"></div>
-
-      <div id="projectGrid" class="project-grid"></div>
-
-      <div id="emptyState" class="empty-state hidden">
-        <div class="empty-icon-box"></div>
-        <h2>Keine Projekte</h2>
-        <p>Tippen Sie auf &bdquo;+ Neues Projekt&ldquo; um zu beginnen.</p>
-      </div>
-      <div id="noResultsState" class="empty-state hidden">
-        <div class="empty-icon-box"></div>
-        <h2>Keine Treffer</h2>
-        <p>Keine Projekte für diese Suche/diesen Filter gefunden.</p>
-      </div>
-    </main>
-  </div>
-
-  <!-- Auswahl-Dialog: für ein angetipptes Projekt zwischen Aufmaß (Angebot)
-       und 2D-Aufmaß (Gerüst-Zeichnung) wählen. -->
-  <div id="appChooserOverlay" class="app-chooser-overlay hidden">
-    <div class="app-chooser-box">
-      <div class="app-chooser-title" id="appChooserProjectName">Projekt</div>
-      <div class="app-chooser-sub">Was möchtest du öffnen?</div>
-      <div class="app-chooser-options">
-        <button type="button" class="app-chooser-option" id="chooseAufmassBtn">
-          <span class="app-chooser-icon">📋</span>
-          <span class="app-chooser-label">Aufmaß</span>
-          <span class="app-chooser-desc">Angebot / Aufmaß erfassen</span>
-        </button>
-        <button type="button" class="app-chooser-option" id="choose2dBtn">
-          <span class="app-chooser-icon">📐</span>
-          <span class="app-chooser-label">2D-Aufmaß</span>
-          <span class="app-chooser-desc">Gerüst zeichnen (nach Aufbau)</span>
-        </button>
-      </div>
-      <button type="button" class="app-chooser-cancel" id="appChooserCancelBtn">Abbrechen</button>
-    </div>
-  </div>
-
-  <div id="toastEl" class="toast"></div>
-
-  <script src="script.js?v=20260812"></script>
-  <script src="start.js?v=20260812"></script>
+  <p>Weiterleitung zum Startbildschirm … <a href="index.html#/">Hier entlang</a>, falls es nicht von selbst weitergeht.</p>
 </body>
 </html>
