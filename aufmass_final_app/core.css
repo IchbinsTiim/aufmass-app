@@ -1,0 +1,116 @@
+/* ===========================================================================
+   Gemeinsame Basis: Design-Tokens
+   ---------------------------------------------------------------------------
+   Wird als erstes Stylesheet geladen. Hier stehen nur Werte, keine Bauteile –
+   Farben, Schriften, Radien, Schatten, Bewegung. Beide Module und der Hub
+   greifen darauf zu; die Modul-Stylesheets bleiben davon unabhängig.
+
+   Signatur der Suite: jedes Modul hat eine eigene Akzentfarbe, die sich vom
+   Startbildschirm bis in jeden Button, jede aktive Zeile und jeden Fokusring
+   durchzieht. `--accent` zeigt immer auf die Farbe des gerade aktiven Moduls.
+   =========================================================================== */
+
+:root {
+  /* ── Grundflächen ─────────────────────────────────────────────────────── */
+  --bg-deep:        #0E1626;   /* Blueprint-Nacht */
+  --surface:        #16213A;   /* Karten, Panels, Glasflächen */
+  --surface-hoch:   #1C2A48;   /* angehobene Fläche (Hover, aktive Zeile) */
+  --surface-tief:   #111B2E;   /* eingelassene Fläche (Eingaben) */
+  --text:           #F2F6FF;
+  --muted:          #9FB3C8;   /* Sekundärtext, Zink/Stahl */
+  --muted-schwach:  #6E819A;
+
+  /* ── Modul-Identität ──────────────────────────────────────────────────── */
+  --accent-aufmass: #FFC93C;   /* Signalgelb */
+  --accent-2d:      #4CC9F0;   /* Neon-Cyan */
+  --accent:         var(--accent-2d);
+  --accent-kontrast:#0E1626;   /* Text auf farbiger Fläche */
+  --accent-weich:   rgba(76, 201, 240, .14);
+  --accent-rand:    rgba(76, 201, 240, .38);
+
+  /* ── Signalfarben ─────────────────────────────────────────────────────── */
+  --gefahr:         #FF6B6B;
+  --warnung:        #FFB454;
+  --erfolg:         #3DDC97;
+
+  /* ── Linien & Tiefe ───────────────────────────────────────────────────── */
+  --hairline:       rgba(255, 255, 255, .08);
+  --hairline-stark: rgba(255, 255, 255, .16);
+  --glas:           rgba(22, 33, 58, .72);
+  --glas-blur:      blur(20px);
+
+  --schatten-s:     0 1px 2px rgba(0, 0, 0, .28);
+  --schatten-m:     0 8px 24px rgba(0, 0, 0, .34);
+  --schatten-l:     0 24px 60px rgba(0, 0, 0, .46);
+
+  /* ── Form ─────────────────────────────────────────────────────────────── */
+  --r-karte:        20px;
+  --r-karte-klein:  16px;
+  --r-control:      12px;
+  --r-pille:        999px;
+
+  /* Baustellen-Handschuhe: nichts Anfassbares unter 44 px. */
+  --touch:          44px;
+
+  /* ── Schrift ──────────────────────────────────────────────────────────── */
+  --font-display:   'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-text:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:      'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* ── Bewegung ─────────────────────────────────────────────────────────── */
+  --federnd:        cubic-bezier(.22, 1, .36, 1);
+  --t-kurz:         160ms;
+  --t-normal:       240ms;
+  --t-lang:         300ms;
+
+  color-scheme: dark;
+}
+
+/* Akzentfarbe folgt dem aktiven Modul. */
+body[data-modul="aufmass"] {
+  --accent:      var(--accent-aufmass);
+  --accent-weich: rgba(255, 201, 60, .14);
+  --accent-rand:  rgba(255, 201, 60, .38);
+}
+body[data-modul="2d"] {
+  --accent:      var(--accent-2d);
+  --accent-weich: rgba(76, 201, 240, .14);
+  --accent-rand:  rgba(76, 201, 240, .38);
+}
+/* Auf dem Startbildschirm gehört keine der beiden Farben zur Ansicht selbst –
+   dort tragen die Kacheln ihre Farbe. */
+body[data-modul="hub"] {
+  --accent:      #7FA8D9;
+  --accent-weich: rgba(127, 168, 217, .14);
+  --accent-rand:  rgba(127, 168, 217, .34);
+}
+
+/* ── Zahlen ─────────────────────────────────────────────────────────────────
+   Alle Maße, Mengen und Tabellenwerte laufen in JetBrains Mono mit festen
+   Ziffernbreiten, damit Zahlenkolonnen exakt untereinander stehen. */
+.zahl,
+input[type="number"],
+input[inputmode="decimal"],
+input[inputmode="numeric"] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -.01em;
+}
+
+/* ── Sichtbarer Tastatur-Fokus, überall ───────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── Bewegung auf Wunsch abschalten ───────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

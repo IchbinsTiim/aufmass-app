@@ -7,25 +7,29 @@
   padding: 0;
 }
 
+/* Die Farb-/Formwerte dieses Moduls hängen an den Tokens der Suite (core.css).
+   Dadurch trägt das Aufmaß-Modul automatisch die Signalgelb-Identität, und ein
+   Wechsel der Tokens färbt das gesamte Modul mit – die ~240 var()-Stellen
+   dieser Datei bleiben unverändert. */
 :root {
-  --color-primary:        #007aff;
-  --color-primary-dark:   #0062cc;
-  --color-danger:         #ff3b30;
-  --color-bg:             #f2f2f7;
-  --color-card:           #ffffff;
-  --color-text:           #1c1c1e;
-  --color-text-secondary: #6e6e73;
-  --color-border:         #e5e5ea;
-  --color-border-focus:   #007aff;
-  --radius-sm:            8px;
-  --radius-md:            12px;
-  --shadow-sm:            0 1px 4px rgba(0, 0, 0, 0.08);
-  --shadow-md:            0 4px 14px rgba(0, 0, 0, 0.12);
+  --color-primary:        var(--accent);
+  --color-primary-dark:   var(--accent);
+  --color-danger:         var(--gefahr);
+  --color-bg:             var(--bg-deep);
+  --color-card:           var(--surface);
+  --color-text:           var(--text);
+  --color-text-secondary: var(--muted);
+  --color-border:         var(--hairline);
+  --color-border-focus:   var(--accent);
+  --radius-sm:            var(--r-control);
+  --radius-md:            var(--r-karte-klein);
+  --shadow-sm:            var(--schatten-s);
+  --shadow-md:            var(--schatten-m);
 }
 
 html, body {
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-text);
   background: var(--color-bg);
   color: var(--color-text);
   font-size: 16px;
@@ -125,7 +129,7 @@ html, body {
 
 .btn-primary {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--accent-kontrast);
 }
 
 .btn-primary:hover {
@@ -146,7 +150,7 @@ html, body {
 
 .btn-danger {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--accent-kontrast);
 }
 
 .btn-danger-ghost {
@@ -216,7 +220,7 @@ html, body {
 }
 .folder-chip.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 .folder-chip-count {
@@ -315,6 +319,20 @@ html, body {
   text-overflow: ellipsis;
 }
 .project-card2-addr { font-weight: 500; color: var(--color-text); }
+.project-card2-vz {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.project-card2-vz-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: var(--accent-weich);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
 .project-card2-stats {
   margin-top: 6px;
   font-size: 0.78rem;
@@ -366,6 +384,51 @@ html, body {
   height: 1px;
   background: var(--color-border);
   margin: 4px 6px;
+}
+
+/* ============================================================
+   Backup-Erinnerung (Gesamt-Export lange her)
+   ============================================================ */
+.backup-reminder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #fff4e0;
+  color: #a15c00;
+  border: 1px solid #f5d9a8;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+}
+.backup-reminder-text { flex: 1; min-width: 220px; }
+.backup-reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.backup-reminder-export {
+  background: #a15c00;
+  color: var(--accent-kontrast);
+  border: none;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.backup-reminder-dismiss {
+  background: none;
+  border: none;
+  color: #a15c00;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
 }
 
 /* ============================================================
@@ -455,6 +518,13 @@ html, body {
   letter-spacing: 0.05em;
 }
 
+.form-label-hint {
+  text-transform: none;
+  font-weight: 500;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
 .form-subhead {
   font-size: 0.72rem;
   font-weight: 700;
@@ -470,7 +540,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
   color: var(--color-text);
-  background: #f9f9fb;
+  background: var(--surface-tief);
   outline: none;
   transition: border-color 0.15s, background 0.15s;
   width: 100%;
@@ -479,7 +549,15 @@ html, body {
 
 .form-input:focus {
   border-color: var(--color-border-focus);
-  background: #fff;
+  background: var(--surface-hoch);
+}
+
+/* Freies Notizfeld (allgemeine Informationen zum Aufmaß) */
+.form-textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.45;
+  font-size: 0.95rem;
 }
 
 /* ============================================================
@@ -497,7 +575,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.82rem;
   font-weight: 600;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   text-align: center;
@@ -508,11 +586,43 @@ html, body {
 
 .type-btn.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 
 .type-btn:active {
+  opacity: 0.75;
+}
+
+/* ============================================================
+   Chip-Mehrfachauswahl (z. B. Verwendungszweck: Fenster/Maler/Dach ...)
+   ============================================================ */
+.chip-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-btn {
+  padding: 9px 14px;
+  border: 2px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: var(--surface-tief);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+.chip-btn.active {
+  border-color: var(--color-primary);
+  background: var(--accent-weich);
+  color: var(--color-primary);
+}
+
+.chip-btn:active {
   opacity: 0.75;
 }
 
@@ -541,7 +651,7 @@ html, body {
   gap: 10px;
   padding: 8px 10px;
   margin-bottom: 12px;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
@@ -606,7 +716,7 @@ html, body {
   display: flex;
   align-items: center;
   padding: 12px 14px;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   gap: 10px;
   cursor: pointer;
   -webkit-user-select: none;
@@ -614,7 +724,7 @@ html, body {
 }
 
 .seite-header:active {
-  background: #f0f0f5;
+  background: var(--surface-tief);
 }
 
 .seite-number {
@@ -689,7 +799,7 @@ html, body {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text);
   outline: none;
   font-family: inherit;
@@ -707,7 +817,7 @@ html, body {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
-  background: #fff;
+  background: var(--surface-hoch);
   color: var(--color-text);
   outline: none;
   font-family: inherit;
@@ -762,7 +872,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 1rem;
   color: var(--color-text);
-  background: #f9f9fb;
+  background: var(--surface-tief);
   text-align: right;
   outline: none;
   transition: border-color 0.15s, background 0.15s;
@@ -778,7 +888,7 @@ html, body {
 
 .meas-input:focus {
   border-color: var(--color-border-focus);
-  background: #fff;
+  background: var(--surface-hoch);
 }
 
 .meas-unit {
@@ -854,7 +964,7 @@ html, body {
 }
 
 .meas-add-btn:active {
-  background: #eff6ff;
+  background: var(--accent-weich);
   border-color: var(--color-primary);
 }
 
@@ -949,7 +1059,7 @@ html, body {
   left: 50%;
   transform: translateX(-50%) translateY(12px);
   background: rgba(28, 28, 30, 0.85);
-  color: #fff;
+  color: var(--accent-kontrast);
   padding: 10px 22px;
   border-radius: 22px;
   font-size: 0.88rem;
@@ -1051,7 +1161,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.82rem;
   font-weight: 600;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
@@ -1060,7 +1170,7 @@ html, body {
 }
 .konsole-btn.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 .konsole-btn-df {
@@ -1080,7 +1190,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.82rem;
   font-weight: 600;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
@@ -1090,7 +1200,7 @@ html, body {
 }
 .accessory-toggle.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 .accessory-length-wrap {
@@ -1126,7 +1236,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
   color: var(--color-text);
-  background: #f9f9fb;
+  background: var(--surface-tief);
   text-align: right;
   outline: none;
   font-family: inherit;
@@ -1134,8 +1244,8 @@ html, body {
 }
 .accessory-length-input::-webkit-inner-spin-button,
 .accessory-length-input::-webkit-outer-spin-button { -webkit-appearance: none; }
-.accessory-length-input:focus { border-color: var(--color-border-focus); background: #fff; }
-.accessory-length-input:disabled { background: #f0f0f5; color: var(--color-text-secondary); }
+.accessory-length-input:focus { border-color: var(--color-border-focus); background: var(--surface-hoch); }
+.accessory-length-input:disabled { background: var(--surface-tief); color: var(--color-text-secondary); }
 .accessory-length-unit {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
@@ -1175,7 +1285,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.78rem;
   font-weight: 700;
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
   flex-shrink: 0;
   line-height: 1;
@@ -1203,7 +1313,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: #f0f7ff;
+  background: var(--accent-weich);
   border-radius: var(--radius-sm);
   border: 1.5px solid #bfdbfe;
 }
@@ -1222,7 +1332,7 @@ html, body {
   font-size: 1rem;
   font-weight: 600;
   color: var(--color-text);
-  background: #fff;
+  background: var(--surface-hoch);
   text-align: right;
   outline: none;
   font-family: inherit;
@@ -1243,7 +1353,7 @@ html, body {
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 700;
-  background: #e0effe;
+  background: var(--accent-weich);
   color: var(--color-primary);
   cursor: pointer;
   font-family: inherit;
@@ -1267,7 +1377,7 @@ html, body {
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
-  background: #f7f8fa;
+  background: var(--surface-tief);
   border-radius: var(--radius-sm);
   border: 1.5px solid var(--color-border);
   flex: 1;
@@ -1286,7 +1396,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
   color: var(--color-text);
-  background: #fff;
+  background: var(--surface-hoch);
   text-align: right;
   outline: none;
   font-family: inherit;
@@ -1318,7 +1428,7 @@ html, body {
   border-radius: 6px;
   font-size: 0.72rem;
   font-weight: 600;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
@@ -1364,7 +1474,7 @@ html, body {
   left: 3px;
   font-size: 0.58rem;
   font-weight: 800;
-  color: #fff;
+  color: var(--accent-kontrast);
   background: var(--color-primary);
   padding: 1px 4px;
   border-radius: 4px;
@@ -1526,7 +1636,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fafafa;
+  background: var(--surface-tief);
 }
 
 .abschnitt-top-line {
@@ -1541,7 +1651,7 @@ html, body {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
-  background: #fff;
+  background: var(--surface-hoch);
   color: var(--color-text);
   outline: none;
   font-family: inherit;
@@ -1580,7 +1690,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
   color: var(--color-text);
-  background: #f9f9fb;
+  background: var(--surface-tief);
   text-align: right;
   outline: none;
   font-family: inherit;
@@ -1597,7 +1707,7 @@ html, body {
 .abschnitt-laenge:focus,
 .abschnitt-hoehe:focus {
   border-color: var(--color-border-focus);
-  background: #fff;
+  background: var(--surface-hoch);
 }
 
 .abschnitt-field-unit {
@@ -1613,7 +1723,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.78rem;
   font-weight: 700;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
@@ -1625,14 +1735,14 @@ html, body {
 
 .einzelfeld-btn.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 
 .abschnitt-calc {
   font-size: 0.8rem;
   color: var(--color-primary);
-  background: #f0f7ff;
+  background: var(--accent-weich);
   border-radius: 6px;
   padding: 6px 10px;
   font-weight: 600;
@@ -1658,7 +1768,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.82rem;
   font-weight: 600;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
@@ -1668,7 +1778,7 @@ html, body {
 
 .logistik-toggle-btn.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 
@@ -1688,7 +1798,7 @@ html, body {
   flex-direction: column;
   gap: 8px;
   margin-bottom: 8px;
-  background: #fafafa;
+  background: var(--surface-tief);
 }
 
 .zusatz-top {
@@ -1705,7 +1815,7 @@ html, body {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text);
   outline: none;
   font-family: inherit;
@@ -1718,7 +1828,7 @@ html, body {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text);
   outline: none;
   font-family: inherit;
@@ -1732,7 +1842,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
   color: var(--color-text);
-  background: #f9f9fb;
+  background: var(--surface-tief);
   text-align: right;
   outline: none;
   font-family: inherit;
@@ -1746,7 +1856,7 @@ html, body {
 
 .zusatz-menge:focus {
   border-color: var(--color-border-focus);
-  background: #fff;
+  background: var(--surface-hoch);
 }
 
 .zusatz-notiz-row {
@@ -1760,14 +1870,14 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
   color: var(--color-text);
-  background: #f9f9fb;
+  background: var(--surface-tief);
   outline: none;
   font-family: inherit;
 }
 
 .zusatz-notiz:focus {
   border-color: var(--color-border-focus);
-  background: #fff;
+  background: var(--surface-hoch);
 }
 
 /* iPad tweaks for new elements */
@@ -1807,7 +1917,7 @@ html, body {
   border-radius: var(--radius-sm);
   font-size: 0.75rem;
   font-weight: 600;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   cursor: pointer;
   white-space: nowrap;
@@ -1896,7 +2006,7 @@ html, body {
   border-radius: 6px;
   font-size: 0.7rem;
   font-weight: 700;
-  background: #f9f9fb;
+  background: var(--surface-tief);
   color: var(--color-text-secondary);
   min-height: 36px;
   min-width: 36px;
@@ -1906,7 +2016,7 @@ html, body {
 
 .plus2-btn.active {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
 }
 
@@ -1918,7 +2028,7 @@ html, body {
   font-size: 0.75rem;
   font-weight: 600;
   text-align: center;
-  background: #eff6ff;
+  background: var(--accent-weich);
   color: var(--color-primary);
   -moz-appearance: textfield;
 }
@@ -1929,7 +2039,7 @@ html, body {
 }
 
 .plus2-value-input:focus {
-  background: #fff;
+  background: var(--surface-hoch);
 }
 
 .messung-mul {
@@ -1956,6 +2066,97 @@ html, body {
   padding: 4px 0 2px;
   border-top: 1px dashed var(--color-border);
   margin-top: 4px;
+}
+
+/* „+" an einer Messzeile: dieselbe Position noch einmal erfassen (Umlauf) */
+.messung-dup-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 6px;
+  background: var(--accent-weich);
+  color: var(--color-primary);
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.messung-dup-btn:active {
+  background: #dbeafe;
+}
+
+/* Notiz je Abschnitt */
+.abschnitt-notiz {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: var(--surface-hoch);
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+}
+
+.abschnitt-notiz:focus {
+  border-color: var(--color-border-focus);
+}
+
+/* Notiz je Hausseite – gleiche Optik wie die Abschnitts-Notiz, aber deutlich
+   abgesetzt, da sie für die ganze Seite gilt. */
+.seite-notiz {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: var(--surface-hoch);
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+  margin-top: 10px;
+}
+
+.seite-notiz:focus {
+  border-color: var(--color-border-focus);
+}
+
+/* 50-m-Hinweis (Treppenturm) an Abschnitt bzw. Hausseite */
+.laenge-warn {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1.5px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  margin-top: 4px;
+}
+
+.seite-warn {
+  margin: 8px 0 2px;
+}
+
+.summary-warn {
+  color: #92400e;
+  font-weight: 700;
+}
+
+/* 50-m-Hinweis über alle Hausseiten – eigene Zeile unter der Gesamtfläche.
+   Muss `.summary-table td:last-child` überstimmen (rechtsbündig, nowrap), sonst
+   läuft der lange Hinweis auf schmalen Displays aus der Tabelle heraus. */
+.summary-table td.summary-warn-row {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  border-top: 1.5px solid #f59e0b;
+  padding: 7px 10px;
+  text-align: left;
+  white-space: normal;
 }
 
 .acc-multi-total {
@@ -1994,4 +2195,88 @@ html, body {
     font-size: 0.85rem;
     min-height: 44px;
   }
+
+  .messung-dup-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 1.4rem;
+  }
+}
+
+/* ============================================================
+   Hub (start.html): Auswahl-Dialog "Aufmaß" / "2D-Aufmaß"
+   ============================================================ */
+.app-chooser-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.app-chooser-overlay.hidden { display: none; }
+.app-chooser-box {
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 24px 20px;
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+}
+.app-chooser-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-chooser-sub {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 18px;
+}
+.app-chooser-options {
+  display: flex;
+  gap: 12px;
+}
+.app-chooser-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 20px 12px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.app-chooser-option:hover  { border-color: var(--color-primary); }
+.app-chooser-option:active { background: var(--accent-weich); }
+.app-chooser-icon  { font-size: 2rem; }
+.app-chooser-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.app-chooser-desc {
+  font-size: 0.74rem;
+  color: var(--color-text-secondary);
+}
+.app-chooser-cancel {
+  margin-top: 16px;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px;
 }

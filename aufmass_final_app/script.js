@@ -4,12 +4,20 @@
 //  Konstanten & Zustand
 // ============================================================
 
-const STORAGE_KEY = 'aufmass_projects_v2';
-const FOLDERS_STORAGE_KEY = 'aufmass_folders_v1';
-// Vom 2D-Zeichner (viewer2d.html) mitgenutzter Schlüssel: welches Projekt ist
-// gerade geöffnet. So wissen beide Programme, welche Projektakte (inkl.
-// 2D-Zeichnung) gerade bearbeitet wird, und teilen sich dieselbe Projektliste.
-const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
+// Speicher-Schlüssel: liegen zentral in core.js (Namensraum geruest.aufmass.*).
+// `GK.aktuellesProjekt` teilen sich beide Module – so wissen Aufmaß und
+// 2D-Aufmaß, welche Projektakte (inkl. 2D-Zeichnung) gerade bearbeitet wird,
+// und greifen auf dieselbe Projektliste zu.
+const STORAGE_KEY = GK.projekte;
+const FOLDERS_STORAGE_KEY = GK.ordner;
+
+// Backup-Erinnerung: alles liegt nur in localStorage (kein Cloud-Sync) – bei
+// Gerätewechsel/-defekt wäre sonst alles weg. Erinnert sanft an einen
+// Gesamt-Export, wenn länger keiner gemacht wurde.
+const LAST_BACKUP_STORAGE_KEY      = GK.letztesBackup;
+const BACKUP_DISMISS_STORAGE_KEY   = GK.backupErinnerungBis;
+const BACKUP_REMIND_AFTER_DAYS     = 7;
+const BACKUP_SNOOZE_DAYS           = 3;
 
 const PROJECT_STATUS = ['in_bearbeitung', 'abgeschlossen', 'archiviert'];
 const PROJECT_STATUS_LABEL = {
@@ -34,11 +42,22 @@ let overviewState = {
 const ZUSATZ_ARTEN = [
   'Gerüsttreppe','Verbreiterung','Konsole','Dachfanggerüst',
   'Überbrückung','Bekleidung','Schutzdach','Aufzug','Innengeländer','Lampen',
-  'Bautenschutzmatte','Fleece','Bauzaun','Käfig'
+  'Bautenschutzmatte','Fleece','Bauzaun','Käfig','Parkplatz','Genehmigung'
 ];
 const ZUSATZ_EINHEITEN = ['m', 'm²', 'Stk.'];
 // Sinnvolle Standard-Einheit je Positionsart (wird beim Wählen automatisch gesetzt)
-const PREFERRED_EINHEIT = { 'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.' };
+const PREFERRED_EINHEIT = {
+  'Bautenschutzmatte': 'm²', 'Fleece': 'm²', 'Bauzaun': 'm', 'Käfig': 'Stk.',
+  // Parkplatz (Halteverbotszone) und Genehmigung werden nicht gemessen, sondern
+  // pauschal je Stück erfasst (Anzahl Parkplätze / Anzahl Genehmigungen).
+  // Details wie Zeitraum oder Behörde gehören in die Notiz der Zeile.
+  'Parkplatz': 'Stk.', 'Genehmigung': 'Stk.'
+};
+// Positionsarten ohne Maßbezug: nur Anzahl + Notiz (Pauschal-/Stückpositionen)
+const PAUSCHAL_ARTEN = ['Parkplatz', 'Genehmigung'];
+// Ab dieser Gerüstlänge (m) ist ein zweiter Aufstieg/Treppenturm erforderlich –
+// die App weist beim Überschreiten automatisch darauf hin.
+const TREPPENTURM_WARN_LAENGE = 50;
 
 // Konsolentypen (Breite in cm) + Sonder-Variante "Dachfang" (intern Konsole 0,50)
 const KONSOLE_TYPES = ['0', '19', '30', '50', '70', '109'];
@@ -47,7 +66,7 @@ const KONSOLE_DACHFANG_TYP = '50df';
 // Standard-Zuschlag der "+Xm"-Tasten bei den Maßen (Standard 2,00 m). Dient als
 // Vorschlagswert beim erstmaligen Aktivieren einer Zuschlag-Taste – jedes Feld
 // kann seinen eigenen (individuellen) Zuschlagswert erhalten und behalten.
-const UEBERSTAND_STORAGE_KEY = 'aufmass_ueberstand_wert';
+const UEBERSTAND_STORAGE_KEY = GK.ueberstandWert;
 let ueberstandWert = 2;
 
 function loadUeberstandWert() {
@@ -78,6 +97,7 @@ function migrateProjectMeta(p) {
   if (p.status === undefined)      p.status = 'in_bearbeitung';
   if (p.folderId === undefined)    p.folderId = null;
   if (p.zeichnung2d === undefined) p.zeichnung2d = null;
+  if (p.notizen === undefined)     p.notizen = '';
   if (p.archiviert !== undefined) { // sehr alte Übergangsdaten
     if (p.archiviert) p.status = 'archiviert';
     delete p.archiviert;
@@ -161,6 +181,13 @@ function fmtNum(n) {
 function parseNum(str) {
   if (str === null || str === undefined || str === '') return NaN;
   return parseFloat(String(str).replace(',', '.'));
+}
+
+// Freitext (Notizen) sicher in die HTML-Zusammenfassung einsetzen
+function escHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function getTypeLabel(type) {
@@ -304,6 +331,82 @@ function computeCardFlaeche(card) {
   return round2(total);
 }
 
+// Gesamtlänge einer Karte (Summe aller Messlängen inkl. Zuschlag über alle
+// Abschnitte). Grundlage für den 50-m-Hinweis (Treppenturm): maßgeblich ist die
+// Länge des Gerüstzugs, nicht die Fläche.
+function computeCardLaenge(card) {
+  let total = 0;
+  card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+    const ef = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
+    abRow.querySelectorAll('.messung-row').forEach(mRow => {
+      const l  = parseNum(mRow.querySelector('.messung-laenge')?.value);
+      const lZ = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+      if (isNaN(l)) return;
+      let lEff = (l || 0) + lZ;
+      if (ef) lEff = Math.max(lEff, 2.5);
+      if (lEff > 0) total += lEff;
+    });
+  });
+  return round2(total);
+}
+
+// Gesamtlänge eines gespeicherten Abschnitts (für Zusammenfassung/PDF)
+function abschnittLaenge(abschnitt) {
+  const ef = abschnitt.einzelfeld || false;
+  let total = 0;
+  for (const m of (abschnitt.messungen || [])) {
+    let l = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
+    if (ef) l = Math.max(l, 2.5);
+    if (l > 0) total += l;
+  }
+  return round2(total);
+}
+
+// Gesamtlänge aller Hausseiten zusammen. Grundlage für den 50-m-Hinweis auf
+// Projektebene: mehrere kurze Seiten (z. B. ein Umlauf ums Haus) ergeben in
+// Summe oft einen Gerüstzug über 50 m, ohne dass eine einzelne Seite die
+// Grenze erreicht.
+function projektLaenge() {
+  let total = 0;
+  document.querySelectorAll('#seitenContainer .seite-card').forEach(card => {
+    total += computeCardLaenge(card);
+  });
+  return round2(total);
+}
+
+// Merkt sich, ob der 50-m-Hinweis auf Projektebene bereits aktiv ist, damit die
+// Meldung nur beim Überschreiten erscheint und nicht bei jeder Eingabe.
+let projektWarn50 = false;
+
+// Warntext für den 50-m-Hinweis (Treppenturm) – oder '' wenn unkritisch
+function treppenturmHinweis(laenge, was) {
+  if (!(laenge > TREPPENTURM_WARN_LAENGE)) return '';
+  return 'Gesamtlänge ' + was + ' ' + fmtNum(laenge) + ' m (über '
+    + TREPPENTURM_WARN_LAENGE + ' m) – Treppenturm erforderlich';
+}
+
+// Größte eingetragene Höhe einer Karte (über alle Abschnitte/Messungen hinweg,
+// inkl. Zuschlag und – bei Giebeln – der Spitzenhöhe H2). Dient als
+// Vorschlagsgrundlage für Positionen, die sich an der Wandhöhe orientieren
+// (z. B. Treppenturm: Höhe der Seite + Überstand).
+function computeCardMaxHoehe(card) {
+  let max = 0;
+  card.querySelectorAll('.abschnitt-row').forEach(abRow => {
+    const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active') || false;
+    abRow.querySelectorAll('.messung-row').forEach(mRow => {
+      const h  = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+      const hZ = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+      if (!isNaN(h)) { const hEff = (h || 0) + hZ; if (hEff > max) max = hEff; }
+      if (isGiebel) {
+        const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+        const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
+        if (!isNaN(h2)) { const h2Eff = (h2 || 0) + h2Z; if (h2Eff > max) max = h2Eff; }
+      }
+    });
+  });
+  return round2(max);
+}
+
 // Migration eines alten Boolean-Zuschlags ("+2m"-Taste an/aus) auf den neuen
 // individuellen, numerischen Zuschlagwert je Feld (Schema 2.2).
 function migrateMessung(m) {
@@ -386,16 +489,8 @@ function migrateSeite(seite) {
 // ============================================================
 //  Toast
 // ============================================================
-
-let toastTimer = null;
-
-function showToast(msg) {
-  const el = document.getElementById('toastEl');
-  el.textContent = msg;
-  el.classList.add('show');
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
-}
+// showToast() steht jetzt in core.js und wird von beiden Modulen gemeinsam
+// genutzt (vorher zwei identische Kopien). Verhalten unverändert.
 
 // ============================================================
 //  Screen-Wechsel
@@ -662,7 +757,8 @@ function deleteProjectFromOverview(proj) {
 
 function openProjectActionMenu(proj, anchorEl) {
   openFloatingMenu(anchorEl, [
-    { label: 'Öffnen', onClick: () => openProject(proj.id) },
+    { label: 'Öffnen', onClick: () => requestOpenProject(proj) },
+    { label: 'Öffnen mit…', onClick: () => requestOpenProjectMitAuswahl(proj) },
     { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
     { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
     { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
@@ -688,6 +784,7 @@ function createProjectCard(proj) {
     statsParts.push(stats2d.felder + ' Feld' + (stats2d.felder !== 1 ? 'er' : ''));
     statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
   }
+  const vzList = Array.isArray(proj.technik?.verwendungszweck) ? proj.technik.verwendungszweck : [];
 
   card.innerHTML = `
     <div class="project-card2-top">
@@ -699,6 +796,7 @@ function createProjectCard(proj) {
     ${bauherr ? `<div class="project-card2-line">${bauherr}</div>` : ''}
     ${addrParts ? `<div class="project-card2-line project-card2-addr">${addrParts}</div>` : ''}
     ${proj.anschrift?.telefon ? `<div class="project-card2-line">${proj.anschrift.telefon}</div>` : ''}
+    ${vzList.length ? `<div class="project-card2-vz">${vzList.map(v => `<span class="project-card2-vz-tag">${v}</span>`).join('')}</div>` : ''}
     <div class="project-card2-stats">${statsParts.join(' · ')}</div>
     <div class="project-card2-dates">Erstellt ${fmtDate(proj.erstellt)} · Geändert ${fmtDate(proj.geaendert)}</div>
   `;
@@ -707,7 +805,7 @@ function createProjectCard(proj) {
     ev.stopPropagation();
     openProjectActionMenu(proj, ev.currentTarget);
   });
-  card.addEventListener('click', () => openProject(proj.id));
+  card.addEventListener('click', () => requestOpenProject(proj));
   return card;
 }
 
@@ -718,6 +816,7 @@ function renderProjectOverview() {
   if (!gridEl) return;
 
   renderFolderBar();
+  renderBackupReminder();
 
   gridEl.innerHTML = '';
 
@@ -737,6 +836,24 @@ function renderProjectOverview() {
 // ============================================================
 //  Projekt erstellen / öffnen
 // ============================================================
+
+// Zentrale Stelle für "dieses Projekt jetzt öffnen": öffnet direkt den
+// Projekt-Editor. Wer aus der Übersicht kommt, hat das Modul am
+// Startbildschirm bereits gewählt – hier noch einmal zu fragen wäre ein
+// Klick zu viel.
+function requestOpenProject(proj) {
+  openProject(proj.id);
+}
+
+// Variante mit vorgeschalteter Auswahl „Aufmaß oder 2D-Aufmaß?" (früher der
+// Auswahl-Dialog des Startbildschirms). Erreichbar über das ⋯-Menü einer
+// Projektkarte – damit lässt sich ein Projekt aus der Liste heraus direkt in
+// der 2D-Zeichnung öffnen, ohne den Umweg über den Editor. Die Shell hängt
+// sich dafür in `window.onProjectOpenRequest` ein.
+function requestOpenProjectMitAuswahl(proj) {
+  if (typeof window.onProjectOpenRequest === 'function') { window.onProjectOpenRequest(proj); return; }
+  openProject(proj.id);
+}
 
 function createNewProject() {
   const today = new Date().toISOString().slice(0, 10);
@@ -758,7 +875,7 @@ function createNewProject() {
   };
   projects.push(proj);
   saveProjects();
-  openProject(proj.id);
+  requestOpenProject(proj);
 }
 
 function openProject(projectId, opts) {
@@ -789,6 +906,9 @@ function openProject(projectId, opts) {
 
   loadTechnik(proj.technik);
   loadLogistik(proj.logistik);
+
+  const notizenEl = document.getElementById('fieldNotizen');
+  if (notizenEl) notizenEl.value = proj.notizen || '';
 
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
@@ -842,20 +962,30 @@ function collectGeruesttyp() {
 
 function collectTechnik() {
   const ankerVal = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
+  const verwendungszweck = Array.from(
+    document.querySelectorAll('#verwendungszweckSelector .chip-btn.active')
+  ).map(b => b.dataset.vz);
   return {
     lastklasse:        document.getElementById('fieldLastklasse')?.value        || '',
     breitenklasse:     document.getElementById('fieldBreitenklasse')?.value     || '',
-    verwendungszweck:  document.getElementById('fieldVerwendungszweck')?.value  || '',
+    verwendungszweck,
     verankerungsgrund: document.getElementById('fieldVerankerungsgrund')?.value || '',
     ankerAnzahl:       isNaN(ankerVal) ? null : ankerVal
   };
 }
 
 function loadTechnik(t) {
+  document.querySelectorAll('#verwendungszweckSelector .chip-btn').forEach(b => b.classList.remove('active'));
   if (!t) return;
   document.getElementById('fieldLastklasse').value        = t.lastklasse        || '';
   document.getElementById('fieldBreitenklasse').value     = t.breitenklasse     || '';
-  document.getElementById('fieldVerwendungszweck').value  = t.verwendungszweck  || '';
+  // Alte Projekte speichern hier einen einzelnen String statt eines Arrays.
+  const vzList = Array.isArray(t.verwendungszweck)
+    ? t.verwendungszweck
+    : (t.verwendungszweck ? [t.verwendungszweck] : []);
+  document.querySelectorAll('#verwendungszweckSelector .chip-btn').forEach(b => {
+    b.classList.toggle('active', vzList.includes(b.dataset.vz));
+  });
   document.getElementById('fieldVerankerungsgrund').value = t.verankerungsgrund || '';
   document.getElementById('fieldAnkerAnzahl').value       = t.ankerAnzahl != null ? t.ankerAnzahl : '';
 }
@@ -920,7 +1050,8 @@ function collectSeiten() {
     // Abschnitte
     const abschnitte = [];
     card.querySelectorAll('.abschnitt-row').forEach(abRow => {
-      const bez    = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      const bez    = abRow.querySelector('.abschnitt-bez')?.value.trim()   || '';
+      const notiz  = abRow.querySelector('.abschnitt-notiz')?.value.trim() || '';
       const ef     = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
       const giebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
       const messungen = [];
@@ -941,7 +1072,7 @@ function collectSeiten() {
           hoehe2Zuschlag: h2Z > 0 ? h2Z : null
         });
       });
-      abschnitte.push({ id: genId('ab'), bezeichnung: bez, einzelfeld: ef, giebel, messungen });
+      abschnitte.push({ id: genId('ab'), bezeichnung: bez, notiz, einzelfeld: ef, giebel, messungen });
     });
 
     // Konsolen (mehrere Lagen je Seite moeglich)
@@ -984,6 +1115,7 @@ function collectSeiten() {
 
     const ttToggle = card.querySelector('.accessory-toggle[data-acc="tt"]');
     const ttInp    = card.querySelector('.accessory-length-input[data-acc="tt"]');
+    const ttL1Btn  = card.querySelector('.accessory-l1-btn[data-acc="tt"]');
     const ttVal    = ttInp ? parseNum(ttInp.value) : NaN;
 
     const ksInp  = card.querySelector('.ks-input');
@@ -996,6 +1128,7 @@ function collectSeiten() {
       id:               card.dataset.sideId,
       name:             sel ? sel.value : '',
       manualName:       manual ? manual.value.trim() : '',
+      notiz:            card.querySelector('.seite-notiz')?.value.trim() || '',
       abschnitte,
       wandabstand:      isNaN(wandabstandVal) ? null : wandabstandVal,
       wdvs:             isNaN(wdvsVal) ? null : wdvsVal,
@@ -1005,7 +1138,7 @@ function collectSeiten() {
       gittertraeger:     collectSingleToggle('gt'),
       fussgaengertunnel: collectSingleToggle('ft'),
       treppenturm: (ttToggle && ttToggle.classList.contains('active'))
-        ? { hoehe: isNaN(ttVal) ? null : ttVal }
+        ? { hoehe: isNaN(ttVal) ? null : ttVal, autoL1: ttL1Btn ? ttL1Btn.dataset.active === '1' : false }
         : null,
       netze:    collectSingleToggle('ne'),
       ks:       isNaN(ksVal) ? null : ksVal,
@@ -1032,6 +1165,7 @@ function collectProjectFromForm(proj) {
   proj.technik           = collectTechnik();
   proj.logistik          = collectLogistik();
   proj.zusatzpositionen  = collectZusatzpositionen();
+  proj.notizen           = document.getElementById('fieldNotizen')?.value.trim() || '';
   proj.geaendert = new Date().toISOString().slice(0, 10);
 }
 
@@ -1095,6 +1229,9 @@ function renderSeiten(seitenData) {
   seitenData.forEach(seite => container.appendChild(createSeiteCard(seite)));
   renumberSeitenBadges();
   refreshNoSidesHint();
+  // Beim Laden eines Projekts nur den Warnzustand übernehmen – der Hinweis wird
+  // angezeigt, aber ohne Meldung (die gilt dem Überschreiten, nicht dem Öffnen).
+  projektWarn50 = projektLaenge() > TREPPENTURM_WARN_LAENGE;
   updateSummary();
 }
 
@@ -1146,8 +1283,25 @@ function createSeiteCard(seiteData) {
   let accSectionRef = null;
   let ksInputRef    = null;
 
+  // 50-m-Hinweis für die gesamte Seite (Summe aller Abschnitte): ein
+  // durchgehender Gerüstzug läuft meist über mehrere Abschnitte.
+  const seiteWarn = document.createElement('div');
+  seiteWarn.className = 'laenge-warn seite-warn';
+  seiteWarn.style.display = 'none';
+
+  function refreshSeiteWarn(silent) {
+    const hinweis = treppenturmHinweis(computeCardLaenge(card), 'Seite');
+    seiteWarn.textContent = hinweis ? '⚠ ' + hinweis : '';
+    seiteWarn.style.display = hinweis ? '' : 'none';
+    if (hinweis && !card._warn50 && !silent) {
+      showToast('Seite über ' + TREPPENTURM_WARN_LAENGE + ' m – Treppenturm erforderlich');
+    }
+    card._warn50 = !!hinweis;
+  }
+
   const mainOnChange = () => {
     updateCardPreview(card, previewEl);
+    refreshSeiteWarn();
     updateSummary();
     if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
     if (ksInputRef && !ksInputRef._ksManual) {
@@ -1233,6 +1387,16 @@ function createSeiteCard(seiteData) {
   wandWdvsRow.appendChild(makeSideMetaField('Wandabstand', 'm',  'seite-wandabstand', seiteData.wandabstand));
   wandWdvsRow.appendChild(makeSideMetaField('WDVS',        'cm', 'seite-wdvs',        seiteData.wdvs));
 
+  // Notiz zur Hausseite – die mittlere von drei Notiz-Ebenen (Projekt → Seite →
+  // Abschnitt). Gilt für die ganze Seite, z. B. „Zufahrt nur über den Hof" oder
+  // „Balkone bauseits freiräumen".
+  const seiteNotizInp = document.createElement('input');
+  seiteNotizInp.type = 'text';
+  seiteNotizInp.className = 'seite-notiz';
+  seiteNotizInp.placeholder = 'Notiz zur Seite (optional)';
+  seiteNotizInp.value = seiteData.notiz || '';
+  seiteNotizInp.addEventListener('input', () => updateSummary());
+
   // Abschnitte
   const abschnittSection = createAbschnittSection(seiteData, mainOnChange);
 
@@ -1298,8 +1462,10 @@ function createSeiteCard(seiteData) {
   body.appendChild(nameRow);
   body.appendChild(wandWdvsRow);
   body.appendChild(abschnittSection);
+  body.appendChild(seiteWarn);
   body.appendChild(ksRow);
   body.appendChild(accSectionRef);
+  body.appendChild(seiteNotizInp);
   body.appendChild(footer);
 
   card.appendChild(header);
@@ -1311,13 +1477,18 @@ function createSeiteCard(seiteData) {
     chevron.classList.toggle('open', !isOpen);
   });
 
-  // Initialer KS-Sync
+  // Initialer Sync: KS-Feld sowie alle aktiven Auto-Positionen (Konsole/IG "= L1",
+  // Treppenturm "= H+Ü", Netze "= Fläche") – muss erst NACH dem vollständigen
+  // Zusammenbau der Karte laufen, da die Abschnitts-Messwerte bis dahin noch
+  // nicht im DOM von `card` stehen.
   if (ksInputRef && !ksInputRef._ksManual) {
     const fl = computeCardFlaeche(card);
     if (fl > 0) ksInputRef.value = fl.toFixed(2);
   }
+  if (accSectionRef && accSectionRef._syncL1) accSectionRef._syncL1();
 
   updateCardPreview(card, previewEl);
+  refreshSeiteWarn(true);
   return card;
 }
 
@@ -1420,18 +1591,24 @@ function createAbschnittRow(data, container, onChange) {
   topLine.appendChild(giebelBtn);
   topLine.appendChild(removeAbBtn);
 
-  // Messpaare (L × H)
+  // Messpaare (H × L)
   const messungenList = document.createElement('div');
   messungenList.className = 'messungen-list';
+
+  // 50-m-Hinweis (Treppenturm) für diesen Abschnitt
+  const warnLine = document.createElement('div');
+  warnLine.className = 'laenge-warn';
+  warnLine.style.display = 'none';
 
   // Abschnitt-Summe
   const abTotalLine = document.createElement('div');
   abTotalLine.className = 'abschnitt-total';
 
-  function refreshAbschnittCalc() {
+  function refreshAbschnittCalc(silent) {
     const ef       = efBtn.classList.contains('active');
     const isGiebel = giebelBtn.classList.contains('active');
     let total = 0;
+    let totalLaenge = 0;
     messungenList.querySelectorAll('.messung-row').forEach(mRow => {
       const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
       const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
@@ -1440,6 +1617,7 @@ function createAbschnittRow(data, container, onChange) {
       if (ef) lEff = Math.max(lEff, 2.5);
       let f = 0;
       if (!isNaN(l) && lEff > 0) {
+        totalLaenge += lEff;
         if (isGiebel) {
           const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
           const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
@@ -1463,7 +1641,55 @@ function createAbschnittRow(data, container, onChange) {
       if (calcEl) calcEl.textContent = f > 0 ? '= ' + fmtNum(f) + ' m²' : '';
     });
     total = round2(total);
-    abTotalLine.textContent = total > 0 ? 'Σ ' + fmtNum(total) + ' m²' : '';
+    totalLaenge = round2(totalLaenge);
+    abTotalLine.textContent = total > 0
+      ? 'Σ L ' + fmtNum(totalLaenge) + ' m · ' + fmtNum(total) + ' m²'
+      : (totalLaenge > 0 ? 'Σ L ' + fmtNum(totalLaenge) + ' m' : '');
+
+    // Treppenturm-Hinweis, sobald der Abschnitt 50 m überschreitet
+    const hinweis = treppenturmHinweis(totalLaenge, 'Abschnitt');
+    warnLine.textContent = hinweis ? '⚠ ' + hinweis : '';
+    warnLine.style.display = hinweis ? '' : 'none';
+    if (hinweis && !row._warn50 && !silent) {
+      showToast('Über ' + TREPPENTURM_WARN_LAENGE + ' m – Treppenturm erforderlich');
+    }
+    row._warn50 = !!hinweis;
+  }
+
+  // Höhenwerte der ersten Messzeile des Abschnitts – innerhalb eines Abschnitts
+  // (z. B. Balkon) ändert sich in der Regel nur die Länge, die Höhe bleibt
+  // gleich. Neue Zeilen übernehmen diese Höhe daher als Vorschlag.
+  function getErsteHoehe() {
+    const first = messungenList.querySelector('.messung-row');
+    if (!first) return {};
+    const h   = parseNum(first.querySelector('.messung-hoehe')?.value);
+    const hZ  = readZuschlag(first.querySelector('.messung-hoehe-zuschlag'));
+    const h2  = parseNum(first.querySelector('.messung-hoehe2')?.value);
+    const h2Z = readZuschlag(first.querySelector('.messung-hoehe2-zuschlag'));
+    return {
+      hoehe:          isNaN(h)  ? null : h,
+      hoeheZuschlag:  hZ  > 0 ? hZ  : null,
+      hoehe2:         isNaN(h2) ? null : h2,
+      hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+    };
+  }
+
+  // Kompletter Wertesatz einer Zeile (für „Position noch einmal erfassen")
+  function readMessungRow(mRow) {
+    const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
+    const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
+    const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
+    const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+    const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
+    const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
+    return {
+      laenge:         isNaN(l)  ? null : l,
+      laengeZuschlag: lZ  > 0 ? lZ  : null,
+      hoehe:          isNaN(h)  ? null : h,
+      hoeheZuschlag:  hZ  > 0 ? hZ  : null,
+      hoehe2:         isNaN(h2) ? null : h2,
+      hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+    };
   }
 
   function createMessungRow(mData) {
@@ -1527,6 +1753,23 @@ function createAbschnittRow(data, container, onChange) {
     const calcSpan = document.createElement('span');
     calcSpan.className = 'messung-calc';
 
+    // „+" duplziert die Zeile mit allen Werten – für Positionen, die für den
+    // Umlauf ein zweites Mal erfasst werden müssen. Nichts muss neu getippt
+    // werden; die Kopie ist danach ganz normal einzeln änderbar.
+    const dupMBtn = document.createElement('button');
+    dupMBtn.type = 'button';
+    dupMBtn.className = 'messung-dup-btn';
+    dupMBtn.textContent = '+';
+    dupMBtn.title = 'Position noch einmal erfassen (z. B. für den Umlauf)';
+    dupMBtn.addEventListener('click', () => {
+      const kopie = createMessungRow(readMessungRow(mRow));
+      mRow.after(kopie);
+      refreshAbschnittCalc();
+      onChange();
+      const inp = kopie.querySelector('.messung-laenge');
+      if (inp) { inp.focus(); if (inp.select) inp.select(); }
+    });
+
     const removeMBtn = document.createElement('button');
     removeMBtn.type = 'button';
     removeMBtn.className = 'meas-remove-btn';
@@ -1547,15 +1790,17 @@ function createAbschnittRow(data, container, onChange) {
     hoeheField.classList.add('meas-field-h');
     const hoehe2Field = wrapMeasField('H2', hoehe2Inp, 'giebel-part');
 
-    mRow.appendChild(laengeField);
-    mRow.appendChild(laengeZuschlagCtrl);
-    mRow.appendChild(mulSign);
+    // Reihenfolge: erst Höhe (bleibt im Abschnitt meist gleich), dann Länge
     mRow.appendChild(hoeheField);
     mRow.appendChild(hoeheZuschlagCtrl);
     mRow.appendChild(giebelSep);
     mRow.appendChild(hoehe2Field);
     mRow.appendChild(hoehe2ZuschlagCtrl);
+    mRow.appendChild(mulSign);
+    mRow.appendChild(laengeField);
+    mRow.appendChild(laengeZuschlagCtrl);
     mRow.appendChild(calcSpan);
+    mRow.appendChild(dupMBtn);
     mRow.appendChild(removeMBtn);
     return mRow;
   }
@@ -1566,14 +1811,30 @@ function createAbschnittRow(data, container, onChange) {
 
   initMessungen.forEach(m => messungenList.appendChild(createMessungRow(m)));
 
+  // Neue Zeilen übernehmen die Höhe der ersten Zeile des Abschnitts als
+  // Vorschlag (nur die Länge muss noch eingetragen werden). Der Wert bleibt
+  // ganz normal überschreibbar, falls die Höhe doch abweicht.
   const addMessBtn = document.createElement('button');
   addMessBtn.type = 'button';
   addMessBtn.className = 'meas-add-btn meas-add-btn-sm';
   addMessBtn.textContent = '+ Maß';
+  addMessBtn.title = 'Weitere Messung – Höhe wird aus der ersten Zeile übernommen';
   addMessBtn.addEventListener('click', () => {
-    messungenList.appendChild(createMessungRow({}));
+    const neu = createMessungRow(getErsteHoehe());
+    messungenList.appendChild(neu);
+    refreshAbschnittCalc();
     onChange();
+    const inp = neu.querySelector('.messung-laenge');
+    if (inp) inp.focus();
   });
+
+  // Notiz zum Abschnitt (z. B. „nur bis OK Brüstung", „Zufahrt frei halten")
+  const notizInp = document.createElement('input');
+  notizInp.type = 'text';
+  notizInp.className = 'abschnitt-notiz';
+  notizInp.placeholder = 'Notiz zum Abschnitt (optional)';
+  notizInp.value = data.notiz || '';
+  notizInp.addEventListener('input', onChange);
 
   // Giebel-Startzustand anwenden
   if (data.giebel) row.classList.add('giebel-active');
@@ -1581,9 +1842,11 @@ function createAbschnittRow(data, container, onChange) {
   row.appendChild(topLine);
   row.appendChild(messungenList);
   row.appendChild(addMessBtn);
+  row.appendChild(notizInp);
+  row.appendChild(warnLine);
   row.appendChild(abTotalLine);
 
-  refreshAbschnittCalc();
+  refreshAbschnittCalc(true);
   return row;
 }
 
@@ -1685,7 +1948,10 @@ function createZusatzRow(data) {
   artSel.addEventListener('change', () => {
     const pref = PREFERRED_EINHEIT[artSel.value];
     if (pref) einheitSel.value = pref;
+    refreshArtHinweise();
+    updateSummary();
   });
+  einheitSel.addEventListener('change', updateSummary);
 
   // Menge
   const mengeInp = document.createElement('input');
@@ -1696,6 +1962,7 @@ function createZusatzRow(data) {
   mengeInp.inputMode = 'decimal';
   mengeInp.placeholder = '0,00';
   if (data?.menge !== null && data?.menge !== undefined && !isNaN(data.menge)) mengeInp.value = data.menge;
+  mengeInp.addEventListener('input', updateSummary);
 
   // Notiz
   const notizInp = document.createElement('input');
@@ -1703,13 +1970,26 @@ function createZusatzRow(data) {
   notizInp.className = 'zusatz-notiz';
   notizInp.placeholder = 'Notiz (optional)';
   notizInp.value = data?.notiz || '';
+  notizInp.addEventListener('input', updateSummary);
+
+  // Pauschal-/Stückpositionen (Parkplatz, Genehmigung) werden nicht gemessen –
+  // dort zählt nur die Anzahl; Zeitraum/Behörde gehören in die Notiz.
+  function refreshArtHinweise() {
+    const pauschal = PAUSCHAL_ARTEN.includes(artSel.value);
+    mengeInp.placeholder = pauschal ? 'Anzahl' : '0,00';
+    notizInp.placeholder = artSel.value === 'Parkplatz'
+      ? 'Notiz, z. B. Zeitraum / Halteverbotszone'
+      : (artSel.value === 'Genehmigung' ? 'Notiz, z. B. Behörde / Art der Genehmigung' : 'Notiz (optional)');
+  }
 
   // Remove
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'meas-remove-btn';
   removeBtn.innerHTML = '&times;';
-  removeBtn.addEventListener('click', () => { row.remove(); refreshNoZusatzHint(); });
+  removeBtn.addEventListener('click', () => { row.remove(); refreshNoZusatzHint(); updateSummary(); });
+
+  refreshArtHinweise();
 
   const topLine = document.createElement('div');
   topLine.className = 'zusatz-top';
@@ -1834,7 +2114,14 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return lEff > 0 ? round2(lEff) : null;
   }
 
-  function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel) {
+  // `getAutoValue`/`autoLabel` erlauben abweichende Vorschlagsquellen statt der
+  // Standard-Länge des ersten Abschnitts (L1) – z. B. Fläche der Seite (Netze)
+  // oder Höhe + Überstand (Treppenturm). Ohne Angabe verhält sich die Funktion
+  // wie bisher (Länge von L1).
+  function createInlineLength(accKey, initLaenge, initAutoL1, unitLabel, autoLabel, getAutoValue) {
+    autoLabel     = autoLabel || '= L1';
+    getAutoValue  = getAutoValue || getL1;
+
     const wrap = document.createElement('div');
     wrap.className = 'acc-inline-length';
 
@@ -1843,8 +2130,9 @@ function createAccessoriesSection(seiteData, card, onChange) {
     l1Btn.className = 'accessory-l1-btn' + (initAutoL1 ? ' active' : '');
     l1Btn.dataset.active = initAutoL1 ? '1' : '0';
     if (accKey) l1Btn.dataset.acc = accKey;
-    l1Btn.textContent = '= L1';
-    l1Btn.title = 'Länge vom ersten Abschnitt übernehmen';
+    l1Btn.textContent = autoLabel;
+    l1Btn._getAutoValue = getAutoValue;
+    l1Btn.title = autoLabel === '= L1' ? 'Länge vom ersten Abschnitt übernehmen' : 'Automatisch berechneten Vorschlagswert übernehmen';
 
     const inp = document.createElement('input');
     inp.type = 'number';
@@ -1856,14 +2144,14 @@ function createAccessoriesSection(seiteData, card, onChange) {
     inp.placeholder = '0,00';
     if (initLaenge !== null && initLaenge !== undefined && !isNaN(initLaenge)) inp.value = initLaenge;
     inp.disabled = initAutoL1;
-    if (initAutoL1) { const v = getL1(); if (v !== null && !isNaN(v)) inp.value = v; }
+    if (initAutoL1) { const v = getAutoValue(); if (v !== null && !isNaN(v)) inp.value = v; }
 
     l1Btn.addEventListener('click', () => {
       const nowActive = l1Btn.dataset.active === '1';
       l1Btn.dataset.active = nowActive ? '0' : '1';
       l1Btn.classList.toggle('active', !nowActive);
       inp.disabled = !nowActive;
-      if (!nowActive) { const v = getL1(); if (v !== null && !isNaN(v)) inp.value = v; }
+      if (!nowActive) { const v = getAutoValue(); if (v !== null && !isNaN(v)) inp.value = v; }
       onChange();
     });
     inp.addEventListener('input', onChange);
@@ -1878,7 +2166,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return wrap;
   }
 
-  function createSingleAcc(accKey, labelText, initData, unitLabel) {
+  function createSingleAcc(accKey, labelText, initData, unitLabel, autoLabel, getAutoValue, defaultAuto, valueField) {
+    valueField = valueField || 'laenge';
     const row = document.createElement('div');
     row.className = 'acc-single-row';
 
@@ -1888,7 +2177,13 @@ function createAccessoriesSection(seiteData, card, onChange) {
     toggleBtn.dataset.acc = accKey;
     toggleBtn.textContent = labelText;
 
-    const lenWrap = createInlineLength(accKey, initData ? initData.laenge : null, initData ? (initData.autoL1 || false) : false, unitLabel);
+    // Neue (noch nie gespeicherte) Position: startet im übergebenen `defaultAuto`-
+    // Modus (z. B. Netze/Treppenturm sofort mit Vorschlagswert). Bereits
+    // gespeicherte Positionen behalten ihren zuletzt gewählten Auto/Manuell-Zustand.
+    const initAutoL1 = initData
+      ? (initData.autoL1 !== undefined ? initData.autoL1 : !!defaultAuto)
+      : !!defaultAuto;
+    const lenWrap = createInlineLength(accKey, initData ? initData[valueField] : null, initAutoL1, unitLabel, autoLabel, getAutoValue);
     lenWrap.style.display = initData ? '' : 'none';
 
     toggleBtn.addEventListener('click', () => {
@@ -1912,7 +2207,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     const lageBtns = document.createElement('div');
     lageBtns.className = 'acc-lage-btns';
     const currentLage   = (data && data.lage != null) ? String(data.lage) : 'alle';
-    const isPresetLage  = ['alle', '1', '2'].includes(currentLage);
+    const isPresetLage  = ['alle', '1', '2', '3', '4', '5'].includes(currentLage);
 
     const lageFreeInp = document.createElement('input');
     lageFreeInp.type = 'number';
@@ -1923,7 +2218,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     lageFreeInp.placeholder = 'Anz.';
     if (!isPresetLage) lageFreeInp.value = currentLage;
 
-    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen']].forEach(([val, lbl]) => {
+    [['alle', 'Alle'], ['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen']].forEach(([val, lbl]) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'lage-btn' + (isPresetLage && currentLage === val ? ' active' : '');
@@ -2146,49 +2441,25 @@ function createAccessoriesSection(seiteData, card, onChange) {
   section.appendChild(createSingleAcc('gt', 'Gitterträger (GT)',       seiteData.gittertraeger     || null));
   section.appendChild(createSingleAcc('ft', 'Fußgängertunnel (FT)',   seiteData.fussgaengertunnel || null));
 
-  // Treppenturm (Höhe)
-  const ttData = seiteData.treppenturm || null;
-  const ttRow  = document.createElement('div');
-  ttRow.className = 'acc-single-row';
+  // Treppenturm: Vorschlagshöhe = größte Höhe der Seite + Überstand (Standard
+  // 2,00 m, wie bei den anderen "+Xm"-Zuschlägen einstellbar). Bei mehreren
+  // Höhen auf der Seite wird die größte verwendet. Der Vorschlag bleibt jederzeit
+  // manuell überschreibbar (Auto-Taste deaktivieren oder Wert direkt ändern).
+  section.appendChild(createSingleAcc(
+    'tt', 'Treppenturm (TT)', seiteData.treppenturm || null, 'm (H)',
+    '= H+' + fmtNum(ueberstandWert) + 'm',
+    () => { const h = computeCardMaxHoehe(card); return h > 0 ? round2(h + ueberstandWert) : null; },
+    true,
+    'hoehe'
+  ));
 
-  const ttBtn = document.createElement('button');
-  ttBtn.type = 'button';
-  ttBtn.className = 'accessory-toggle' + (ttData ? ' active' : '');
-  ttBtn.dataset.acc = 'tt';
-  ttBtn.textContent = 'Treppenturm (TT)';
-
-  const ttWrap = document.createElement('div');
-  ttWrap.className = 'acc-inline-length';
-  ttWrap.style.display = ttData ? '' : 'none';
-
-  const ttInp = document.createElement('input');
-  ttInp.type = 'number';
-  ttInp.className = 'accessory-length-input';
-  ttInp.dataset.acc = 'tt';
-  ttInp.step = '0.01';
-  ttInp.min = '0';
-  ttInp.inputMode = 'decimal';
-  ttInp.placeholder = '0,00';
-  if (ttData && ttData.hoehe !== null && !isNaN(ttData.hoehe)) ttInp.value = ttData.hoehe;
-  ttInp.addEventListener('input', onChange);
-
-  const ttUnit = document.createElement('span');
-  ttUnit.className = 'accessory-length-unit';
-  ttUnit.textContent = 'm (H)';
-
-  ttWrap.appendChild(ttInp);
-  ttWrap.appendChild(ttUnit);
-  ttBtn.addEventListener('click', () => {
-    const wasActive = ttBtn.classList.contains('active');
-    ttBtn.classList.toggle('active', !wasActive);
-    ttWrap.style.display = wasActive ? 'none' : '';
-    onChange();
-  });
-  ttRow.appendChild(ttBtn);
-  ttRow.appendChild(ttWrap);
-  section.appendChild(ttRow);
-
-  section.appendChild(createSingleAcc('ne', 'Netze (NE)', seiteData.netze || null, 'm²'));
+  // Netze: Vorschlags-m² = Gerüstfläche der Seite (wie beim KS-Feld).
+  section.appendChild(createSingleAcc(
+    'ne', 'Netze (NE)', seiteData.netze || null, 'm²',
+    '= Fläche',
+    () => { const fl = computeCardFlaeche(card); return fl > 0 ? fl : null; },
+    true
+  ));
 
   // L1-Sync
   section._syncL1 = function() {
@@ -2197,7 +2468,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
       if (!wrap) return;
       const inp = wrap.querySelector('.accessory-length-input');
       if (!inp) return;
-      const v = getL1();
+      const v = (l1Btn._getAutoValue || getL1)();
       if (v !== null && !isNaN(v)) inp.value = v;
     });
   };
@@ -2243,7 +2514,8 @@ function updateSummary() {
     card.querySelectorAll('.abschnitt-row').forEach(abRow => {
       const ef       = abRow.querySelector('.einzelfeld-btn')?.classList.contains('active') || false;
       const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active')    || false;
-      const bez      = abRow.querySelector('.abschnitt-bez')?.value.trim() || '';
+      const bez      = abRow.querySelector('.abschnitt-bez')?.value.trim()   || '';
+      const abNotiz  = abRow.querySelector('.abschnitt-notiz')?.value.trim() || '';
       let abFlaeche  = 0;
       abRow.querySelectorAll('.messung-row').forEach(mRow => {
         const l   = parseNum(mRow.querySelector('.messung-laenge')?.value);
@@ -2264,7 +2536,7 @@ function updateSummary() {
             if (h2Eff >= h1Eff && h1Eff >= 0) {
               const pair = round2(lEff * (h1Eff + h2Eff) / 2);
               abFlaeche += pair;
-              detailParts.push(bezPfx + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)');
+              detailParts.push(bezPfx + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)');
             }
           }
         } else {
@@ -2275,13 +2547,22 @@ function updateSummary() {
             if (hEff > 0) {
               const pair = round2(lEff * hEff);
               abFlaeche += pair;
-              detailParts.push(bezPfx + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
+              detailParts.push(bezPfx + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
             }
           }
         }
       });
+      if (abNotiz) detailParts.push((bez ? bez + ': ' : '') + 'Notiz: ' + escHtml(abNotiz));
       seitenFlaeche += abFlaeche;
     });
+
+    // Notiz zur Hausseite
+    const seiteNotiz = card.querySelector('.seite-notiz')?.value.trim() || '';
+    if (seiteNotiz) detailParts.push('Notiz: ' + escHtml(seiteNotiz));
+
+    // 50-m-Hinweis (Treppenturm) für die gesamte Seite
+    const seiteHinweis = treppenturmHinweis(computeCardLaenge(card), 'Seite');
+    if (seiteHinweis) detailParts.push('<span class="summary-warn">⚠ ' + seiteHinweis + '</span>');
 
     totalArea += seitenFlaeche;
 
@@ -2345,7 +2626,7 @@ function updateSummary() {
       const notiz   = row.querySelector('.zusatz-notiz')?.value.trim();
       const mengeStr = !isNaN(menge) ? fmtNum(menge) + ' ' + einheit : '–';
       html += `<tr>
-        <td><span class="summary-side-name" style="font-size:0.88rem">${art}</span>${notiz ? '<span class="summary-side-detail">' + notiz + '</span>' : ''}</td>
+        <td><span class="summary-side-name" style="font-size:0.88rem">${art}</span>${notiz ? '<span class="summary-side-detail">' + escHtml(notiz) + '</span>' : ''}</td>
         <td>${mengeStr}</td>
       </tr>`;
     });
@@ -2356,6 +2637,20 @@ function updateSummary() {
       <td>Gesamtfläche</td>
       <td>${fmtNum(totalArea)} m²</td>
     </tr>`;
+
+  // 50-m-Hinweis über alle Hausseiten hinweg: mehrere kurze Seiten ergeben in
+  // Summe oft einen Gerüstzug über 50 m, ohne dass eine einzelne Seite warnt.
+  const projektHinweis = treppenturmHinweis(projektLaenge(), 'alle Seiten');
+  if (projektHinweis) {
+    html += `<tr><td colspan="2" class="summary-warn-row">⚠ ${projektHinweis}</td></tr>`;
+  }
+  // Meldung nur beim Überschreiten – und nur, wenn nicht ohnehin schon eine
+  // einzelne Seite darauf hingewiesen hat (sonst käme dasselbe doppelt).
+  const seiteWarntBereits = Array.from(cards).some(c => c._warn50);
+  if (projektHinweis && !projektWarn50 && !seiteWarntBereits) {
+    showToast('Alle Seiten zusammen über ' + TREPPENTURM_WARN_LAENGE + ' m – Treppenturm erforderlich');
+  }
+  projektWarn50 = !!projektHinweis;
 
   const ankerAnzahl = parseNum(document.getElementById('fieldAnkerAnzahl')?.value);
   if (!isNaN(ankerAnzahl) && ankerAnzahl > 0) {
@@ -2448,6 +2743,7 @@ async function autoCalcAnfahrt() {
 function generatePDF() {
   const anschrift  = collectAnschrift();
   const geruesttyp = collectGeruesttyp();
+  const technik    = collectTechnik();
   const seiten     = collectSeiten();
   const logistik   = collectLogistik();
   const zusatz     = collectZusatzpositionen();
@@ -2522,6 +2818,9 @@ function generatePDF() {
   if (anschrift.bauherr)  { doc.setFontSize(10); doc.text('Bauherr: ' + anschrift.bauherr, LM, y); y += 5; }
   if (anschrift.telefon)  { doc.setFontSize(10); doc.text('Telefon: ' + anschrift.telefon, LM, y); y += 5; }
   doc.setFontSize(10); doc.text(geruesttypLabel, LM, y); y += 5;
+  if (technik.verwendungszweck.length) {
+    doc.text('Verwendungszweck: ' + technik.verwendungszweck.join(', '), LM, y); y += 5;
+  }
   y += 2;
 
   // ── Gerüstfläche ──────────────────────────────────────────────
@@ -2529,6 +2828,7 @@ function generatePDF() {
   secHead('Gerüstfläche');
 
   let totalArea = 0;
+  let gesamtLaenge = 0;
   const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
 
   seiten.forEach((seite, idx) => {
@@ -2552,9 +2852,11 @@ function generatePDF() {
     }
 
     let seitenFlaeche = 0;
+    let seitenLaenge  = 0;
     (seite.abschnitte || []).forEach(a => {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
+      seitenLaenge += abschnittLaenge(a);
       (a.messungen || []).forEach(m => {
         let lEff = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
@@ -2569,7 +2871,7 @@ function generatePDF() {
           seitenFlaeche += pair;
           chk(6);
           doc.setFontSize(9);
-          doc.text(bezStr + fmtNum(lEff) + ' × (H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2' + efStr, IND + 3, y);
+          doc.text(bezStr + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr, IND + 3, y);
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
@@ -2579,11 +2881,24 @@ function generatePDF() {
           seitenFlaeche += pair;
           chk(6);
           doc.setFontSize(9);
-          doc.text(bezStr + fmtNum(lEff) + ' m × ' + fmtNum(hEff) + ' m' + efStr, IND + 3, y);
+          doc.text(bezStr + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr, IND + 3, y);
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         }
       });
+
+      // Notiz zum Abschnitt
+      if (a.notiz) {
+        chk(6);
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'italic');
+        doc.splitTextToSize('Notiz: ' + a.notiz, RM - (IND + 3)).forEach(zeile => {
+          chk(5);
+          doc.text(zeile, IND + 3, y);
+          y += 4.5;
+        });
+        doc.setFont(undefined, 'normal');
+      }
     });
 
     if (seitenFlaeche > 0) {
@@ -2592,6 +2907,32 @@ function generatePDF() {
       doc.setFontSize(10);
       doc.setFont(undefined, 'bold');
       doc.text(fmtNum(seitenFlaeche) + ' m²', RM, y, { align: 'right' });
+      doc.setFont(undefined, 'normal');
+      y += 5;
+    }
+
+    // Notiz zur Hausseite
+    if (seite.notiz) {
+      chk(6);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'italic');
+      doc.splitTextToSize('Notiz: ' + seite.notiz, RM - (IND + 3)).forEach(zeile => {
+        chk(5);
+        doc.text(zeile, IND + 3, y);
+        y += 4.5;
+      });
+      doc.setFont(undefined, 'normal');
+    }
+
+    gesamtLaenge += seitenLaenge;
+
+    // Hinweis: ab 50 m Gerüstlänge ist ein Treppenturm erforderlich
+    const seitenHinweis = treppenturmHinweis(round2(seitenLaenge), 'Seite');
+    if (seitenHinweis) {
+      chk(6);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'bold');
+      doc.text('Hinweis: ' + seitenHinweis, IND + 3, y);
       doc.setFont(undefined, 'normal');
       y += 5;
     }
@@ -2631,6 +2972,17 @@ function generatePDF() {
   doc.line(LM, y, RM, y);
   y += 5;
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
+
+  // 50-m-Hinweis über alle Hausseiten hinweg
+  const projektHinweisPdf = treppenturmHinweis(round2(gesamtLaenge), 'alle Seiten');
+  if (projektHinweisPdf) {
+    chk(6);
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'bold');
+    doc.text('Hinweis: ' + projektHinweisPdf, IND, y);
+    doc.setFont(undefined, 'normal');
+    y += 5;
+  }
 
   // ── Positionen ─────────────────────────────────────────────────
   // Konsolen: rein numerisch nach Typ sortiert, Dachfang-Variante (z. B. "50df")
@@ -2696,6 +3048,25 @@ function generatePDF() {
     transportParts.forEach(([label, val]) => pdfRow(label, val));
   }
 
+  // ── Notizen / Allgemeine Informationen ────────────────────────
+  const notizen = document.getElementById('fieldNotizen')?.value.trim() || '';
+  if (notizen) {
+    y += 1;
+    hline(0.3);
+    secHead('Notizen / Allgemeine Informationen');
+    doc.setFontSize(10);
+    // Absätze des Notizfeldes einzeln umbrechen, damit Zeilenumbrüche des
+    // Anwenders erhalten bleiben.
+    notizen.split(/\r?\n/).forEach(absatz => {
+      if (absatz.trim() === '') { y += 3; return; }
+      doc.splitTextToSize(absatz, RM - IND).forEach(zeile => {
+        chk(6);
+        doc.text(zeile, IND, y);
+        y += 5;
+      });
+    });
+  }
+
   const proj = getCurrentProject();
   const base = proj ? getProjectName(proj).replace(/[^a-zA-Z0-9\-_äöüÄÖÜß ]/g, '').trim() : 'Aufmaß';
   doc.save((base || 'Aufmaß') + '.pdf');
@@ -2704,6 +3075,67 @@ function generatePDF() {
 // ============================================================
 //  JSON-Export / Import
 // ============================================================
+
+/** Exportiert ALLE Projekte + Ordner in einer Datei (Gesamt-Backup) – anders
+ *  als exportJson(), das nur das gerade geöffnete Projekt sichert. Wird vom
+ *  Backup-Reminder-Banner sowie optional manuell genutzt. */
+function exportAllProjectsBackup() {
+  const payload = { exportedAt: new Date().toISOString(), projects, folders };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'Aufmass_Backup_' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  localStorage.setItem(LAST_BACKUP_STORAGE_KEY, String(Date.now()));
+  renderBackupReminder();
+  showToast('Backup exportiert');
+}
+
+/** Zeigt/aktualisiert ein dezentes Hinweisbanner über der Projektübersicht,
+ *  wenn länger kein Gesamt-Backup (JSON-Export aller Projekte) gemacht wurde.
+ *  Rein additiv per JS erzeugt – keine Änderung an index.html/start.html nötig. */
+function renderBackupReminder() {
+  const host = document.getElementById('homeScreen');
+  if (!host) return;
+  const content = host.querySelector('main.screen-content');
+  let banner = document.getElementById('backupReminderBanner');
+  if (!content) return;
+
+  const remove = () => { if (banner) banner.remove(); };
+
+  if (projects.length === 0) return remove();
+
+  const dismissedUntil = parseInt(localStorage.getItem(BACKUP_DISMISS_STORAGE_KEY) || '0', 10);
+  if (Date.now() < dismissedUntil) return remove();
+
+  const lastTsRaw = localStorage.getItem(LAST_BACKUP_STORAGE_KEY);
+  const lastTs    = lastTsRaw ? parseInt(lastTsRaw, 10) : null;
+  const days      = lastTs ? Math.floor((Date.now() - lastTs) / 86400000) : null;
+  if (lastTs !== null && days < BACKUP_REMIND_AFTER_DAYS) return remove();
+
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'backupReminderBanner';
+    banner.className = 'backup-reminder';
+    content.prepend(banner);
+  }
+  const msg = lastTs === null
+    ? 'Noch kein Backup erstellt.'
+    : `Seit ${days} Tagen kein Backup.`;
+  banner.innerHTML = `
+    <span class="backup-reminder-text">💾 ${msg} Alle Projekte liegen nur auf diesem Gerät.</span>
+    <span class="backup-reminder-actions">
+      <button type="button" class="backup-reminder-export" id="backupReminderExportBtn">Jetzt exportieren</button>
+      <button type="button" class="backup-reminder-dismiss" id="backupReminderDismissBtn" aria-label="Später erinnern">×</button>
+    </span>`;
+  banner.querySelector('#backupReminderExportBtn').addEventListener('click', exportAllProjectsBackup);
+  banner.querySelector('#backupReminderDismissBtn').addEventListener('click', () => {
+    localStorage.setItem(BACKUP_DISMISS_STORAGE_KEY, String(Date.now() + BACKUP_SNOOZE_DAYS * 86400000));
+    banner.remove();
+  });
+}
 
 function exportJson() {
   const proj = getCurrentProject();
@@ -2760,7 +3192,10 @@ function open2dViewer() {
   if (!proj) return;
   flushAutosave();
   localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, proj.id);
-  window.location.href = 'viewer2d.html';
+  // Früher ein Seitenwechsel zu viewer2d.html – in der zusammengeführten App
+  // ein Routenwechsel innerhalb derselben Seite. Der 2D-Zeichner lädt beim
+  // Aktivieren die Zeichnung des verknüpften Projekts nach.
+  Shell.gehe('#/2d');
 }
 
 function initApp() {
@@ -2769,6 +3204,8 @@ function initApp() {
 
   // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
   // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
+  // `?resume=1` bleibt als Einstieg erhalten (alte Lesezeichen); innerhalb der
+  // Shell übernimmt zusätzlich `AufmassModul.oeffneProjekt(id)`.
   const resumeId = new URLSearchParams(window.location.search).get('resume')
     ? localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY)
     : null;
@@ -2794,30 +3231,35 @@ function initApp() {
     });
   }
 
-  document.getElementById('newProjectBtn').addEventListener('click', createNewProject);
+  document.getElementById('newProjectBtn')?.addEventListener('click', createNewProject);
 
-  document.getElementById('backBtn').addEventListener('click', () => {
+  // Die folgenden Elemente existieren nur auf Seiten mit eingebettetem
+  // Projekt-Editor (#projectScreen, z. B. index.html). Auf reinen
+  // Übersichtsseiten (z. B. start.html) fehlen sie – daher optional verknüpft,
+  // ohne dass sich am bestehenden Verhalten dort etwas ändert, wo sie existieren.
+  document.getElementById('backBtn')?.addEventListener('click', () => {
     flushAutosave();
     goToOverview();
   });
 
-  document.getElementById('deleteProjectBtn').addEventListener('click', deleteCurrentProject);
-  document.getElementById('addSideBtn').addEventListener('click', addSide);
-  document.getElementById('addSideBtnBottom').addEventListener('click', addSide);
-  document.getElementById('saveProjectBtn').addEventListener('click', saveCurrentProject);
-  document.getElementById('exportPdfBtn').addEventListener('click', generatePDF);
-  document.getElementById('calcAnfahrtBtn').addEventListener('click', autoCalcAnfahrt);
-  document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
-  document.getElementById('importJsonBtn').addEventListener('click', () => {
+  document.getElementById('deleteProjectBtn')?.addEventListener('click', deleteCurrentProject);
+  document.getElementById('addSideBtn')?.addEventListener('click', addSide);
+  document.getElementById('addSideBtnBottom')?.addEventListener('click', addSide);
+  document.getElementById('saveProjectBtn')?.addEventListener('click', saveCurrentProject);
+  document.getElementById('exportPdfBtn')?.addEventListener('click', generatePDF);
+  document.getElementById('calcAnfahrtBtn')?.addEventListener('click', autoCalcAnfahrt);
+  document.getElementById('exportJsonBtn')?.addEventListener('click', exportJson);
+  document.getElementById('importJsonBtn')?.addEventListener('click', () => {
     document.getElementById('importFileInput').click();
   });
-  document.getElementById('importFileInput').addEventListener('change', handleImportFile);
+  document.getElementById('importFileInput')?.addEventListener('change', handleImportFile);
   document.getElementById('open2dBtn')?.addEventListener('click', open2dViewer);
 
-  document.getElementById('addZusatzBtn').addEventListener('click', () => {
+  document.getElementById('addZusatzBtn')?.addEventListener('click', () => {
     const container = document.getElementById('zusatzContainer');
     container.appendChild(createZusatzRow({}));
     refreshNoZusatzHint();
+    updateSummary();
     scheduleAutosave();
   });
 
@@ -2843,6 +3285,12 @@ function initApp() {
     });
   });
 
+  // Verwendungszweck: Mehrfachauswahl – jeder Chip lässt sich unabhängig
+  // von den anderen ein-/ausschalten (oft mehrere Gewerke am selben Objekt).
+  document.querySelectorAll('#verwendungszweckSelector .chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => btn.classList.toggle('active'));
+  });
+
   // Status-Toggle (Projekt-Status)
   document.querySelectorAll('#statusSelector .status-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2855,11 +3303,13 @@ function initApp() {
   // Projektbildschirm löst (gebündelt) einen Auto-Save aus – deckt Anschrift,
   // Technik, Logistik, Hausseiten, Positionen, Projektname & Status ab.
   const projectScreenEl = document.getElementById('projectScreen');
-  projectScreenEl.addEventListener('input',  scheduleAutosave);
-  projectScreenEl.addEventListener('change', scheduleAutosave);
-  projectScreenEl.addEventListener('click', e => {
-    if (e.target.closest('button')) scheduleAutosave();
-  });
+  if (projectScreenEl) {
+    projectScreenEl.addEventListener('input',  scheduleAutosave);
+    projectScreenEl.addEventListener('change', scheduleAutosave);
+    projectScreenEl.addEventListener('click', e => {
+      if (e.target.closest('button')) scheduleAutosave();
+    });
+  }
 
   // Projektübersicht: Suche, Status-Filter, Sortierung
   document.getElementById('searchInput')?.addEventListener('input', e => {
@@ -2876,4 +3326,71 @@ function initApp() {
   });
 }
 
-document.addEventListener('DOMContentLoaded', initApp);
+// ============================================================
+//  Modul-Schnittstelle zur Shell
+// ============================================================
+// Früher startete dieses Programm selbst per DOMContentLoaded. In der
+// zusammengeführten App entscheidet die Shell (shell.js), wann das Modul
+// aufgebaut (`mount`) und wann es sichtbar wird (`aktiviere`). Aufgebaut wird
+// nur einmal – dadurch bleibt beim Wechsel Hub ↔ Modul der gesamte Zustand
+// (geöffnetes Projekt, Formularinhalte, Scrollposition) erhalten.
+
+const AufmassModul = (() => {
+  let gemountet = false;
+
+  return {
+    id: 'aufmass',
+    name: 'Aufmaß',
+
+    /** Einmaliger Aufbau: Daten laden, Bedienelemente verknüpfen. */
+    mount() {
+      if (gemountet) return;
+      gemountet = true;
+      initApp();
+    },
+
+    /** Modul wird sichtbar. Die Projektliste kann zwischenzeitlich vom
+     *  2D-Modul verändert worden sein (Zeichnung gespeichert) – deshalb neu
+     *  einlesen und die Kennzahlen der 2D-Zeichnung auffrischen. */
+    aktiviere() {
+      this.mount();
+      loadProjects();
+      loadFolders();
+      renderProjectOverview();
+      renderBackupReminder();
+      const proj = getCurrentProject();
+      if (proj) update2dSummary(proj);
+    },
+
+    /** Modul wird verlassen: gebündelte Autosave-Schreibvorgänge sofort
+     *  ausführen, damit nichts verloren geht. */
+    deaktiviere() {
+      if (!gemountet) return;
+      flushAutosave();
+      closeFloatingMenu();
+    },
+
+    /** Sind Änderungen erfasst, die noch nicht geschrieben wurden? */
+    hatUngespeicherte() {
+      return gemountet && autosaveTimer !== null;
+    },
+
+    /** Öffnet ein Projekt direkt im Editor (vom Hub/Auswahldialog aus). */
+    oeffneProjekt(id) {
+      this.mount();
+      openProject(id);
+    },
+
+    /** Zurück zur Projektübersicht innerhalb des Moduls. */
+    zeigeUebersicht() {
+      this.mount();
+      goToOverview();
+    },
+
+    /** true, wenn gerade ein Projekt im Editor offen ist (nicht die Übersicht). */
+    imProjekt() {
+      const el = document.getElementById('projectScreen');
+      return !!el && !el.classList.contains('hidden');
+    }
+  };
+})();

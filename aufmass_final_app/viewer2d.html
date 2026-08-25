@@ -2,90 +2,14 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-  <title>Gerüst 2D-Ansicht</title>
-  <link rel="stylesheet" href="style.css?v=20260630" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260701" />
+  <title>2D-Aufmaß</title>
+  <!-- Die 2D-App ist jetzt Modul 2 der zusammengeführten Anwendung. Diese
+       Datei bleibt nur bestehen, damit alte Lesezeichen und Verknüpfungen auf
+       dem Startbildschirm weiter funktionieren. -->
+  <meta name="robots" content="noindex" />
+  <script>location.replace('index.html#/2d');</script>
 </head>
 <body>
-
-  <header class="viewer-header">
-    <a href="index.html" class="back-link">← Aufmaß</a>
-    <h1>Gerüst 2D-Ansicht</h1>
-    <p>Jedes Feld ist einzeln verschiebbar: Ziehen Sie den orangenen Punkt, um ein Feld frei zu bewegen. Tippen Sie auf einen blauen&nbsp;+ Button (links/rechts), um direkt ein weiteres Feld in dieselbe Richtung anzufügen. Tippen Sie auf das Feld selbst, um Maße, Höhen und Drehung zu bearbeiten.</p>
-  </header>
-
-  <div id="toolbar">
-    <div class="tool-group">
-      <label class="tool-label">Projekt
-        <input type="text" id="projectName" placeholder="z. B. Haus Meier" />
-      </label>
-      <label class="tool-label">Gerüsttiefe (m)
-        <input type="number" id="scaffDepth" value="0.73" min="0.10" step="0.01" />
-      </label>
-    </div>
-    <div class="tool-group presets">
-      <span class="tool-label">Vorlage:</span>
-      <button id="lShapeBtn" class="secondary">L-Form</button>
-      <button id="uShapeBtn" class="secondary">U-Form</button>
-      <button id="rectBtn" class="secondary">Rechteck</button>
-    </div>
-    <div class="tool-group stats">
-      <span class="area-readout" id="areaReadout" title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">Gesamtfläche: 0,00 m²</span>
-    </div>
-    <div class="tool-group actions">
-      <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
-      <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
-      <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
-      <button id="savePlanBtn" class="secondary">Speichern</button>
-      <button id="loadPlanBtn" class="secondary">Laden</button>
-      <button id="exportPdfBtn" class="primary">PDF</button>
-      <button id="deviceToggleBtn" class="secondary" title="Gerät wechseln">📱</button>
-    </div>
-    <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
-  </div>
-
-  <div id="appLayout">
-    <!-- Left: section editor -->
-    <aside id="sidePanel">
-      <div id="sectionsContainer"></div>
-      <p id="noSectionsHint" class="hint">Tippen Sie auf „Feld hinzufügen" oder wählen Sie eine Vorlage.</p>
-    </aside>
-
-    <!-- Right: SVG canvas -->
-    <div id="viewerPanel">
-      <svg id="planSvg" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <pattern id="svgGrid" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
-            <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#eef" stroke-width="0.6"/>
-          </pattern>
-          <pattern id="svgGrid5" x="0" y="0" width="500" height="500" patternUnits="userSpaceOnUse">
-            <rect width="500" height="500" fill="url(#svgGrid)"/>
-            <path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dde" stroke-width="1.5"/>
-          </pattern>
-        </defs>
-        <rect id="gridBg" fill="url(#svgGrid5)" />
-        <g id="planGroup"></g>
-      </svg>
-      <div id="emptyHint" class="empty-hint">
-        <div class="empty-state">
-          <div class="empty-icon">📐</div>
-          <div class="empty-title">Noch keine Felder erfasst</div>
-          <button class="empty-add-btn" id="emptyAddBtn">Feld&nbsp;hinzufügen</button>
-        </div>
-      </div>
-      <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
-    </div>
-  </div>
-
-  <!-- Bay editor popup (injected by JS) -->
-
-  <div id="toastEl" class="toast"></div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="viewer2d.js?v=20260701"></script>
+  <p>Weiterleitung zum 2D-Aufmaß … <a href="index.html#/2d">Hier entlang</a>, falls es nicht von selbst weitergeht.</p>
 </body>
 </html>
