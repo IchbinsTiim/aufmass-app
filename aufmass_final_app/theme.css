@@ -135,10 +135,16 @@ body { background: var(--bg-deep); }
 
 #am-root .form-textarea { min-height: 92px; font-family: var(--font-text); }
 
-#am-root .form-label {
+/* Feldbeschriftungen im normalen Satzbild. Das gesperrte Versal-Bild bleibt
+   den Kartenüberschriften vorbehalten – zwei Ebenen in Großbuchstaben
+   übereinander lesen sich unruhig. */
+#am-root .form-label,
+#am-root .form-subhead {
   font-size: .78rem;
   font-weight: 500;
   color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 /* Alle Maße und Mengen in gleichbreiten Ziffern – Zahlenkolonnen stehen so
@@ -396,10 +402,14 @@ body[data-modul="2d"] #scaffDepth {
   border-radius: var(--r-control);
   color: var(--text);
 }
+/* Die Gerüsttiefe steht in gleichbreiten Ziffern – dafür braucht das Feld
+   etwas mehr Platz, sonst wird „0,73" auf dem Handy beschnitten. */
 body[data-modul="2d"] #scaffDepth {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  min-width: 5.5rem;
 }
+body[data-modul="2d"][data-mode="iphone"] #scaffDepth { width: 5.5rem; }
 
 body[data-modul="2d"] #toolbar button {
   min-height: var(--touch);
