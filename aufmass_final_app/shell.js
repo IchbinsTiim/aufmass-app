@@ -244,6 +244,14 @@ const Shell = (() => {
     // Verzögerung stimmen. Das 2D-Modul startet erst beim ersten Öffnen.
     AufmassModul.mount();
 
+    // Alte Verknüpfung „index.html?resume=1" (Rücksprung aus dem früheren
+    // 2D-Fenster): sie öffnet weiterhin das zuletzt bearbeitete Projekt – und
+    // landet dafür jetzt in Modul 1 statt auf dem Startbildschirm.
+    if (!window.location.hash && new URLSearchParams(window.location.search).get('resume')) {
+      window.location.hash = '#/aufmass';
+      return;                       // der hashchange übernimmt das Anzeigen
+    }
+
     zeige(ansichtAusHash());
   }
 

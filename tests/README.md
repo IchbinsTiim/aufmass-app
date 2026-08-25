@@ -1,8 +1,17 @@
 # Tests zum 2D-Zeichner und zum Aufmaß-Programm
 
-Browser-Tests gegen `aufmass_final_app/viewer2d.html` (2D-Zeichner) und
-`aufmass_final_app/index.html` (Aufmaß-Programm, Positionserfassung). Sie
-starten einen kleinen statischen Server, öffnen die Seite in Chromium
+Browser-Tests gegen die zusammengeführte Anwendung `aufmass_final_app/index.html`.
+Beide Programme leben seit der Zusammenführung in dieser einen Seite und werden
+über die Route angesteuert:
+
+| Route | Modul |
+|---|---|
+| `index.html#/` | Startbildschirm (Hub) |
+| `index.html#/aufmass` | Modul 1 – Aufmaß / Positionserfassung |
+| `index.html#/2d` | Modul 2 – 2D-Aufmaß / Gerüst-Zeichnung |
+
+`harness.open()` öffnet `#/2d`, `harness.openAufmass()` öffnet `#/aufmass`.
+Die Tests starten einen kleinen statischen Server, öffnen die Seite in Chromium
 (Playwright) und prüfen Verhalten statt Implementierungsdetails.
 
 ## Voraussetzungen
@@ -85,6 +94,33 @@ node tests/r6-blaetter-verbreiterung.mjs   # Blatteinteilung (so wenige Blätter
   komplett); eine Bordbretter-Linie wirkt auf alle Achsen, an denen sie
   entlangläuft; ein Umlauf an einer Außenecke lässt sich direkt an der Ecke
   festlegen (+ Gerüsttiefe je Seite), ohne eine Linie zu zeichnen.
+
+Runde 7 (Shell der zusammengeführten App):
+
+```bash
+node tests/r7-shell-routing.mjs   # Hash-Routing, Deep-Link, Neuladen, Zurück-Button,
+                                  # Zustandserhalt beim Modulwechsel, Speicher-Migration,
+                                  # Namensraum-Sauberkeit, 44-px-Trefferflächen
+```
+
+## Nachweis „rechnerisch identisch"
+
+Zwei Vergleichsläufe rechnen dasselbe Aufmaß einmal in der Fassung **vor** dem
+Zusammenführen und einmal in der zusammengeführten App durch. Verglichen werden
+alle Rechenergebnisse **und jeder einzelne Zeichenaufruf des PDF-Exports**
+(Text, Position, Reihenfolge, Seite).
+
+```bash
+git worktree add /tmp/vorher <commit-vor-der-zusammenfuehrung>
+node tests/ab-vergleich-2d.mjs      /tmp/vorher   # Aufmaßregeln ATV DIN 18451,
+                                                  # Eckenkorrektur, Bordbretter, Plan-PDF
+node tests/ab-vergleich-aufmass.mjs /tmp/vorher   # Flächen, Längen, 50-m-Hinweise,
+                                                  # Zusammenfassung, Angebots-PDF
+```
+
+Beide melden „rechnerisch identisch – keine einzige Abweichung", solange an der
+Fachlogik nichts geändert wurde. Genau das ist die Abnahmebedingung für jede
+Umbaumaßnahme an der Hülle.
 
 `r5` prüft das Testbeispiel bei 0,73 m Gerüsttiefe: eine Achse, deren
 Bordbretter-Linie durch eine Innenecke läuft, verliert am letzten Feld vor der

@@ -3,7 +3,719 @@
    ---------------------------------------------------------------------------
    Wird als letztes Stylesheet geladen und legt das Erscheinungsbild der Suite
    über die beiden gewachsenen Modul-Stylesheets. Bewusst als eigene Ebene:
-   style.css und viewer2d.css behalten dadurch ihre komplette Layout- und
-   Verhaltenslogik unverändert – hier ändern sich nur Farbe, Schrift, Radius,
-   Tiefe und Bewegung.
+   style.css und viewer2d.css behalten ihre komplette Layout- und
+   Verhaltenslogik – hier ändern sich Farbe, Schrift, Radius, Tiefe, Bewegung.
+
+   Aufbau
+     A  Rahmen der Anwendung (Kopfzone, Ansichten)
+     B  Modul 1 – Aufmaß
+     C  Modul 2 – 2D-Aufmaß
+     D  Gemeinsame Bauteile (Toast, Dialoge, Menüs, Bildlaufleisten)
    =========================================================================== */
+
+
+/* ===========================================================================
+   A  Rahmen der Anwendung
+   =========================================================================== */
+
+/* Höhe der Kopfzone, in der die Umschalter-Pille schwebt. */
+:root { --chrome-h: calc(var(--touch) + 18px + env(safe-area-inset-top, 0px)); }
+
+/* Damit beim Scrollen nichts unter der Pille hervorblitzt, liegt über der
+   Kopfzone ein weicher Verlauf in der Grundfarbe. */
+body[data-modul="aufmass"]::before,
+body[data-modul="2d"]::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--chrome-h);
+  background: linear-gradient(to bottom, var(--bg-deep) 62%, rgba(14, 22, 38, 0));
+  z-index: 850;
+  pointer-events: none;
+}
+
+/* Die App bringt ihren eigenen Hintergrund mit – auch hinter dem Modul. */
+body { background: var(--bg-deep); }
+
+
+/* ===========================================================================
+   B  Modul 1 – Aufmaß
+   =========================================================================== */
+
+#am-root .screen { min-height: calc(100dvh - var(--chrome-h)); }
+
+/* ── Kopfzeile ───────────────────────────────────────────────────────────── */
+
+/* Deutlich blickdichter als eine reine Glasfläche: unter der Kopfzeile läuft
+   der Inhalt durch, und Beschriftungen müssen jederzeit lesbar bleiben. */
+#am-root .app-header {
+  top: var(--chrome-h);
+  padding: 12px 16px;
+  min-height: 56px;
+  background: rgba(14, 22, 38, .88);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-bottom: 1px solid var(--hairline);
+}
+
+#am-root .app-header h1,
+#am-root .header-title h1 {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+/* ── Karten ──────────────────────────────────────────────────────────────── */
+
+#am-root .card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  box-shadow: var(--schatten-s);
+}
+
+#am-root .card-title {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .14em;
+  color: var(--muted-schwach);
+}
+
+/* ── Schaltflächen ───────────────────────────────────────────────────────── */
+
+#am-root .btn {
+  min-height: var(--touch);
+  border-radius: var(--r-control);
+  font-family: var(--font-text);
+  font-weight: 600;
+  transition: background var(--t-kurz) var(--federnd),
+              transform var(--t-kurz) var(--federnd),
+              opacity var(--t-kurz) var(--federnd);
+}
+#am-root .btn-sm { min-height: 36px; }
+#am-root .btn:active { transform: scale(.97); }
+
+#am-root .btn-primary {
+  background: var(--accent);
+  color: var(--accent-kontrast);
+  box-shadow: 0 4px 14px rgba(255, 201, 60, .18);
+}
+#am-root .btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+#am-root .btn-secondary {
+  background: rgba(255, 255, 255, .07);
+  color: var(--text);
+  border: 1px solid var(--hairline);
+}
+#am-root .btn-secondary:hover { background: rgba(255, 255, 255, .11); }
+
+#am-root .btn-ghost { color: var(--accent); }
+#am-root .btn-danger-ghost { color: var(--gefahr); }
+
+/* ── Eingaben ────────────────────────────────────────────────────────────── */
+
+#am-root .form-input,
+#am-root .seite-select,
+#am-root .seite-manual-input {
+  min-height: var(--touch);
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+}
+#am-root .form-input::placeholder { color: var(--muted-schwach); }
+#am-root .form-input:focus,
+#am-root .seite-select:focus,
+#am-root .seite-manual-input:focus {
+  background: var(--surface-hoch);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-weich);
+}
+
+#am-root .form-textarea { min-height: 92px; font-family: var(--font-text); }
+
+#am-root .form-label {
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* Alle Maße und Mengen in gleichbreiten Ziffern – Zahlenkolonnen stehen so
+   exakt untereinander. */
+#am-root input[type="number"],
+#am-root .seite-manual-input,
+#am-root .summary-table td,
+#am-root .project-card2-stats,
+#am-root .project-card2-dates,
+#am-root .ks-input,
+#am-root .accessory-length-input,
+#am-root .meas-extra-input {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ── Auswahl-Knöpfe (Gerüsttyp, Status, Verwendungszweck) ────────────────── */
+
+#am-root .type-btn,
+#am-root .chip-btn,
+#am-root .folder-chip,
+#am-root .logistik-toggle-btn {
+  min-height: var(--touch);
+  border: 1px solid var(--hairline);
+  background: var(--surface-tief);
+  color: var(--muted);
+  border-radius: var(--r-control);
+  transition: background var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              color var(--t-kurz) var(--federnd);
+}
+#am-root .folder-chip { border-radius: var(--r-pille); }
+
+#am-root .type-btn.active,
+#am-root .chip-btn.active,
+#am-root .folder-chip.active,
+#am-root .logistik-toggle-btn.active,
+#am-root .logistik-toggle-btn[data-active="1"] {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent);
+}
+
+/* ── Projektkarten ───────────────────────────────────────────────────────── */
+
+#am-root .project-card2 {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  transition: transform var(--t-normal) var(--federnd),
+              border-color var(--t-normal) var(--federnd),
+              box-shadow var(--t-normal) var(--federnd);
+}
+#am-root .project-card2:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-rand);
+  box-shadow: var(--schatten-m);
+}
+
+#am-root .project-card2-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+#am-root .project-card2-line { color: var(--muted); }
+#am-root .project-card2-addr { color: var(--text); }
+#am-root .project-card2-stats { color: var(--accent); }
+#am-root .project-card2-dates { color: var(--muted-schwach); font-size: .68rem; }
+#am-root .project-card2-menu-btn {
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--r-control);
+}
+
+/* Farbige Marken: auf dunklem Grund als getönte Fläche mit heller Schrift. */
+#am-root .project-card2-badge.fassade { background: rgba(96, 165, 250, .16); color: #93C5FD; }
+#am-root .project-card2-badge.dach    { background: rgba(244, 114, 182, .16); color: #F9A8D4; }
+#am-root .project-card2-badge.sonder  { background: rgba(52, 211, 153, .16);  color: #6EE7B7; }
+
+#am-root .project-card2-status.status-in_bearbeitung { background: rgba(255, 201, 60, .16); color: var(--accent-aufmass); }
+#am-root .project-card2-status.status-abgeschlossen  { background: rgba(61, 220, 151, .16); color: var(--erfolg); }
+#am-root .project-card2-status.status-archiviert     { background: rgba(159, 179, 200, .14); color: var(--muted); }
+
+#am-root .project-card2-vz-tag {
+  background: rgba(255, 255, 255, .06);
+  color: var(--muted);
+  border: 1px solid var(--hairline);
+}
+
+/* ── Hausseiten / Abschnitte ─────────────────────────────────────────────── */
+
+#am-root .seite-card {
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+}
+#am-root .seite-header { background: transparent; min-height: var(--touch); }
+#am-root .seite-header:active { background: rgba(255, 255, 255, .04); }
+#am-root .seite-number {
+  background: var(--accent-weich);
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+#am-root .seite-title { font-weight: 600; color: var(--text); }
+#am-root .seite-preview { color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ── Warnungen und Hinweise ──────────────────────────────────────────────── */
+
+#am-root .laenge-warn,
+#am-root .laenge-warn-gesamt {
+  background: rgba(255, 180, 84, .12);
+  border-color: rgba(255, 180, 84, .38);
+  color: var(--warnung);
+}
+#am-root .summary-warn { color: var(--warnung); }
+
+#am-root .backup-reminder {
+  background: rgba(255, 201, 60, .10);
+  border: 1px solid rgba(255, 201, 60, .30);
+  border-radius: var(--r-karte-klein);
+  color: var(--accent-aufmass);
+}
+#am-root .backup-reminder-text { color: var(--accent-aufmass); }
+#am-root .backup-reminder-export {
+  background: var(--accent-aufmass);
+  color: var(--accent-kontrast);
+  min-height: 36px;
+  border-radius: var(--r-pille);
+}
+#am-root .backup-reminder-dismiss {
+  color: var(--accent-aufmass);
+  width: 32px; height: 32px;
+}
+
+/* Zubehör: Konsolen, Lagen, Giebel (bisher orange auf hellem Grund) */
+#am-root .konsole-btn-df,
+#am-root .acc-lage-calc,
+#am-root .giebel-sep { color: var(--warnung); }
+#am-root .konsole-btn-df.active,
+#am-root .lage-btn.active,
+#am-root .giebel-btn.active {
+  background: rgba(255, 180, 84, .14);
+  border-color: rgba(255, 180, 84, .42);
+  color: var(--warnung);
+}
+
+#am-root .ks-input,
+#am-root .ks-reset-btn {
+  border-color: var(--accent-rand);
+  background: var(--surface-tief);
+  color: var(--text);
+}
+#am-root .ks-reset-btn:active { background: var(--accent-weich); }
+
+#am-root .meas-remove-btn:hover { background: rgba(255, 107, 107, .16); color: var(--gefahr); }
+
+/* ── Zusammenfassung ─────────────────────────────────────────────────────── */
+
+#am-root .summary-table td { border-color: var(--hairline); color: var(--text); }
+#am-root .summary-side-name { color: var(--text); font-weight: 600; }
+#am-root .summary-side-detail { color: var(--muted); }
+#am-root .summary-total-row td { color: var(--accent); font-weight: 700; }
+#am-root .summary-empty,
+#am-root .no-sides-hint,
+#am-root .ueberstand-setting-hint,
+#am-root .empty-state p { color: var(--muted-schwach); }
+#am-root .empty-state h2 { font-family: var(--font-display); color: var(--text); }
+#am-root .empty-icon-box {
+  background: var(--surface-hoch);
+  border: 1px solid var(--hairline);
+}
+
+#am-root .ueberstand-setting {
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+}
+
+
+/* ===========================================================================
+   C  Modul 2 – 2D-Aufmaß
+   ---------------------------------------------------------------------------
+   Dunkle Werkzeug-Umgebung, helle Zeichenfläche: der Plan bleibt bewusst eine
+   Papierfläche, weil er genau so auch im PDF landet und alle Farben der
+   Zeichnung (Achsen, Ecken, Bordbretter, Warnungen) darauf abgestimmt sind.
+   =========================================================================== */
+
+body[data-modul="2d"] #td-root { padding-top: var(--chrome-h); }
+
+/* Die feste Höhenrechnung des Layouts um die Kopfzone ergänzen. */
+body[data-modul="2d"] #appLayout { height: calc(100vh - 155px - var(--chrome-h)); }
+body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100dvh - 120px - var(--chrome-h)); }
+@supports not (height: 1dvh) {
+  body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100vh - 120px - var(--chrome-h)); }
+}
+
+/* ── Kopfzeile ───────────────────────────────────────────────────────────── */
+
+body[data-modul="2d"] .viewer-header {
+  padding: 12px 20px 14px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+body[data-modul="2d"] .viewer-header h1 {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+body[data-modul="2d"] .viewer-header p {
+  color: var(--muted);
+  font-size: .8rem;
+  line-height: 1.5;
+  max-width: 100ch;
+}
+body[data-modul="2d"] .viewer-header kbd {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--surface-hoch);
+  border: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: .74rem;
+}
+body[data-modul="2d"] .back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--accent-2d);
+  font-size: .88rem;
+}
+
+/* ── Werkzeugleiste ──────────────────────────────────────────────────────── */
+
+body[data-modul="2d"] #toolbar {
+  top: var(--chrome-h);
+  background: rgba(14, 22, 38, .90);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-bottom: 1px solid var(--hairline);
+}
+
+body[data-modul="2d"] .tool-label {
+  color: var(--muted);
+  font-size: .75rem;
+}
+body[data-modul="2d"] .tool-label input,
+body[data-modul="2d"] #projectName,
+body[data-modul="2d"] #scaffDepth {
+  min-height: 38px;
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+}
+body[data-modul="2d"] #scaffDepth {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-modul="2d"] #toolbar button {
+  min-height: var(--touch);
+  border-radius: var(--r-control);
+  transition: background var(--t-kurz) var(--federnd),
+              transform var(--t-kurz) var(--federnd);
+}
+body[data-modul="2d"] #toolbar button:active { transform: scale(.96); }
+
+body[data-modul="2d"] #toolbar button.secondary {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+}
+body[data-modul="2d"] #toolbar button.secondary:hover { background: rgba(255, 255, 255, .12); }
+
+body[data-modul="2d"] #toolbar button.primary {
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
+  border: none;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(76, 201, 240, .20);
+}
+body[data-modul="2d"] #toolbar button.primary:hover { filter: brightness(1.08); }
+
+body[data-modul="2d"] .area-readout {
+  background: var(--accent-weich);
+  border: 1px solid var(--accent-rand);
+  border-radius: var(--r-control);
+  color: var(--accent-2d);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+body[data-modul="2d"] .warnings-readout {
+  background: rgba(255, 180, 84, .14);
+  border: 1px solid rgba(255, 180, 84, .40);
+  border-radius: var(--r-control);
+  color: var(--warnung);
+  font-family: var(--font-mono);
+}
+
+/* ── Seitenleiste ────────────────────────────────────────────────────────── */
+
+body[data-modul="2d"] #sidePanel {
+  background: var(--surface);
+  border-right: 1px solid var(--hairline);
+}
+body[data-modul="2d"] #sidePanel .hint { color: var(--muted-schwach); }
+
+body[data-modul="2d"] .sec-card,
+body[data-modul="2d"] .bay-row {
+  background: var(--surface-tief);
+  border-color: var(--hairline);
+  color: var(--text);
+  border-radius: var(--r-karte-klein);
+}
+
+body[data-modul="2d"] #abschnittBar,
+body[data-modul="2d"] #bulkBar {
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+  color: var(--text);
+}
+
+/* ── Zeichenfläche: helle Papierfläche im dunklen Rahmen ─────────────────── */
+
+body[data-modul="2d"] #viewerPanel {
+  background: #F4F7FC;
+  border-left: 1px solid var(--hairline);
+}
+body[data-modul="2d"] #planSvg { background: #F4F7FC; }
+
+body[data-modul="2d"] .selection-info {
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  box-shadow: var(--schatten-m);
+}
+
+body[data-modul="2d"] .zoom-reset-btn {
+  width: var(--touch);
+  height: var(--touch);
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  border-radius: var(--r-pille);
+}
+
+body[data-modul="2d"] .bordbrett-bar {
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--accent-rand);
+  border-radius: var(--r-karte-klein);
+  color: var(--text);
+  box-shadow: var(--schatten-m);
+}
+body[data-modul="2d"] .bordbrett-bar-hint { color: var(--muted); }
+
+/* Der Hinweis auf der leeren Zeichenfläche liegt auf hellem Papier. */
+body[data-modul="2d"] .empty-title { color: #5A6B7A; }
+body[data-modul="2d"] .empty-add-btn {
+  min-height: var(--touch);
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
+  border: none;
+  border-radius: var(--r-control);
+  font-weight: 600;
+}
+
+/* ── Bottom-Sheets und Overlays ──────────────────────────────────────────── */
+
+body[data-modul="2d"] .bottom-sheet {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  box-shadow: var(--schatten-l);
+}
+body[data-modul="2d"] .sheet-overlay { background: rgba(6, 11, 20, .62); }
+
+body[data-modul="2d"] .bottom-sheet input,
+body[data-modul="2d"] .bottom-sheet select,
+body[data-modul="2d"] .bottom-sheet textarea {
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+}
+body[data-modul="2d"] .bottom-sheet input[type="number"] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-modul="2d"] .sheet-ok,
+body[data-modul="2d"] .sheet-add-btn {
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
+  min-height: var(--touch);
+  border-radius: var(--r-control);
+}
+body[data-modul="2d"] .sheet-cancel,
+body[data-modul="2d"] .sheet-del {
+  min-height: var(--touch);
+  border-radius: var(--r-control);
+}
+
+body[data-modul="2d"] .std-btn,
+body[data-modul="2d"] .adj-btn,
+body[data-modul="2d"] .dir-big-btn,
+body[data-modul="2d"] .dev-btn {
+  min-height: var(--touch);
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  border-radius: var(--r-control);
+}
+body[data-modul="2d"] .std-btn.active,
+body[data-modul="2d"] .dir-big-btn.active {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent-2d);
+}
+
+body[data-modul="2d"] #deviceOverlay { background: rgba(6, 11, 20, .72); }
+body[data-modul="2d"] .device-picker {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  color: var(--text);
+  box-shadow: var(--schatten-l);
+}
+body[data-modul="2d"] .device-picker-title { font-family: var(--font-display); }
+body[data-modul="2d"] .device-picker-sub,
+body[data-modul="2d"] .device-picker-note { color: var(--muted); }
+
+
+/* ===========================================================================
+   D  Gemeinsame Bauteile
+   =========================================================================== */
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+
+.toast {
+  bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pille);
+  color: var(--text);
+  box-shadow: var(--schatten-m);
+  font-family: var(--font-text);
+}
+
+/* ── Auswahl-Dialog „Aufmaß oder 2D-Aufmaß?" ─────────────────────────────── */
+
+.app-chooser-overlay { background: rgba(6, 11, 20, .68); backdrop-filter: blur(6px); }
+
+.app-chooser-box {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  box-shadow: var(--schatten-l);
+  color: var(--text);
+}
+.app-chooser-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--text);
+}
+.app-chooser-sub { color: var(--muted); }
+
+.app-chooser-option {
+  min-height: 72px;
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+  color: var(--text);
+  transition: border-color var(--t-kurz) var(--federnd),
+              background var(--t-kurz) var(--federnd),
+              transform var(--t-kurz) var(--federnd);
+}
+.app-chooser-option:hover { transform: translateY(-1px); }
+.app-chooser-option[data-ziel="aufmass"]:hover {
+  border-color: rgba(255, 201, 60, .45);
+  background: rgba(255, 201, 60, .08);
+}
+.app-chooser-option[data-ziel="2d"]:hover {
+  border-color: rgba(76, 201, 240, .45);
+  background: rgba(76, 201, 240, .08);
+}
+.app-chooser-option[data-ziel="aufmass"] .app-chooser-label { color: var(--accent-aufmass); }
+.app-chooser-option[data-ziel="2d"] .app-chooser-label { color: var(--accent-2d); }
+.app-chooser-label { font-family: var(--font-display); font-weight: 600; }
+.app-chooser-desc { color: var(--muted); }
+.app-chooser-cancel {
+  min-height: var(--touch);
+  color: var(--muted);
+  border-radius: var(--r-control);
+}
+.app-chooser-option:active { background: var(--accent-weich); }
+
+/* ── Schwebendes Menü der Projektkarten ──────────────────────────────────── */
+
+.floating-menu {
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+  box-shadow: var(--schatten-l);
+  overflow: hidden;
+}
+.floating-menu-item {
+  min-height: var(--touch);
+  color: var(--text);
+}
+.floating-menu-item:hover { background: rgba(255, 255, 255, .07); }
+.floating-menu-item:active { background: rgba(255, 255, 255, .11); }
+.floating-menu-sep { background: var(--hairline); }
+.floating-menu-overlay { background: transparent; }
+
+/* ── Bildlaufleisten ─────────────────────────────────────────────────────── */
+
+* { scrollbar-color: rgba(159, 179, 200, .35) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: rgba(159, 179, 200, .28);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(159, 179, 200, .45); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Auf der hellen Zeichenfläche bleibt die Auswahl unverändert bedienbar. */
+body[data-modul="2d"] #viewerPanel ::selection { background: rgba(76, 201, 240, .35); }
+
+
+/* ===========================================================================
+   Handy
+   =========================================================================== */
+
+@media (max-width: 720px) {
+  #am-root .screen-content { padding: 14px 14px 40px; }
+
+  body[data-modul="2d"] .viewer-header { padding: 10px 14px 12px; }
+  body[data-modul="2d"] .viewer-header h1 { font-size: 1.02rem; }
+
+  /* Die vollständige Bedienhilfe bleibt erhalten, beansprucht auf dem Handy
+     aber nur noch eine feste Höhe und wird darin gescrollt – sonst läge die
+     Zeichenfläche außerhalb des Bildschirms. */
+  body[data-modul="2d"] .viewer-header p {
+    font-size: .74rem;
+    max-height: 4.6em;
+    overflow-y: auto;
+    padding-right: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Werkzeuge in einer wischbaren Zeile statt über fünf Zeilen umgebrochen.
+     Jeder Knopf behält seine 44-px-Trefferfläche; die Zeichenfläche gewinnt
+     dadurch rund 120 px zurück. */
+  body[data-modul="2d"] #toolbar .tool-group.actions {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  body[data-modul="2d"] #toolbar .tool-group.actions::-webkit-scrollbar { display: none; }
+  body[data-modul="2d"] #toolbar .tool-group.actions > button { flex: 0 0 auto; }
+}

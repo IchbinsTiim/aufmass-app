@@ -32,9 +32,14 @@ body[data-modul="2d"] #td-root {
   animation: view-auf var(--t-lang) var(--federnd) both;
 }
 
+/* Bewusst nur die Deckkraft, kein transform: das 2D-Modul misst beim
+   Sichtbarwerden seine Zeichenfläche, um die Kamera exakt einzupassen – ein
+   laufendes scale() würde diese Messung verfälschen (die Zeichnung säße nach
+   jedem Modulwechsel ein Stück daneben). Die räumliche Bewegung übernimmt der
+   Kachel-Übergang auf dem Startbildschirm. */
 @keyframes view-auf {
-  from { opacity: 0; transform: translateY(8px) scale(.995); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* ===========================================================================
