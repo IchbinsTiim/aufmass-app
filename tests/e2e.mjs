@@ -72,7 +72,7 @@ await page.evaluate(() => closeSheet());
 await page.waitForTimeout(350);
 
 // PDF-Dialog
-await page.click('#exportPdfBtn');
+await page.click('#td-exportPdfBtn');
 await page.waitForSelector('.pdf-theme-card', { timeout: 3000 });
 assert((await page.$$('.pdf-theme-card')).length === 3, 'PDF-Dialog zeigt drei Layouts');
 await page.evaluate(() => document.querySelector('.sheet-del').click());

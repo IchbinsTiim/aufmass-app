@@ -142,7 +142,9 @@ await page.evaluate(() => {
   [...document.querySelectorAll('.sheet-ok')][0].click();
 });
 await page.waitForTimeout(700);
-assert(await page.evaluate(() => localStorage.getItem('av_2d_pdf_theme')) === 'kontrast',
+// Speicher-Schlüssel liegen seit dem Zusammenführen im Namensraum „geruest.*"
+// (siehe core.js); Altdaten werden beim ersten Start migriert.
+assert(await page.evaluate(() => localStorage.getItem('geruest.2d.pdfDesign')) === 'kontrast',
   'gewähltes Layout wird für das nächste Mal gemerkt');
 
 const errs = ctx.logs.filter(l => l.includes('pageerror') || (l.includes('[error]') && !l.includes('404')));

@@ -4,18 +4,18 @@
 //  Konstanten & Zustand
 // ============================================================
 
-const STORAGE_KEY = 'aufmass_projects_v2';
-const FOLDERS_STORAGE_KEY = 'aufmass_folders_v1';
-// Vom 2D-Zeichner (viewer2d.html) mitgenutzter Schlüssel: welches Projekt ist
-// gerade geöffnet. So wissen beide Programme, welche Projektakte (inkl.
-// 2D-Zeichnung) gerade bearbeitet wird, und teilen sich dieselbe Projektliste.
-const CURRENT_PROJECT_STORAGE_KEY = 'aufmass_current_project_id';
+// Speicher-Schlüssel: liegen zentral in core.js (Namensraum geruest.aufmass.*).
+// `GK.aktuellesProjekt` teilen sich beide Module – so wissen Aufmaß und
+// 2D-Aufmaß, welche Projektakte (inkl. 2D-Zeichnung) gerade bearbeitet wird,
+// und greifen auf dieselbe Projektliste zu.
+const STORAGE_KEY = GK.projekte;
+const FOLDERS_STORAGE_KEY = GK.ordner;
 
 // Backup-Erinnerung: alles liegt nur in localStorage (kein Cloud-Sync) – bei
 // Gerätewechsel/-defekt wäre sonst alles weg. Erinnert sanft an einen
 // Gesamt-Export, wenn länger keiner gemacht wurde.
-const LAST_BACKUP_STORAGE_KEY      = 'aufmass_last_backup_ts';
-const BACKUP_DISMISS_STORAGE_KEY   = 'aufmass_backup_reminder_dismissed_until';
+const LAST_BACKUP_STORAGE_KEY      = GK.letztesBackup;
+const BACKUP_DISMISS_STORAGE_KEY   = GK.backupErinnerungBis;
 const BACKUP_REMIND_AFTER_DAYS     = 7;
 const BACKUP_SNOOZE_DAYS           = 3;
 
@@ -66,7 +66,7 @@ const KONSOLE_DACHFANG_TYP = '50df';
 // Standard-Zuschlag der "+Xm"-Tasten bei den Maßen (Standard 2,00 m). Dient als
 // Vorschlagswert beim erstmaligen Aktivieren einer Zuschlag-Taste – jedes Feld
 // kann seinen eigenen (individuellen) Zuschlagswert erhalten und behalten.
-const UEBERSTAND_STORAGE_KEY = 'aufmass_ueberstand_wert';
+const UEBERSTAND_STORAGE_KEY = GK.ueberstandWert;
 let ueberstandWert = 2;
 
 function loadUeberstandWert() {
@@ -489,16 +489,8 @@ function migrateSeite(seite) {
 // ============================================================
 //  Toast
 // ============================================================
-
-let toastTimer = null;
-
-function showToast(msg) {
-  const el = document.getElementById('toastEl');
-  el.textContent = msg;
-  el.classList.add('show');
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
-}
+// showToast() steht jetzt in core.js und wird von beiden Modulen gemeinsam
+// genutzt (vorher zwei identische Kopien). Verhalten unverändert.
 
 // ============================================================
 //  Screen-Wechsel
@@ -766,6 +758,7 @@ function deleteProjectFromOverview(proj) {
 function openProjectActionMenu(proj, anchorEl) {
   openFloatingMenu(anchorEl, [
     { label: 'Öffnen', onClick: () => requestOpenProject(proj) },
+    { label: 'Öffnen mit…', onClick: () => requestOpenProjectMitAuswahl(proj) },
     { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
     { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
     { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
@@ -844,12 +837,20 @@ function renderProjectOverview() {
 //  Projekt erstellen / öffnen
 // ============================================================
 
-// Zentrale Stelle für "dieses Projekt jetzt öffnen": Auf Seiten mit
-// eingebettetem Editor (index.html) öffnet das wie bisher direkt den
-// Projekt-Editor. Der Hub (start.html) definiert stattdessen
-// `window.onProjectOpenRequest`, um vorher zwischen Aufmaß und 2D-Aufmaß
-// wählen zu lassen – ohne dass sich an index.html selbst etwas ändert.
+// Zentrale Stelle für "dieses Projekt jetzt öffnen": öffnet direkt den
+// Projekt-Editor. Wer aus der Übersicht kommt, hat das Modul am
+// Startbildschirm bereits gewählt – hier noch einmal zu fragen wäre ein
+// Klick zu viel.
 function requestOpenProject(proj) {
+  openProject(proj.id);
+}
+
+// Variante mit vorgeschalteter Auswahl „Aufmaß oder 2D-Aufmaß?" (früher der
+// Auswahl-Dialog des Startbildschirms). Erreichbar über das ⋯-Menü einer
+// Projektkarte – damit lässt sich ein Projekt aus der Liste heraus direkt in
+// der 2D-Zeichnung öffnen, ohne den Umweg über den Editor. Die Shell hängt
+// sich dafür in `window.onProjectOpenRequest` ein.
+function requestOpenProjectMitAuswahl(proj) {
   if (typeof window.onProjectOpenRequest === 'function') { window.onProjectOpenRequest(proj); return; }
   openProject(proj.id);
 }
@@ -3191,7 +3192,10 @@ function open2dViewer() {
   if (!proj) return;
   flushAutosave();
   localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, proj.id);
-  window.location.href = 'viewer2d.html';
+  // Früher ein Seitenwechsel zu viewer2d.html – in der zusammengeführten App
+  // ein Routenwechsel innerhalb derselben Seite. Der 2D-Zeichner lädt beim
+  // Aktivieren die Zeichnung des verknüpften Projekts nach.
+  Shell.gehe('#/2d');
 }
 
 function initApp() {
@@ -3200,6 +3204,8 @@ function initApp() {
 
   // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
   // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
+  // `?resume=1` bleibt als Einstieg erhalten (alte Lesezeichen); innerhalb der
+  // Shell übernimmt zusätzlich `AufmassModul.oeffneProjekt(id)`.
   const resumeId = new URLSearchParams(window.location.search).get('resume')
     ? localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY)
     : null;
@@ -3320,4 +3326,71 @@ function initApp() {
   });
 }
 
-document.addEventListener('DOMContentLoaded', initApp);
+// ============================================================
+//  Modul-Schnittstelle zur Shell
+// ============================================================
+// Früher startete dieses Programm selbst per DOMContentLoaded. In der
+// zusammengeführten App entscheidet die Shell (shell.js), wann das Modul
+// aufgebaut (`mount`) und wann es sichtbar wird (`aktiviere`). Aufgebaut wird
+// nur einmal – dadurch bleibt beim Wechsel Hub ↔ Modul der gesamte Zustand
+// (geöffnetes Projekt, Formularinhalte, Scrollposition) erhalten.
+
+const AufmassModul = (() => {
+  let gemountet = false;
+
+  return {
+    id: 'aufmass',
+    name: 'Aufmaß',
+
+    /** Einmaliger Aufbau: Daten laden, Bedienelemente verknüpfen. */
+    mount() {
+      if (gemountet) return;
+      gemountet = true;
+      initApp();
+    },
+
+    /** Modul wird sichtbar. Die Projektliste kann zwischenzeitlich vom
+     *  2D-Modul verändert worden sein (Zeichnung gespeichert) – deshalb neu
+     *  einlesen und die Kennzahlen der 2D-Zeichnung auffrischen. */
+    aktiviere() {
+      this.mount();
+      loadProjects();
+      loadFolders();
+      renderProjectOverview();
+      renderBackupReminder();
+      const proj = getCurrentProject();
+      if (proj) update2dSummary(proj);
+    },
+
+    /** Modul wird verlassen: gebündelte Autosave-Schreibvorgänge sofort
+     *  ausführen, damit nichts verloren geht. */
+    deaktiviere() {
+      if (!gemountet) return;
+      flushAutosave();
+      closeFloatingMenu();
+    },
+
+    /** Sind Änderungen erfasst, die noch nicht geschrieben wurden? */
+    hatUngespeicherte() {
+      return gemountet && autosaveTimer !== null;
+    },
+
+    /** Öffnet ein Projekt direkt im Editor (vom Hub/Auswahldialog aus). */
+    oeffneProjekt(id) {
+      this.mount();
+      openProject(id);
+    },
+
+    /** Zurück zur Projektübersicht innerhalb des Moduls. */
+    zeigeUebersicht() {
+      this.mount();
+      goToOverview();
+    },
+
+    /** true, wenn gerade ein Projekt im Editor offen ist (nicht die Übersicht). */
+    imProjekt() {
+      const el = document.getElementById('projectScreen');
+      return !!el && !el.classList.contains('hidden');
+    }
+  };
+})();

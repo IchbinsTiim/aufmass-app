@@ -1,0 +1,9 @@
+/* ===========================================================================
+   Oberflächen-Überarbeitung beider Module
+   ---------------------------------------------------------------------------
+   Wird als letztes Stylesheet geladen und legt das Erscheinungsbild der Suite
+   über die beiden gewachsenen Modul-Stylesheets. Bewusst als eigene Ebene:
+   style.css und viewer2d.css behalten dadurch ihre komplette Layout- und
+   Verhaltenslogik unverändert – hier ändern sich nur Farbe, Schrift, Radius,
+   Tiefe und Bewegung.
+   =========================================================================== */

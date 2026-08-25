@@ -23,11 +23,20 @@ export async function serve() {
       res.end(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'jspdf-stub.js')));
       return;
     }
+    // Webschriften ebenso: offline gäbe es sonst Konsolenfehler, die nichts
+    // mit der App zu tun haben. Im Browser greifen dann die Ersatzschriften.
+    if (url.pathname === '/__fonts.css') {
+      res.writeHead(200, { 'Content-Type': 'text/css' });
+      res.end('/* Testlauf ohne Webschriften */');
+      return;
+    }
     if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
     let body = fs.readFileSync(p);
     if (p.endsWith('.html')) {
-      body = body.toString().replace(
-        /https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/jspdf\/[^"]+/, '/__jspdf.js');
+      body = body.toString()
+        .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/jspdf\/[^"]+/, '/__jspdf.js')
+        .replace(/https:\/\/fonts\.googleapis\.com\/css2[^"]*/, '/__fonts.css')
+        .replace(/<link rel="preconnect"[^>]*>/g, '');
     }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
     res.end(body);
@@ -44,15 +53,16 @@ export async function open({ width = 1280, height = 900 } = {}) {
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
   await page.addInitScript(() => localStorage.setItem('av_deviceMode', 'ipad'));
-  await page.goto(`http://127.0.0.1:${port}/viewer2d.html`);
-  await page.waitForFunction(() => typeof window.state !== 'undefined' || document.getElementById('planSvg'));
+  // Zusammengeführte App: ein Einstiegspunkt, das 2D-Modul liegt auf #/2d.
+  await page.goto(`http://127.0.0.1:${port}/index.html#/2d`);
+  await page.waitForFunction(() => document.body.dataset.modul === '2d' && !!document.getElementById('planSvg'));
   return {
     page, logs,
     async close() { await browser.close(); server.close(); }
   };
 }
 
-/** Öffnet das Aufmaß-Programm (index.html) mit leerem Speicher. */
+/** Öffnet das Aufmaß-Programm (Modul 1 der zusammengeführten App) mit leerem Speicher. */
 export async function openAufmass({ width = 1280, height = 900 } = {}) {
   const { server, port } = await serve();
   const browser = await chromium.launch(EXE ? { executablePath: EXE } : {});
@@ -60,8 +70,9 @@ export async function openAufmass({ width = 1280, height = 900 } = {}) {
   const logs = [];
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
-  await page.goto(`http://127.0.0.1:${port}/index.html`);
-  await page.waitForFunction(() => document.getElementById('projectGrid') && typeof window.jspdf !== 'undefined');
+  await page.goto(`http://127.0.0.1:${port}/index.html#/aufmass`);
+  await page.waitForFunction(() => document.body.dataset.modul === 'aufmass'
+    && !!document.getElementById('projectGrid') && typeof window.jspdf !== 'undefined');
   return {
     page, logs,
     async close() { await browser.close(); server.close(); }
