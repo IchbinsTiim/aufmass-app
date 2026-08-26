@@ -79,6 +79,11 @@ assert(mig.pdfDesign === 'kontrast', 'PDF-Layout übernommen');
 assert(mig.geraet === 'ipad', 'Gerätemodus übernommen');
 assert(mig.altWeg, 'alte Schlüssel sind nach der Migration entfernt');
 
+// Ein gewähltes Projekt setzen: das 2D-Modul zeigt sonst zuerst seine
+// Projektliste (siehe r8) statt der Zeichenfläche. Hier geht es um das
+// Routing der Shell, nicht um die Projektauswahl.
+await page.evaluate(() => localStorage.setItem('geruest.app.aktuellesProjekt', 'p-alt'));
+
 // ── 2. Routing ───────────────────────────────────────────────────────────
 assert(await modul() === 'hub', 'Startadresse ohne Route zeigt den Hub');
 assert(await sichtbar('hub') && !(await sichtbar('aufmass')) && !(await sichtbar('2d')),
@@ -91,7 +96,8 @@ assert(await sichtbar('aufmass') && !(await sichtbar('hub')), 'Modul 1 ist sicht
 
 await page.click('.mod-tab[data-ziel="2d"]');
 await page.waitForFunction(() => document.body.dataset.modul === '2d');
-assert(await page.evaluate(() => location.hash) === '#/2d', 'Umschalter führt auf #/2d');
+assert(await page.evaluate(() => location.hash) === '#/2d',
+  'Umschalter führt mit gewähltem Projekt direkt in die Zeichnung');
 assert(await page.evaluate(() => !!document.getElementById('planSvg').clientWidth),
   'die Zeichenfläche ist beim Aktivieren wirklich sichtbar (Kamera kann messen)');
 

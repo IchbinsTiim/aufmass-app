@@ -17,10 +17,14 @@
 
 const Shell = (() => {
 
+  // Mehrere Routen dürfen auf dieselbe Ansicht zeigen: das 2D-Modul hat zwei
+  // Bildschirme – die Projektliste und die Zeichnung –, die sich denselben
+  // Namensraum und denselben Zustand teilen.
   const ROUTEN = {
-    '#/':        'hub',
-    '#/aufmass': 'aufmass',
-    '#/2d':      '2d'
+    '#/':            'hub',
+    '#/aufmass':     'aufmass',
+    '#/2d':          '2d',
+    '#/2d/projekte': '2d'
   };
   const ROUTE_VON_ANSICHT = { hub: '#/', aufmass: '#/aufmass', '2d': '#/2d' };
 
@@ -30,6 +34,7 @@ const Shell = (() => {
   };
 
   let aktuelleAnsicht = null;
+  let aktuellerHash   = null;
 
   // ── Routen lesen/schreiben ────────────────────────────────────────────────
 
@@ -43,15 +48,25 @@ const Shell = (() => {
   /** Wechselt die Route. Der eigentliche Wechsel läuft über `hashchange`,
    *  damit der Zurück-Button des Browsers immer dasselbe Verhalten zeigt. */
   function gehe(hash) {
-    if (window.location.hash === hash) { zeige(ROUTEN[hash] || 'hub'); return; }
+    if (window.location.hash === hash) { zeige(ROUTEN[hash] || 'hub', hash); return; }
     window.location.hash = hash;
   }
 
   // ── Ansicht umschalten ────────────────────────────────────────────────────
 
-  function zeige(ansicht) {
+  function zeige(ansicht, hash) {
     if (!ROUTE_VON_ANSICHT[ansicht]) ansicht = 'hub';
-    if (ansicht === aktuelleAnsicht) return;
+    hash = hash || window.location.hash || '#/';
+
+    // Gleiche Ansicht, andere Unterroute (z. B. Zeichnung ↔ Projektliste):
+    // Das Modul bleibt geladen und entscheidet selbst, was es anzeigt.
+    if (ansicht === aktuelleAnsicht) {
+      if (hash !== aktuellerHash) {
+        aktuellerHash = hash;
+        if (module[ansicht]) module[ansicht].aktiviere();
+      }
+      return;
+    }
 
     const vorher = aktuelleAnsicht;
     if (vorher && module[vorher]) module[vorher].deaktiviere();
@@ -61,6 +76,7 @@ const Shell = (() => {
     });
     document.body.dataset.modul = ansicht;
     aktuelleAnsicht = ansicht;
+    aktuellerHash   = hash;
 
     // Umschalter-Pille und Kacheln nachziehen
     document.querySelectorAll('.mod-tab').forEach(t => {
@@ -220,7 +236,8 @@ const Shell = (() => {
     document.querySelectorAll('.hub-tile').forEach(kachel => {
       kachel.addEventListener('click', e => {
         e.preventDefault();
-        oeffneMitUebergang(kachel, kachel.dataset.ziel === '2d' ? '#/2d' : '#/aufmass');
+        // Kachel 2 fragt zuerst, welches Projekt gezeichnet werden soll.
+        oeffneMitUebergang(kachel, kachel.dataset.ziel === '2d' ? '#/2d/projekte' : '#/aufmass');
       });
     });
 
@@ -230,7 +247,7 @@ const Shell = (() => {
       exportAllProjectsBackup();
     });
 
-    window.addEventListener('hashchange', () => zeige(ansichtAusHash()));
+    window.addEventListener('hashchange', () => zeige(ansichtAusHash(), window.location.hash || '#/'));
 
     window.addEventListener('beforeunload', e => {
       if (!ungespeicherte()) return;
@@ -252,7 +269,7 @@ const Shell = (() => {
       return;                       // der hashchange übernimmt das Anzeigen
     }
 
-    zeige(ansichtAusHash());
+    zeige(ansichtAusHash(), window.location.hash || '#/');
   }
 
   if (document.readyState === 'loading') {

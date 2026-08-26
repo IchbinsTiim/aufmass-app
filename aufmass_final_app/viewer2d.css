@@ -2342,3 +2342,207 @@ body[data-modul="2d"] .pos-feld-masse .height-inp {
 body[data-modul="2d"] .pos-feld-masse .height-inp:focus { border-color: #7a4bd1; background: #212121; }
 body[data-modul="2d"] .pos-feld-masse .height-inp::placeholder { color: #a99bc6; }
 body[data-modul="2d"] .pos-feld-row .pdf-sheet-note { margin: 0; }
+
+/* ── Projektliste des 2D-Moduls ────────────────────────────────────────────
+   Dieselbe Ordnerstruktur wie im Aufmaß-Modul, aber auf das Zeichnen
+   zugeschnitten: an jeder Karte steht, ob und wie viel schon gezeichnet ist. */
+
+body[data-modul="2d"] .td-projekte {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 8px 20px 56px;
+}
+
+body[data-modul="2d"] .td-projekte-kopf {
+  padding: 12px 0 20px;
+}
+body[data-modul="2d"] .td-projekte-kopf h1 {
+  margin: 6px 0 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 4vw, 2.3rem);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.08;
+  color: var(--text);
+}
+body[data-modul="2d"] .td-projekte-kopf p {
+  margin: 0;
+  max-width: 60ch;
+  font-size: .92rem;
+  color: var(--muted);
+}
+
+body[data-modul="2d"] .td-projekte-leiste {
+  margin-bottom: 14px;
+}
+body[data-modul="2d"] .td-projekte-suche {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 10px 14px;
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: .95rem;
+}
+body[data-modul="2d"] .td-projekte-suche::placeholder { color: var(--muted-schwach); }
+body[data-modul="2d"] .td-projekte-suche:focus {
+  outline: none;
+  border-color: var(--accent-2d);
+  box-shadow: 0 0 0 3px var(--accent-weich);
+}
+
+/* Ordnerleiste */
+body[data-modul="2d"] .td-folder-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+body[data-modul="2d"] .td-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--touch);
+  padding: 8px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pille);
+  background: var(--surface-tief);
+  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: .86rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .16s cubic-bezier(.22,1,.36,1),
+              border-color .16s cubic-bezier(.22,1,.36,1),
+              color .16s cubic-bezier(.22,1,.36,1);
+}
+body[data-modul="2d"] .td-folder-chip:hover { color: var(--text); border-color: var(--hairline-stark); }
+body[data-modul="2d"] .td-folder-chip.aktiv {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent-2d);
+}
+body[data-modul="2d"] .td-folder-chip-zahl {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .74rem;
+  opacity: .7;
+}
+
+/* Projektkarten */
+body[data-modul="2d"] .td-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: 12px;
+}
+
+body[data-modul="2d"] .td-project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px 18px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  color: var(--text);
+  font-family: var(--font-text);
+  cursor: pointer;
+  transition: transform .2s cubic-bezier(.22,1,.36,1),
+              border-color .2s cubic-bezier(.22,1,.36,1),
+              box-shadow .2s cubic-bezier(.22,1,.36,1);
+}
+body[data-modul="2d"] .td-project-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-rand);
+  box-shadow: var(--schatten-m);
+}
+body[data-modul="2d"] .td-project-card:active { transform: translateY(0) scale(.995); }
+body[data-modul="2d"] .td-project-card.aktuell {
+  border-color: var(--accent-rand);
+  background: linear-gradient(var(--accent-weich), var(--accent-weich)), var(--surface);
+}
+
+body[data-modul="2d"] .td-project-kopf {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+body[data-modul="2d"] .td-project-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body[data-modul="2d"] .td-project-marke {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--r-pille);
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
+  font-family: var(--font-mono);
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+body[data-modul="2d"] .td-project-zeile { font-size: .86rem; color: var(--muted); }
+body[data-modul="2d"] .td-project-ordner { font-size: .78rem; color: var(--muted-schwach); }
+
+body[data-modul="2d"] .td-project-stats {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .8rem;
+  color: var(--accent-2d);
+}
+body[data-modul="2d"] .td-project-stats.leer { color: var(--muted-schwach); }
+
+/* Leerzustände */
+body[data-modul="2d"] .td-projekte-leer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 20px;
+  text-align: center;
+}
+body[data-modul="2d"] .td-projekte-leer-icon { font-size: 2.6rem; opacity: .55; }
+body[data-modul="2d"] .td-projekte-leer-titel {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+body[data-modul="2d"] .td-projekte-leer p {
+  margin: 0;
+  max-width: 46ch;
+  font-size: .9rem;
+  color: var(--muted-schwach);
+}
+body[data-modul="2d"] .td-projekte-leer-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  margin-top: 8px;
+  padding: 0 20px;
+  border-radius: var(--r-control);
+  background: var(--accent-aufmass);
+  color: var(--accent-kontrast);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (max-width: 720px) {
+  body[data-modul="2d"] .td-projekte { padding: 4px 14px 48px; }
+  body[data-modul="2d"] .td-project-grid { grid-template-columns: minmax(0, 1fr); }
+}

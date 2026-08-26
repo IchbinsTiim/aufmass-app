@@ -94,7 +94,7 @@
         </a>
 
         <!-- Kachel 2: 2D-Aufmaß -->
-        <a class="hub-tile" data-ziel="2d" href="#/2d">
+        <a class="hub-tile" data-ziel="2d" href="#/2d/projekte">
           <div class="hub-tile-glow" aria-hidden="true"></div>
           <div class="hub-tile-body">
             <div class="hub-tile-text">
@@ -450,6 +450,41 @@
        ══════════════════════════════════════════════════════════════════ -->
   <section id="td-root" class="view td-scope" data-view="2d" aria-label="2D-Aufmaß">
 
+
+    <!-- Projektliste des 2D-Moduls  →  #/2d/projekte
+         Dieselbe Ordnerstruktur wie im Aufmaß-Modul, aber auf das Zeichnen
+         zugeschnitten: jede Karte zeigt, ob und wie viel schon gezeichnet ist. -->
+    <div id="td-projekte" class="td-projekte hidden">
+      <header class="td-projekte-kopf">
+        <a href="#/" class="back-link">← Start</a>
+        <h1>Welches Projekt zeichnen?</h1>
+        <p>Tippen Sie ein Projekt an, um seine Gerüst-Zeichnung zu öffnen. Die Ordner sind dieselben wie im Aufmaß.</p>
+      </header>
+
+      <div class="td-projekte-leiste">
+        <input type="search" id="tdProjectSearch" class="td-projekte-suche"
+               placeholder="Suche nach Name, Kunde, Adresse…" />
+      </div>
+
+      <div id="tdFolderBar" class="td-folder-bar"></div>
+      <div id="tdProjectGrid" class="td-project-grid"></div>
+
+      <div id="tdProjectEmpty" class="td-projekte-leer hidden">
+        <div class="td-projekte-leer-icon">📐</div>
+        <div class="td-projekte-leer-titel">Noch kein Projekt angelegt</div>
+        <p>Projekte werden im Aufmaß-Modul angelegt – dort gehören Anschrift, Technik und Positionen hin.</p>
+        <a class="td-projekte-leer-btn" href="#/aufmass">Zum Aufmaß</a>
+      </div>
+
+      <div id="tdProjectNoHits" class="td-projekte-leer hidden">
+        <div class="td-projekte-leer-icon">🔍</div>
+        <div class="td-projekte-leer-titel">Keine Treffer</div>
+        <p>Kein Projekt passt zu dieser Suche oder diesem Ordner.</p>
+      </div>
+    </div>
+
+    <!-- Die Zeichnung selbst  →  #/2d -->
+    <div id="td-zeichnung">
     <header class="viewer-header">
       <a href="#/" class="back-link">← Start</a>
       <h1>Gerüst 2D-Ansicht</h1>
@@ -482,6 +517,7 @@
         <button id="shakeUndoBtn" class="secondary" title="Schütteln zum Rückgängigmachen aktivieren">📳</button>
         <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
         <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
+        <button id="tdProjectBtn" class="secondary" title="Anderes Projekt zeichnen – zeigt die Projekte nach Ordnern">📁&nbsp;Projekt</button>
         <button id="savePlanBtn" class="secondary">Speichern</button>
         <button id="loadPlanBtn" class="secondary">Laden</button>
         <button id="photosBtn" class="secondary" title="Projekt-Fotos ansehen/hinzufügen">📷 Fotos</button>
@@ -542,6 +578,7 @@
           </div>
         </div>
       </div>
+    </div>
     </div>
   </section>
 
