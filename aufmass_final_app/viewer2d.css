@@ -2372,11 +2372,104 @@ body[data-modul="2d"] .td-projekte-kopf p {
   color: var(--muted);
 }
 
+/* Titelzeile mit Primäraktion. Der Knopf steht neben der Überschrift und ist
+   nie ausgegraut – das Anlegen einer Zeichnung hängt an keiner Bedingung. */
+body[data-modul="2d"] .td-projekte-titelzeile {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+body[data-modul="2d"] .td-projekte-titeltext { min-width: 0; }
+
+body[data-modul="2d"] .td-neu-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--touch);
+  padding: 0 22px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
+  font-family: var(--font-text);
+  font-size: .95rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  cursor: pointer;
+  box-shadow: var(--schatten-s);
+  transition: transform var(--t-kurz) var(--federnd),
+              box-shadow var(--t-kurz) var(--federnd),
+              filter var(--t-kurz) var(--federnd);
+}
+body[data-modul="2d"] .td-neu-btn:hover { filter: brightness(1.06); box-shadow: var(--schatten-m); }
+body[data-modul="2d"] .td-neu-btn:active { transform: scale(.98); }
+body[data-modul="2d"] .td-neu-btn span { font-size: 1.1rem; line-height: 1; }
+
 body[data-modul="2d"] .td-projekte-leiste {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 14px;
 }
+
+/* Sekundäre Knöpfe der Liste (Auswählen, Bulk-Leiste) */
+body[data-modul="2d"] .td-leiste-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  padding: 0 18px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--surface-tief);
+  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: .88rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              background var(--t-kurz) var(--federnd);
+}
+body[data-modul="2d"] .td-leiste-btn:hover:not(:disabled) { color: var(--text); border-color: var(--hairline-stark); }
+body[data-modul="2d"] .td-leiste-btn.aktiv {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent-2d);
+}
+body[data-modul="2d"] .td-leiste-btn.gefahr { color: var(--gefahr); border-color: rgba(255, 107, 107, .3); }
+body[data-modul="2d"] .td-leiste-btn.gefahr:hover:not(:disabled) { background: rgba(255, 107, 107, .12); }
+body[data-modul="2d"] .td-leiste-btn:disabled { opacity: .4; cursor: default; }
+
+/* Leiste der Mehrfachauswahl */
+body[data-modul="2d"] .td-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-rand);
+  border-radius: var(--r-control);
+  background: var(--accent-weich);
+}
+body[data-modul="2d"] .td-bulk-bar.hidden { display: none; }
+body[data-modul="2d"] .td-bulk-info {
+  flex: 1;
+  min-width: 140px;
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 body[data-modul="2d"] .td-projekte-suche {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: var(--touch);
   padding: 10px 14px;
   background: var(--surface-tief);
@@ -2425,6 +2518,30 @@ body[data-modul="2d"] .td-folder-chip.aktiv {
   border-color: var(--accent-rand);
   color: var(--accent-2d);
 }
+/* Aktionen der Ordnerleiste – bewusst anders als die Filter-Chips */
+body[data-modul="2d"] .td-folder-neu,
+body[data-modul="2d"] .td-folder-verwalten {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--touch);
+  padding: 8px 16px;
+  border: 1px dashed var(--hairline-stark);
+  border-radius: var(--r-pille);
+  background: transparent;
+  color: var(--muted-schwach);
+  font-family: var(--font-text);
+  font-size: .86rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--t-kurz) var(--federnd), border-color var(--t-kurz) var(--federnd);
+}
+body[data-modul="2d"] .td-folder-neu:hover,
+body[data-modul="2d"] .td-folder-verwalten:hover { color: var(--accent-2d); border-color: var(--accent-rand); }
+body[data-modul="2d"] .td-folder-verwalten { min-width: var(--touch); padding: 8px 12px; }
+
 body[data-modul="2d"] .td-folder-chip-zahl {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -2443,6 +2560,8 @@ body[data-modul="2d"] .td-project-card {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  font-size: 1rem;
+  -webkit-tap-highlight-color: transparent;
   padding: 16px 18px;
   text-align: left;
   background: var(--surface);
@@ -2466,10 +2585,58 @@ body[data-modul="2d"] .td-project-card.aktuell {
   background: linear-gradient(var(--accent-weich), var(--accent-weich)), var(--surface);
 }
 
+body[data-modul="2d"] .td-project-card.auswahl { border-style: dashed; }
+body[data-modul="2d"] .td-project-card.gewaehlt {
+  border-style: solid;
+  border-color: var(--accent-2d);
+  background: linear-gradient(var(--accent-weich), var(--accent-weich)), var(--surface);
+}
+
 body[data-modul="2d"] .td-project-kopf {
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+
+/* Auswahlhaken (Mehrfachauswahl) */
+body[data-modul="2d"] .td-project-haken {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--hairline-stark);
+  border-radius: 7px;
+  color: var(--accent-kontrast);
+  font-size: .8rem;
+  line-height: 1;
+}
+body[data-modul="2d"] .td-project-card.gewaehlt .td-project-haken {
+  background: var(--accent-2d);
+  border-color: var(--accent-2d);
+}
+
+/* ⋯-Menü der Karte – groß genug für Handschuhe, ruhig im Normalzustand */
+body[data-modul="2d"] .td-project-menu-btn {
+  flex: none;
+  align-self: center;
+  width: 34px;
+  height: 34px;
+  margin: -6px -8px -6px 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted-schwach);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-kurz) var(--federnd), color var(--t-kurz) var(--federnd);
+}
+body[data-modul="2d"] .td-project-menu-btn:hover {
+  background: var(--surface-hoch);
+  color: var(--text);
 }
 body[data-modul="2d"] .td-project-name {
   flex: 1;
@@ -2529,20 +2696,178 @@ body[data-modul="2d"] .td-projekte-leer p {
   font-size: .9rem;
   color: var(--muted-schwach);
 }
+body[data-modul="2d"] .td-projekte-leer-aktionen {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
 body[data-modul="2d"] .td-projekte-leer-btn {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   min-height: var(--touch);
-  margin-top: 8px;
   padding: 0 20px;
+  border: 1px solid transparent;
   border-radius: var(--r-control);
   background: var(--accent-aufmass);
   color: var(--accent-kontrast);
+  font-family: var(--font-text);
+  font-size: .95rem;
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
 }
+body[data-modul="2d"] .td-projekte-leer-btn.primaer { background: var(--accent-2d); }
+body[data-modul="2d"] .td-projekte-leer-btn:active { transform: scale(.98); }
+
+/* ── Dialoge der Zeichnungsverwaltung ─────────────────────────────────────
+   Anlegen, Löschen, ungespeicherte Änderungen. Eine Form für alle drei. */
+.td-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 11, 20, .68);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.td-dialog-overlay.hidden { display: none; }
+
+.td-dialog {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 26px 26px 22px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  box-shadow: var(--schatten-l);
+  color: var(--text);
+  font-family: var(--font-text);
+}
+.td-dialog-titel {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+.td-dialog-text {
+  margin: 0 0 18px;
+  font-size: .92rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.td-dialog-liste {
+  margin: -8px 0 18px;
+  padding-left: 18px;
+  font-size: .88rem;
+  color: var(--muted);
+}
+.td-dialog-liste.hidden { display: none; }
+.td-dialog-liste li { margin: 2px 0; }
+.td-dialog-liste li.mehr { color: var(--muted-schwach); list-style: none; margin-left: -18px; }
+
+.td-dialog-feld {
+  display: block;
+  margin-bottom: 14px;
+}
+.td-dialog-feld > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted-schwach);
+}
+.td-dialog-feld input,
+.td-dialog-feld select {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 10px 14px;
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: .95rem;
+}
+.td-dialog-feld input:focus,
+.td-dialog-feld select:focus {
+  outline: none;
+  border-color: var(--accent-2d);
+  box-shadow: 0 0 0 3px var(--accent-weich);
+}
+
+.td-dialog-aktionen {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+.td-dialog-aktionen.drei { justify-content: space-between; }
+
+.td-dialog-btn {
+  flex: none;
+  min-height: var(--touch);
+  padding: 0 20px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--surface-tief);
+  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: .92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              background var(--t-kurz) var(--federnd),
+              transform var(--t-kurz) var(--federnd);
+}
+.td-dialog-btn:hover { color: var(--text); border-color: var(--hairline-stark); }
+.td-dialog-btn:active { transform: scale(.98); }
+.td-dialog-btn.primaer {
+  background: var(--accent-2d);
+  border-color: transparent;
+  color: var(--accent-kontrast);
+}
+.td-dialog-btn.primaer:hover { filter: brightness(1.06); color: var(--accent-kontrast); }
+.td-dialog-btn.gefahr {
+  background: rgba(255, 107, 107, .12);
+  border-color: rgba(255, 107, 107, .34);
+  color: var(--gefahr);
+}
+.td-dialog-btn.gefahr:hover { background: rgba(255, 107, 107, .2); color: var(--gefahr); }
+
+/* ── Toast mit Aktion („Rückgängig") ──────────────────────────────────── */
+.toast-aktion {
+  margin-left: 14px;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: var(--r-pille);
+  background: transparent;
+  color: var(--accent-2d);
+  font-family: inherit;
+  font-size: .84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.toast-aktion:hover { background: rgba(255, 255, 255, .1); }
+/* Nur der Toast mit Knopf nimmt Zeiger an – sonst blockiert er die Fläche. */
+.toast--aktion { pointer-events: auto; }
 
 @media (max-width: 720px) {
   body[data-modul="2d"] .td-projekte { padding: 4px 14px 48px; }
   body[data-modul="2d"] .td-project-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Auf dem Telefon läuft die Primäraktion über die volle Breite. */
+  body[data-modul="2d"] .td-projekte-titelzeile { align-items: stretch; }
+  body[data-modul="2d"] .td-neu-btn { width: 100%; justify-content: center; }
+  .td-dialog-aktionen .td-dialog-btn { flex: 1; }
 }

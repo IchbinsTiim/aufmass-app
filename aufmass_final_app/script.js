@@ -117,6 +117,8 @@ function loadProjects() {
 
 function saveProjects() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  // Das 2D-Modul hält seine Liste aus demselben Speicher – Bescheid geben.
+  meldeDatenAenderung('aufmass');
 }
 
 function loadFolders() {
@@ -130,6 +132,7 @@ function loadFolders() {
 
 function saveFolders() {
   localStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+  meldeDatenAenderung('aufmass');
 }
 
 function getCurrentProject() {
@@ -615,59 +618,8 @@ function deleteFolderPrompt(folderId) {
   renderProjectOverview();
 }
 
-function closeFloatingMenu() {
-  document.getElementById('floatingMenu')?.remove();
-  document.getElementById('floatingMenuOverlay')?.remove();
-}
-
-/** Kleines, an einem Button verankertes Popup-Menü (Aktionen, ggf. mit
- *  Untermenüs) – touch-tauglich, ohne Abhängigkeit von Browser-Kontextmenüs. */
-function openFloatingMenu(anchorEl, items) {
-  closeFloatingMenu();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'floatingMenuOverlay';
-  overlay.className = 'floating-menu-overlay';
-  overlay.addEventListener('click', closeFloatingMenu);
-
-  const menu = document.createElement('div');
-  menu.id = 'floatingMenu';
-  menu.className = 'floating-menu';
-
-  items.forEach(item => {
-    if (item === '---') {
-      const sep = document.createElement('div');
-      sep.className = 'floating-menu-sep';
-      menu.appendChild(sep);
-      return;
-    }
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'floating-menu-item' + (item.danger ? ' danger' : '') + (item.active ? ' active' : '');
-    btn.textContent = item.label;
-    btn.addEventListener('click', () => { closeFloatingMenu(); item.onClick(); });
-    menu.appendChild(btn);
-  });
-
-  document.body.appendChild(overlay);
-  document.body.appendChild(menu);
-
-  const r = anchorEl.getBoundingClientRect();
-  const menuW = 240;
-  let left = r.right - menuW;
-  if (left < 8) left = 8;
-  if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
-  let top = r.bottom + 6;
-  menu.style.left = left + 'px';
-  menu.style.top  = top + 'px';
-  // Falls das Menü unten aus dem Bildschirm ragen würde: oberhalb öffnen
-  requestAnimationFrame(() => {
-    const mh = menu.getBoundingClientRect().height;
-    if (top + mh > window.innerHeight - 8) {
-      menu.style.top = Math.max(8, r.top - mh - 6) + 'px';
-    }
-  });
-}
+// closeFloatingMenu() / openFloatingMenu() stehen jetzt in core.js – die
+// Zeichnungsliste des 2D-Moduls benutzt dasselbe Menü.
 
 function openFolderManageMenu(folder, anchorEl) {
   openFloatingMenu(anchorEl, [
@@ -746,11 +698,17 @@ function duplicateProject(proj) {
 
 function deleteProjectFromOverview(proj) {
   if (!confirm(`Projekt "${getProjectName(proj)}" wirklich löschen?`)) return;
-  projects = projects.filter(p => p.id !== proj.id);
+  const id = proj.id;
+  projects = projects.filter(p => p.id !== id);
   saveProjects();
-  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === proj.id) {
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === id) {
     localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
   }
+  // Zum Projekt gehören auch Fotos (IndexedDB) und ggf. eine im 2D-Modul
+  // geöffnete Zeichnung – beides wird hier mit aufgeräumt, sonst bleiben
+  // verwaiste Datensätze bzw. ein Editor auf einem gelöschten Projekt zurück.
+  if (typeof entferneFotosZuProjekt === 'function') entferneFotosZuProjekt(id);
+  if (typeof zeichnungenEntfallen === 'function')  zeichnungenEntfallen([id]);
   renderProjectOverview();
   showToast('Projekt gelöscht');
 }
@@ -3202,6 +3160,15 @@ function initApp() {
   loadProjects();
   loadFolders();
 
+  // Das 2D-Modul schreibt in dieselbe Projektliste (neue Zeichnung, Löschen,
+  // Umbenennen, Verschieben). Ohne dieses Nachladen liefe die Übersicht hier
+  // auf einem veralteten Stand weiter – und der nächste Schreibvorgang würde
+  // die Änderung des anderen Moduls überschreiben.
+  document.addEventListener(GERUEST_DATEN_EVENT, e => {
+    if (e.detail && e.detail.quelle === 'aufmass') return;
+    AufmassModul.frischeDatenLaden();
+  });
+
   // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
   // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
   // `?resume=1` bleibt als Einstieg erhalten (alte Lesezeichen); innerhalb der
@@ -3354,12 +3321,20 @@ const AufmassModul = (() => {
      *  einlesen und die Kennzahlen der 2D-Zeichnung auffrischen. */
     aktiviere() {
       this.mount();
+      this.frischeDatenLaden();
+      const proj = getCurrentProject();
+      if (proj) update2dSummary(proj);
+    },
+
+    /** Liest Projekte und Ordner neu aus dem Speicher und frischt die
+     *  Übersicht auf – nötig, sobald das 2D-Modul Zeichnungen angelegt,
+     *  gelöscht oder verschoben hat. */
+    frischeDatenLaden() {
+      if (!gemountet) return;
       loadProjects();
       loadFolders();
       renderProjectOverview();
       renderBackupReminder();
-      const proj = getCurrentProject();
-      if (proj) update2dSummary(proj);
     },
 
     /** Modul wird verlassen: gebündelte Autosave-Schreibvorgänge sofort
