@@ -29,7 +29,7 @@ Browser nach.
 | Datei | Rolle | Herkunft |
 |---|---|---|
 | `index.html` | **einziger Einstiegspunkt**: Hub + beide Modulansichten + Umschalter | neu (enthält das Markup beider Alt-Apps) |
-| `core.js` | gemeinsame Basis: Speicher-Schlüssel, Migration, Toast, Zahlenformat | neu |
+| `core.js` | gemeinsame Basis: Speicher-Schlüssel, Migration, Toast (auch mit „Rückgängig"), Aktionsmenü, Datenmeldung zwischen den Modulen, Zahlenformat | neu |
 | `core.css` | Design-Tokens: Farben, Schriften, Radien, Tiefe, Bewegung | neu |
 | `shell.js` | Hash-Routing, Modul-Lebenszyklus, Hub-Kennzahlen, Auswahl-Dialog | neu |
 | `shell.css` | Hub, Kacheln mit Vorschau, Umschalter, Ansichtswechsel | neu |
@@ -130,6 +130,7 @@ zusammengeführten App geprüft.
 | Alle Felder anzeigen · Magnetraster · Ansicht zurücksetzen | ✅ |
 | Speichern / Laden (JSON-Datei) | ✅ |
 | Fotos · Grundriss · Bordbrett · PDF · Gerät wechseln | ✅ |
+| Datei-Menü: neue Zeichnung, Zeichnung öffnen, als Datei speichern/laden | ✅ |
 
 **Seitenleiste**
 
@@ -190,6 +191,38 @@ zusammengeführten App geprüft.
 | Plan-Beschriftungen ohne Überlappung, nicht in Kopf/Fuß/Legende | ✅ |
 | Positions- und Aufmaßtabellen, Fotos | ✅ |
 | Drei Layouts (Technisch, Kontrast, Monochrom), Auswahl wird gemerkt | ✅ |
+
+**Zeichnungsübersicht (`#/2d/projekte`)**
+
+Die Übersicht zeigt dieselben Projekte und Ordner wie das Aufmaß-Modul, aber
+auf das Zeichnen zugeschnitten. Sie war zunächst nur lesend – öffnen ging,
+anlegen und löschen nicht. Beides liegt jetzt hier, auf demselben Speicher und
+in demselben Datenformat (ein Projektdatensatz, die Zeichnung darin unter
+`zeichnung2d`); eine Migration war dafür nicht nötig.
+
+| Funktion | |
+|---|---|
+| „Neue Zeichnung": Primärknopf der Übersicht, Leerzustand und Datei-Menü – immer sichtbar, nie gesperrt | ✅ |
+| Anlege-Dialog: Namensvorschlag + Zielordner (vorbelegt), Anlegen öffnet die leere Zeichnung sofort | ✅ |
+| Löschen je Zeichnung über ⋯-Menü und Rechtsklick, mit Nennung des Namens | ✅ |
+| Mehrfachauswahl mit Sammel-Löschen | ✅ |
+| Toast mit „Rückgängig"; erst nach Ablauf der Frist fallen auch die Projektfotos weg | ✅ |
+| Gelöschte offene Zeichnung → Editor schließt sauber, zurück zur Übersicht | ✅ |
+| Umbenennen, Duplizieren, zwischen Ordnern verschieben | ✅ |
+| Ordner anlegen, umbenennen, löschen (Inhalt wandert nach „Ohne Ordner") | ✅ |
+| Ungespeicherte Änderungen → Speichern / Verwerfen / Abbrechen | ✅ |
+
+**Zustandsisolierung beim Dokumentwechsel**
+
+Ein Dokumentwechsel läuft über genau eine Stelle (`oeffneZeichnung`), die
+`resetState2d()` aufruft: Zeichenobjekte, Gerüstfelder, Achsen, Abschnitte,
+Auswahl und Mehrfachauswahl, Zwischenablage, Undo-/Redo-Stapel, laufende
+Gesten, Bordbrett- und Grundriss-Modus samt ihrer Event-Listener, Kamera und
+Zoom werden dabei vollständig geleert. Ein ausstehender Autosave gehört zum
+alten Dokument und wird vorher ausgeführt oder verworfen – er kann nie in das
+neue hineinschreiben.
+
+---
 
 **Tastatur**
 

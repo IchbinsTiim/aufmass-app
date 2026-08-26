@@ -15,11 +15,11 @@
 
   <!-- Reihenfolge zählt: core = Tokens & gemeinsame Bausteine, dann die beiden
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
-  <link rel="stylesheet" href="core.css?v=20260825" />
-  <link rel="stylesheet" href="style.css?v=20260825" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260825" />
-  <link rel="stylesheet" href="shell.css?v=20260825" />
-  <link rel="stylesheet" href="theme.css?v=20260825" />
+  <link rel="stylesheet" href="core.css?v=20260826" />
+  <link rel="stylesheet" href="style.css?v=20260826" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260826" />
+  <link rel="stylesheet" href="shell.css?v=20260826" />
+  <link rel="stylesheet" href="theme.css?v=20260826" />
 </head>
 <body data-modul="hub">
 
@@ -457,13 +457,30 @@
     <div id="td-projekte" class="td-projekte hidden">
       <header class="td-projekte-kopf">
         <a href="#/" class="back-link">← Start</a>
-        <h1>Welches Projekt zeichnen?</h1>
-        <p>Tippen Sie ein Projekt an, um seine Gerüst-Zeichnung zu öffnen. Die Ordner sind dieselben wie im Aufmaß.</p>
+        <div class="td-projekte-titelzeile">
+          <div class="td-projekte-titeltext">
+            <h1>Welches Projekt zeichnen?</h1>
+            <p>Tippen Sie ein Projekt an, um seine Gerüst-Zeichnung zu öffnen. Die Ordner sind dieselben wie im Aufmaß.</p>
+          </div>
+          <!-- Immer sichtbar, nie gesperrt – auch während eine andere
+               Zeichnung im Editor offen ist. -->
+          <button type="button" id="tdNeuBtn" class="td-neu-btn">
+            <span aria-hidden="true">＋</span> Neue Zeichnung
+          </button>
+        </div>
       </header>
 
       <div class="td-projekte-leiste">
         <input type="search" id="tdProjectSearch" class="td-projekte-suche"
                placeholder="Suche nach Name, Kunde, Adresse…" />
+        <button type="button" id="tdAuswahlBtn" class="td-leiste-btn" aria-pressed="false"
+                title="Mehrere Zeichnungen auswählen und löschen">Auswählen</button>
+      </div>
+
+      <div id="tdBulkBar" class="td-bulk-bar hidden">
+        <span id="tdBulkInfo" class="td-bulk-info">0 Zeichnungen ausgewählt</span>
+        <button type="button" id="tdBulkAlle" class="td-leiste-btn">Alle</button>
+        <button type="button" id="tdBulkLoeschen" class="td-leiste-btn gefahr" disabled>Löschen</button>
       </div>
 
       <div id="tdFolderBar" class="td-folder-bar"></div>
@@ -471,9 +488,14 @@
 
       <div id="tdProjectEmpty" class="td-projekte-leer hidden">
         <div class="td-projekte-leer-icon">📐</div>
-        <div class="td-projekte-leer-titel">Noch kein Projekt angelegt</div>
-        <p>Projekte werden im Aufmaß-Modul angelegt – dort gehören Anschrift, Technik und Positionen hin.</p>
-        <a class="td-projekte-leer-btn" href="#/aufmass">Zum Aufmaß</a>
+        <div class="td-projekte-leer-titel">Noch keine Zeichnung vorhanden</div>
+        <p>Legen Sie hier direkt eine leere Zeichnung an. Wer zuerst Anschrift, Technik und Positionen erfassen möchte, beginnt im Aufmaß – die Zeichnung hängt danach an demselben Projekt.</p>
+        <div class="td-projekte-leer-aktionen">
+          <button type="button" id="tdEmptyNeuBtn" class="td-projekte-leer-btn primaer">
+            <span aria-hidden="true">＋</span> Neue Zeichnung
+          </button>
+          <a class="td-projekte-leer-btn" href="#/aufmass">Zum Aufmaß</a>
+        </div>
       </div>
 
       <div id="tdProjectNoHits" class="td-projekte-leer hidden">
@@ -517,6 +539,7 @@
         <button id="shakeUndoBtn" class="secondary" title="Schütteln zum Rückgängigmachen aktivieren">📳</button>
         <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
         <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
+        <button id="tdFileMenuBtn" class="secondary" title="Datei: neue Zeichnung anlegen, öffnen, sichern">📄&nbsp;Datei</button>
         <button id="tdProjectBtn" class="secondary" title="Anderes Projekt zeichnen – zeigt die Projekte nach Ordnern">📁&nbsp;Projekt</button>
         <button id="savePlanBtn" class="secondary">Speichern</button>
         <button id="loadPlanBtn" class="secondary">Laden</button>
@@ -608,12 +631,58 @@
     </div>
   </div>
 
+  <!-- Neue Zeichnung anlegen (Name + Zielordner) -->
+  <div id="tdNeuOverlay" class="td-dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tdNeuTitel">
+    <div class="td-dialog">
+      <h2 class="td-dialog-titel" id="tdNeuTitel">Neue Zeichnung</h2>
+      <p class="td-dialog-text">Name und Ordner festlegen – die Zeichenfläche startet vollständig leer.</p>
+      <label class="td-dialog-feld">
+        <span>Name</span>
+        <input type="text" id="tdNeuName" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="td-dialog-feld">
+        <span>Ordner</span>
+        <select id="tdNeuOrdner"></select>
+      </label>
+      <div class="td-dialog-aktionen">
+        <button type="button" class="td-dialog-btn" id="tdNeuAbbrechen">Abbrechen</button>
+        <button type="button" class="td-dialog-btn primaer" id="tdNeuAnlegen">Anlegen &amp; öffnen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Löschen bestätigen -->
+  <div id="tdLoeschOverlay" class="td-dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tdLoeschTitel">
+    <div class="td-dialog">
+      <h2 class="td-dialog-titel" id="tdLoeschTitel">Zeichnung löschen?</h2>
+      <p class="td-dialog-text" id="tdLoeschText"></p>
+      <ul class="td-dialog-liste hidden" id="tdLoeschListe"></ul>
+      <div class="td-dialog-aktionen">
+        <button type="button" class="td-dialog-btn" id="tdLoeschAbbrechen">Abbrechen</button>
+        <button type="button" class="td-dialog-btn gefahr" id="tdLoeschBestaetigen">Löschen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ungespeicherte Änderungen vor dem Dokumentwechsel -->
+  <div id="tdSpeichernOverlay" class="td-dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tdSpeichernTitel">
+    <div class="td-dialog">
+      <h2 class="td-dialog-titel" id="tdSpeichernTitel">Ungespeicherte Änderungen</h2>
+      <p class="td-dialog-text" id="tdSpeichernText"></p>
+      <div class="td-dialog-aktionen drei">
+        <button type="button" class="td-dialog-btn" id="tdSpeichernAbbrechen">Abbrechen</button>
+        <button type="button" class="td-dialog-btn gefahr" id="tdSpeichernVerwerfen">Verwerfen</button>
+        <button type="button" class="td-dialog-btn primaer" id="tdSpeichernSichern">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="core.js?v=20260825"></script>
-  <script src="script.js?v=20260825"></script>
-  <script src="viewer2d.js?v=20260825"></script>
-  <script src="shell.js?v=20260825"></script>
+  <script src="core.js?v=20260826"></script>
+  <script src="script.js?v=20260826"></script>
+  <script src="viewer2d.js?v=20260826"></script>
+  <script src="shell.js?v=20260826"></script>
 </body>
 </html>

@@ -103,6 +103,32 @@ node tests/r7-shell-routing.mjs   # Hash-Routing, Deep-Link, Neuladen, Zurück-B
                                   # Namensraum-Sauberkeit, 44-px-Trefferflächen
 ```
 
+Runde 8 (Zeichnungsübersicht des 2D-Moduls):
+
+```bash
+node tests/r8-2d-projektliste.mjs   # Ordnerstruktur, Suche, Auswahl öffnet die
+                                    # richtige Zeichnung, Wechseln, Zurück-Button
+```
+
+Runde 9 (Zeichnungen anlegen und löschen):
+
+```bash
+node tests/r9-2d-zeichnungen.mjs    # „Neue Zeichnung" (Liste, Leerzustand,
+                                    # Datei-Menü), leere Zeichenfläche und leere
+                                    # Undo-History, Persistenz über den Reload,
+                                    # Löschen einzeln/mehrfach mit Bestätigung
+                                    # und „Rückgängig", Editor schließt beim
+                                    # Löschen der offenen Zeichnung, Speichern-
+                                    # Dialog, Umbenennen/Duplizieren/Verschieben,
+                                    # Ordner anlegen/löschen, Fotos ohne Projekt
+```
+
+`r9` prüft ausdrücklich, dass gelöschte Zeichnungen nach einem Reload nicht
+wieder auftauchen und dass keine verwaisten Datensätze zurückbleiben: die
+Projektfotos (IndexedDB) fallen mit der Zeichnung weg – aber erst nach Ablauf
+der Rückgängig-Frist, damit „Rückgängig" die Zeichnung samt Bildern zurückholt.
+Fotos, deren Projekt es nicht mehr gibt, räumt der Start des Moduls auf.
+
 ## Nachweis „rechnerisch identisch"
 
 Zwei Vergleichsläufe rechnen dasselbe Aufmaß einmal in der Fassung **vor** dem

@@ -652,6 +652,11 @@ const PROJECTS_STORAGE_KEY = GK.projekte;
 // CURRENT_PROJECT_STORAGE_KEY: siehe core.js (von beiden Modulen genutzt).
 let linkedProjectId = null;
 let autosave2dTimer = null;
+// Stand der Zeichnung, wie er zuletzt im Projekt stand. Daran – und nicht am
+// laufenden Autosave-Timer – hängt die Frage „gibt es ungespeicherte
+// Änderungen?": Der Timer läuft nach jedem Neuzeichnen an, auch ohne dass
+// sich inhaltlich etwas geändert hat.
+let dokumentBasis   = null;
 
 function loadLinkedProjects() {
   try {
@@ -660,6 +665,39 @@ function loadLinkedProjects() {
   } catch (_) {
     return [];
   }
+}
+
+/**
+ * Schreibt die Projektliste zurück – die einzige Stelle im 2D-Modul, die das
+ * tut. Sie meldet die Änderung auch dem Aufmaß-Modul, das dieselbe Liste im
+ * Speicher hält; ohne diese Meldung liefe dort ein veralteter Stand weiter
+ * und würde beim nächsten Schreiben die Änderung von hier überschreiben.
+ * @returns {boolean} false, wenn der Speicher die Daten nicht annimmt.
+ */
+function schreibeLinkedProjects(list) {
+  try {
+    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    // Kein stilles Verschlucken: voller Speicher oder privater Modus müssen
+    // sichtbar sein, sonst wirkt die Aktion nur scheinbar folgenlos.
+    console.error('[2D] Projektliste konnte nicht gespeichert werden:', err);
+    showToast('Speicher voll – Änderung nicht gesichert');
+    return false;
+  }
+  meldeDatenAenderung('2d');
+  return true;
+}
+
+function schreibeLinkedFolders(list) {
+  try {
+    localStorage.setItem(GK.ordner, JSON.stringify(list));
+  } catch (err) {
+    console.error('[2D] Ordner konnten nicht gespeichert werden:', err);
+    showToast('Speicher voll – Ordner nicht gesichert');
+    return false;
+  }
+  meldeDatenAenderung('2d');
+  return true;
 }
 
 /** Lädt die Zeichnung des verknüpften Projekts (falls vorhanden) in `state`. */
@@ -696,22 +734,35 @@ function loadFromLinkedProject() {
   }
 }
 
-/** Schreibt die aktuelle Zeichnung in das verknüpfte Projekt (ohne Verzögerung). */
-function writeToLinkedProject() {
-  if (!linkedProjectId) return;
-  const list = loadLinkedProjects();
-  const idx = list.findIndex(p => p.id === linkedProjectId);
-  if (idx < 0) return;
-  list[idx].name = state.project || list[idx].name || '';
-  list[idx].zeichnung2d = {
+/** Die aktuelle Zeichnung als Datensatz, so wie sie im Projekt landet. */
+function aktuelleZeichnungsDaten() {
+  return {
     depth: state.depth, sections: state.sections,
     abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
     aufmass: aufmassRules(), ecken: state.ecken || {},
     grundriss: state.grundriss || null, bordbretter: state.bordbretter || [],
     _sId, _bId
   };
+}
+
+/** Schreibt die aktuelle Zeichnung in das verknüpfte Projekt (ohne Verzögerung). */
+function writeToLinkedProject() {
+  if (!linkedProjectId) return;
+  const list = loadLinkedProjects();
+  const idx = list.findIndex(p => p.id === linkedProjectId);
+  // Das Projekt ist zwischenzeitlich gelöscht worden – dann gibt es nichts
+  // mehr zu beschreiben (und erst recht nichts wieder anzulegen).
+  if (idx < 0) { linkedProjectId = null; return; }
+  list[idx].name = state.project || list[idx].name || '';
+  list[idx].zeichnung2d = aktuelleZeichnungsDaten();
   list[idx].geaendert = new Date().toISOString().slice(0, 10);
-  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+  if (schreibeLinkedProjects(list)) dokumentBasis = serializeUndoState();
+}
+
+/** Stehen Änderungen an, die noch nicht im Projekt stehen? */
+function hatUngespeicherteAenderungen() {
+  if (!linkedProjectId || dokumentBasis === null) return false;
+  return serializeUndoState() !== dokumentBasis;
 }
 
 /** Schreibt die aktuelle Zeichnung (gebündelt) in das verknüpfte Projekt. */
@@ -820,6 +871,62 @@ function deleteProjectPhoto(id) {
     tx.oncomplete = () => resolve();
     tx.onerror    = () => reject(tx.error);
   }));
+}
+
+/** Entfernt alle Fotos eines Projekts – gehört zum Löschen der Zeichnung,
+ *  sonst bleiben die Bilder als verwaiste Datensätze in IndexedDB liegen. */
+function entferneFotosZuProjekt(projectId) {
+  if (!projectId || typeof indexedDB === 'undefined') return Promise.resolve(0);
+  return openPhotosDB().then(db => new Promise(resolve => {
+    const tx    = db.transaction(PHOTOS_STORE, 'readwrite');
+    const store = tx.objectStore(PHOTOS_STORE);
+    let n = 0;
+    const req = store.index('projectId').openKeyCursor(IDBKeyRange.only(projectId));
+    req.onsuccess = () => {
+      const c = req.result;
+      if (!c) return;
+      store.delete(c.primaryKey); n++;
+      c.continue();
+    };
+    tx.oncomplete = () => resolve(n);
+    tx.onerror    = () => resolve(n);
+  })).catch(err => {
+    console.warn('[2D] Fotos konnten nicht gelöscht werden:', err);
+    return 0;
+  });
+}
+
+/**
+ * Einmaliger Aufräumlauf: Fotos, deren Projekt es nicht mehr gibt. Nötig für
+ * den Fall, dass die Seite zwischen „gelöscht" und dem Ablauf der
+ * Rückgängig-Frist neu geladen wird.
+ * Bewusst vorsichtig: Lässt sich die Projektliste nicht sicher lesen, wird
+ * nichts gelöscht – lieber ein Foto zu viel als eines zu wenig.
+ */
+function raeumeVerwaisteFotosAuf() {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(0);
+  let raw = null;
+  try { raw = localStorage.getItem(PROJECTS_STORAGE_KEY); } catch (_) { return Promise.resolve(0); }
+  if (raw === null) return Promise.resolve(0);
+  let liste;
+  try { liste = JSON.parse(raw); } catch (_) { return Promise.resolve(0); }
+  if (!Array.isArray(liste)) return Promise.resolve(0);
+
+  const bekannt = new Set(liste.map(p => p && p.id).filter(Boolean));
+  return openPhotosDB().then(db => new Promise(resolve => {
+    const tx    = db.transaction(PHOTOS_STORE, 'readwrite');
+    const store = tx.objectStore(PHOTOS_STORE);
+    let n = 0;
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const c = req.result;
+      if (!c) return;
+      if (!bekannt.has(c.value && c.value.projectId)) { store.delete(c.primaryKey); n++; }
+      c.continue();
+    };
+    tx.oncomplete = () => resolve(n);
+    tx.onerror    = () => resolve(n);
+  })).catch(() => 0);
 }
 
 function setPhotoIncluded(id, included) {
@@ -10022,6 +10129,46 @@ function init() {
     renderProjektListe();
   });
 
+  // ── Zeichnungen anlegen und löschen ─────────────────────────────────────
+  // „Neue Zeichnung" steht an drei Stellen: als Primärknopf über der Liste,
+  // im Leerzustand und im Datei-Menü des Editors. Alle drei führen auf
+  // denselben Einstieg – und keiner davon wird je gesperrt.
+  document.getElementById('tdNeuBtn')?.addEventListener('click', neueZeichnungStarten);
+  document.getElementById('tdEmptyNeuBtn')?.addEventListener('click', neueZeichnungStarten);
+
+  document.getElementById('tdAuswahlBtn')?.addEventListener('click', () => {
+    setzeAuswahlModus(!tdAuswahlModus);
+  });
+  document.getElementById('tdBulkAlle')?.addEventListener('click', waehleAlleSichtbaren);
+  document.getElementById('tdBulkLoeschen')?.addEventListener('click', () => {
+    if (!tdAuswahl.size) return;
+    frageZeichnungenLoeschen(Array.from(tdAuswahl));
+  });
+
+  // Datei-Menü im Editor – derselbe Einstieg ohne Umweg über die Liste.
+  document.getElementById('tdFileMenuBtn')?.addEventListener('click', ev => {
+    openFloatingMenu(ev.currentTarget, [
+      { label: 'Neue Zeichnung…',      onClick: neueZeichnungStarten },
+      { label: 'Zeichnung öffnen…',    onClick: () => Shell.gehe('#/2d/projekte') },
+      '---',
+      { label: 'Als Datei speichern',  onClick: savePlan },
+      { label: 'Aus Datei laden',      onClick: triggerLoad }
+    ]);
+  });
+
+  verknuepfeZeichnungsDialoge();
+
+  // Das Aufmaß-Modul verwaltet dieselben Projekte. Ändert es dort etwas,
+  // zeigt die Liste hier sonst einen veralteten Stand.
+  document.addEventListener(GERUEST_DATEN_EVENT, e => {
+    if (e.detail && e.detail.quelle === '2d') return;
+    if (window.location.hash === '#/2d/projekte') renderProjektListe();
+  });
+
+  // Fotos ohne Projekt (Seite wurde während der Rückgängig-Frist neu geladen)
+  // einmalig entfernen – nachrangig, deshalb erst nach dem Aufbau.
+  setTimeout(() => raeumeVerwaisteFotosAuf(), 1500);
+
   document.getElementById('savePlanBtn').addEventListener('click', savePlan);
   document.getElementById('loadPlanBtn').addEventListener('click', triggerLoad);
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
@@ -10158,18 +10305,123 @@ function syncBackLink() {
   backLink.textContent = linkedProjectId ? '← Aufmaß' : '← Start';
 }
 
-/** Setzt die Zeichnung auf „leer" zurück (Projektwechsel ohne Zeichnung). */
+/**
+ * Setzt ALLES zurück, was zum gerade geöffneten Dokument gehört.
+ *
+ * Das ist die Grundlage der Zustandsisolierung: Der Editor arbeitet auf
+ * modulweiten Variablen (state, Undo-Stapel, Zwischenablage, Auswahl, Kamera,
+ * laufende Zeichenmodi). Wer ein anderes Dokument öffnet, ohne sie zu leeren,
+ * schleppt Reste des alten mit – sichtbar etwa als Undo-Schritt, der Felder
+ * aus einer fremden Zeichnung zurückholt. Deshalb hängt hier alles an einer
+ * Stelle, statt an jeder Aufrufstelle einzeln zu stehen.
+ */
 function resetState2d() {
+  // Ausstehende, gebündelte Schreibvorgänge gehören zum alten Dokument.
+  if (autosave2dTimer)   { clearTimeout(autosave2dTimer);   autosave2dTimer = null; }
+  if (undoSnapshotTimer) { clearTimeout(undoSnapshotTimer); undoSnapshotTimer = null; }
+
   state = {
     project: '', depth: 0.73, abschnitte: [], hideUnassigned: false,
     aufmass: null, ecken: {}, grundriss: null, bordbretter: [], sections: []
   };
-  _sId = 0; _bId = 0;
+  _sId = 0; _bId = 0; _aId = 0; _bbId = 0;
   linkedProjectId = null;
+
+  // Auswahl und Mehrfachauswahl
   selectedSi = null; selectedBi = null;
   bulkMode = false; bulkSelected.clear();
+  bulkHL = null; bulkHR = null; bulkKonsMeter = null;
+
+  // Zwischenablage und Undo-/Redo-History
+  copiedBayData = null;
+  undoStack = []; redoStack = []; lastUndoSnapshot = null;
+
+  // Laufende Gesten und Zeichenhilfen
+  drag = null; movePreview = null;
+  addCtx = null; addCtxDirFixed = false; pendingLen = null; pendingDir = 'S';
+  canvasGesture = null; canvasJustMoved = false;
+  grundrissMessen = false; grundrissMessPunkt = null;
+  bordbrettModus = false; bordbrettPunkte = [];
+
+  // Ansicht: neues Dokument beginnt wieder eingepasst
+  camera = { cx: 200, cy: 150, scale: 1 };
+  autoFit = true;
+
+  dokumentBasis = null;
+
   invalidateEckenCache();
   invalidateViewCaches();
+}
+
+/** Schließt alles, was über der Zeichenfläche liegen kann (Sheets, Menüs,
+ *  aktive Zeichenmodi mit ihren Event-Listenern). */
+function schliesseOffeneOberflaechen() {
+  closeSheet();
+  closePhotosSheet();
+  closeFloatingMenu();
+  if (bordbrettModus)  brichBordbrettZeichnenAb();
+  if (grundrissMessen) brichGrundrissMessungAb();
+}
+
+/** Überträgt den frisch geladenen Zustand in die Bedienelemente. */
+function uebernehmeDokumentInOberflaeche() {
+  const nameEl  = document.getElementById('projectName');
+  const depthEl = document.getElementById('scaffDepth');
+  if (nameEl)  nameEl.value  = state.project;
+  if (depthEl) depthEl.value = state.depth;
+  // Frisch geladen = gespeicherter Stand; ab hier zählt jede Abweichung.
+  dokumentBasis    = serializeUndoState();
+  lastUndoSnapshot = dokumentBasis;
+  updateUndoRedoButtons();
+  updateBordbrettBar();
+}
+
+/** Zeichenfläche neu vermessen und darstellen (nach jedem Sichtbarwerden). */
+function aktualisiereZeichenflaeche() {
+  zeigeZeichnung();
+  syncBackLink();
+  _vpCache = null;                 // war ausgeblendet → gemessene Größen veraltet
+  if (autoFit) fitCameraToContent();
+  applyCamera();
+  renderAllNow();
+}
+
+/**
+ * Öffnet ein Dokument im Editor – vollständig vom vorherigen getrennt.
+ * @param {string|null} id Projekt-ID, oder null für die freie Zeichnung.
+ */
+function oeffneZeichnung(id) {
+  schliesseOffeneOberflaechen();
+  flushAutosave2d();               // was noch offen ist, gehört ins alte Dokument
+  resetState2d();                  // ab hier bleibt nichts vom alten übrig
+
+  if (id) localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, id);
+  else    localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+
+  loadFromLinkedProject();
+  normalizeState();
+  uebernehmeDokumentInOberflaeche();
+
+  Shell.gehe('#/2d');
+  aktualisiereZeichenflaeche();
+}
+
+/** Schließt den Editor, ohne ein anderes Dokument zu öffnen – etwa wenn die
+ *  geöffnete Zeichnung gelöscht wurde. */
+function schliesseZeichnung() {
+  schliesseOffeneOberflaechen();
+  resetState2d();                  // löscht auch den ausstehenden Autosave
+  localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+  uebernehmeDokumentInOberflaeche();
+  renderAllNow();
+  Shell.gehe('#/2d/projekte');
+}
+
+/** Wird gerufen, wenn Zeichnungen verschwinden (auch aus dem Aufmaß-Modul
+ *  heraus): Ist eine davon gerade offen, schließt der Editor sauber. */
+function zeichnungenEntfallen(ids) {
+  if (!linkedProjectId || !Array.isArray(ids) || ids.indexOf(linkedProjectId) < 0) return;
+  schliesseZeichnung();
 }
 
 // ============================================================================
@@ -10185,8 +10437,10 @@ function resetState2d() {
 // gemeinsamen Speicher (siehe core.js) – das Modul greift dafür nicht in das
 // Aufmaß-Modul hinein.
 
-let tdSuche    = '';
-let tdOrdnerId = '';          // '' = alle, '__ohne__' = ohne Ordner, sonst Ordner-ID
+let tdSuche       = '';
+let tdOrdnerId    = '';       // '' = alle, '__ohne__' = ohne Ordner, sonst Ordner-ID
+let tdAuswahlModus = false;   // Mehrfachauswahl zum Löschen
+const tdAuswahl    = new Set();
 
 function loadLinkedFolders() {
   try {
@@ -10271,16 +10525,63 @@ function tdRenderOrdnerLeiste() {
   const ohne = projekte.filter(p => !p.folderId).length;
   if (ohne || ordner.length) chip('__ohne__', 'Ohne Ordner', ohne);
   ordner.forEach(o => chip(o.id, o.name || 'Ordner', projekte.filter(p => p.folderId === o.id).length));
+
+  // Ordner anlegen. Bewusst eine eigene Klasse: die Chips oben sind Filter,
+  // dieser Knopf ist eine Aktion.
+  const neu = document.createElement('button');
+  neu.type = 'button';
+  neu.className = 'td-folder-neu';
+  neu.textContent = '+ Ordner';
+  neu.title = 'Neuen Ordner anlegen';
+  neu.addEventListener('click', ordnerAnlegen);
+  bar.appendChild(neu);
+
+  // Für den gerade gewählten Ordner: umbenennen/löschen.
+  if (tdOrdnerId && tdOrdnerId !== '__ohne__') {
+    const aktiv = ordner.find(o => o.id === tdOrdnerId);
+    if (aktiv) {
+      const verwalten = document.createElement('button');
+      verwalten.type = 'button';
+      verwalten.className = 'td-folder-verwalten';
+      verwalten.textContent = '✎';
+      verwalten.title = 'Ordner umbenennen oder löschen';
+      verwalten.setAttribute('aria-label', 'Ordner umbenennen oder löschen');
+      verwalten.addEventListener('click', () => openFloatingMenu(verwalten, [
+        { label: 'Ordner umbenennen…', onClick: () => ordnerUmbenennen(aktiv.id) },
+        '---',
+        { label: 'Ordner löschen', danger: true, onClick: () => ordnerLoeschen(aktiv.id) }
+      ]));
+      bar.appendChild(verwalten);
+    }
+  }
 }
 
 function tdProjektKarte(proj, ordner) {
-  const karte = document.createElement('button');
-  karte.type = 'button';
+  // Bewusst ein <div> mit Knopf-Rolle statt <button>: die Karte trägt selbst
+  // Bedienelemente (⋯-Menü, Auswahlfeld), und ein Knopf im Knopf ist weder
+  // gültiges HTML noch bedienbar.
+  const karte = document.createElement('div');
   karte.className = 'td-project-card';
+  karte.setAttribute('role', 'button');
+  karte.tabIndex = 0;
+  karte.dataset.id = proj.id;
   if (proj.id === linkedProjectId) karte.classList.add('aktuell');
+  if (tdAuswahlModus) {
+    karte.classList.add('auswahl');
+    if (tdAuswahl.has(proj.id)) karte.classList.add('gewaehlt');
+  }
 
   const kopf = document.createElement('div');
   kopf.className = 'td-project-kopf';
+
+  if (tdAuswahlModus) {
+    const haken = document.createElement('span');
+    haken.className = 'td-project-haken';
+    haken.textContent = tdAuswahl.has(proj.id) ? '✓' : '';
+    haken.setAttribute('aria-hidden', 'true');
+    kopf.appendChild(haken);
+  }
+
   const name = document.createElement('span');
   name.className = 'td-project-name';
   name.textContent = tdProjektName(proj);
@@ -10291,6 +10592,19 @@ function tdProjektKarte(proj, ordner) {
     marke.textContent = 'geöffnet';
     kopf.appendChild(marke);
   }
+
+  const menuBtn = document.createElement('button');
+  menuBtn.type = 'button';
+  menuBtn.className = 'td-project-menu-btn';
+  menuBtn.textContent = '⋯';
+  menuBtn.title = 'Aktionen';
+  menuBtn.setAttribute('aria-label', 'Aktionen für ' + tdProjektName(proj));
+  menuBtn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    oeffneZeichnungsMenu(proj, ev.currentTarget);
+  });
+  kopf.appendChild(menuBtn);
+
   karte.appendChild(kopf);
 
   const a = proj.anschrift || {};
@@ -10321,7 +10635,20 @@ function tdProjektKarte(proj, ordner) {
     : 'Noch nichts gezeichnet';
   karte.appendChild(fuss);
 
-  karte.addEventListener('click', () => oeffneProjektZumZeichnen(proj.id));
+  const aktiviere = () => {
+    if (tdAuswahlModus) { schalteAuswahl(proj.id); return; }
+    oeffneProjektZumZeichnen(proj.id);
+  };
+  karte.addEventListener('click', aktiviere);
+  karte.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); aktiviere(); }
+  });
+  // Rechtsklick (Desktop) öffnet dasselbe Menü wie der ⋯-Knopf.
+  karte.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const punkt = { right: ev.clientX + 120, bottom: ev.clientY, top: ev.clientY };
+    oeffneZeichnungsMenu(proj, { getBoundingClientRect: () => punkt });
+  });
   return karte;
 }
 
@@ -10333,12 +10660,18 @@ function renderProjektListe() {
   const projekte = loadLinkedProjects();
   const ordner   = loadLinkedFolders();
 
+  // Auswahl aufräumen: gelöschte Einträge dürfen nicht ausgewählt bleiben.
+  const vorhanden = new Set(projekte.map(p => p.id));
+  Array.from(tdAuswahl).forEach(id => { if (!vorhanden.has(id)) tdAuswahl.delete(id); });
+
   tdRenderOrdnerLeiste();
   grid.innerHTML = '';
 
   if (!projekte.length) {
     leer?.classList.remove('hidden');
     keineTr?.classList.add('hidden');
+    setzeAuswahlModus(false, true);
+    aktualisiereAuswahlLeiste();
     return;
   }
   leer?.classList.add('hidden');
@@ -10346,13 +10679,528 @@ function renderProjektListe() {
   const liste = tdGefilterteProjekte();
   keineTr?.classList.toggle('hidden', liste.length > 0);
   liste.forEach(p => grid.appendChild(tdProjektKarte(p, ordner)));
+  aktualisiereAuswahlLeiste();
 }
 
 /** Projekt auswählen und dessen Zeichnung öffnen. */
 function oeffneProjektZumZeichnen(id) {
-  flushAutosave2d();
-  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, id);
-  Shell.gehe('#/2d');
+  if (id === linkedProjectId) { Shell.gehe('#/2d'); return; }
+  mitGesichertenAenderungen(() => oeffneZeichnung(id));
+}
+
+// ── Mehrfachauswahl ────────────────────────────────────────────────────────
+
+function setzeAuswahlModus(an, ohneRender) {
+  if (tdAuswahlModus === !!an) return;
+  tdAuswahlModus = !!an;
+  if (!tdAuswahlModus) tdAuswahl.clear();
+  const btn = document.getElementById('tdAuswahlBtn');
+  if (btn) {
+    btn.classList.toggle('aktiv', tdAuswahlModus);
+    btn.textContent = tdAuswahlModus ? 'Fertig' : 'Auswählen';
+    btn.setAttribute('aria-pressed', tdAuswahlModus ? 'true' : 'false');
+  }
+  if (!ohneRender) renderProjektListe();
+}
+
+function schalteAuswahl(id) {
+  if (tdAuswahl.has(id)) tdAuswahl.delete(id); else tdAuswahl.add(id);
+  renderProjektListe();
+}
+
+function aktualisiereAuswahlLeiste() {
+  const bar = document.getElementById('tdBulkBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !tdAuswahlModus);
+  const info = document.getElementById('tdBulkInfo');
+  const n = tdAuswahl.size;
+  if (info) info.textContent = n === 1 ? '1 Zeichnung ausgewählt' : `${n} Zeichnungen ausgewählt`;
+  const del = document.getElementById('tdBulkLoeschen');
+  if (del) del.disabled = n === 0;
+}
+
+function waehleAlleSichtbaren() {
+  const sichtbar = tdGefilterteProjekte();
+  const alleSchon = sichtbar.length > 0 && sichtbar.every(p => tdAuswahl.has(p.id));
+  sichtbar.forEach(p => { if (alleSchon) tdAuswahl.delete(p.id); else tdAuswahl.add(p.id); });
+  renderProjektListe();
+}
+
+// ── Aktionsmenü einer Zeichnung ────────────────────────────────────────────
+
+function oeffneZeichnungsMenu(proj, anchor) {
+  openFloatingMenu(anchor, [
+    { label: 'Öffnen',                  onClick: () => oeffneProjektZumZeichnen(proj.id) },
+    { label: 'Umbenennen…',             onClick: () => benenneZeichnungUm(proj) },
+    { label: 'Duplizieren',             onClick: () => dupliziereZeichnung(proj) },
+    { label: 'In Ordner verschieben…',  onClick: () => oeffneVerschiebenMenu(proj, anchor) },
+    { label: 'Mehrere auswählen',       onClick: () => {
+        setzeAuswahlModus(true, true);
+        tdAuswahl.add(proj.id);
+        renderProjektListe();
+      } },
+    '---',
+    { label: 'Löschen', danger: true, onClick: () => frageZeichnungenLoeschen([proj.id]) }
+  ]);
+}
+
+function oeffneVerschiebenMenu(proj, anchor) {
+  const ordner = loadLinkedFolders();
+  const items = [{
+    label: (!proj.folderId ? '✓ ' : '') + 'Ohne Ordner',
+    active: !proj.folderId,
+    onClick: () => verschiebeZeichnung(proj.id, null)
+  }];
+  ordner.forEach(o => items.push({
+    label: (proj.folderId === o.id ? '✓ ' : '') + (o.name || 'Ordner'),
+    active: proj.folderId === o.id,
+    onClick: () => verschiebeZeichnung(proj.id, o.id)
+  }));
+  items.push('---');
+  items.push({ label: '+ Neuer Ordner…', onClick: () => {
+    const neu = ordnerAnlegen();
+    if (neu) verschiebeZeichnung(proj.id, neu.id);
+  } });
+  openFloatingMenu(anchor, items);
+}
+
+// ============================================================================
+//  Zeichnungen anlegen, löschen, umbenennen, duplizieren, verschieben
+// ============================================================================
+// Bis hierher war die Liste eine Einbahnstraße: lesen ja, schreiben nein. Die
+// folgenden Funktionen arbeiten auf demselben Speicher und in demselben
+// Format wie das Aufmaß-Modul – ein Projektdatensatz, in dem die Zeichnung
+// unter `zeichnung2d` steckt. Damit bleibt jeder vorhandene Datensatz gültig,
+// eine Migration ist nicht nötig.
+
+function tdGenId(prefix) {
+  return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+}
+
+/** Eine leere, aber vollständige Zeichnung. */
+function leereZeichnung() {
+  return {
+    depth: 0.73, sections: [], abschnitte: [], hideUnassigned: false,
+    aufmass: null, ecken: {}, grundriss: null, bordbretter: [], _sId: 0, _bId: 0
+  };
+}
+
+/** Namensvorschlag: „Neue Zeichnung N", fortlaufend über den Bestand. */
+function tdVorschlagName() {
+  let max = 0;
+  loadLinkedProjects().forEach(p => {
+    const m = /^\s*Neue Zeichnung(?:\s+(\d+))?\s*$/i.exec(p.name || '');
+    if (m) max = Math.max(max, m[1] ? parseInt(m[1], 10) : 1);
+  });
+  return 'Neue Zeichnung ' + (max + 1);
+}
+
+/** Vorbelegter Zielordner: der gerade gefilterte, sonst der der offenen Zeichnung. */
+function tdVorgabeOrdner() {
+  if (tdOrdnerId && tdOrdnerId !== '__ohne__') return tdOrdnerId;
+  const offen = loadLinkedProjects().find(p => p.id === linkedProjectId);
+  return (offen && offen.folderId) || null;
+}
+
+/** Legt den Projektdatensatz an (Format wie im Aufmaß-Modul). */
+function erzeugeZeichnung(name, folderId) {
+  const heute = new Date().toISOString().slice(0, 10);
+  const proj = {
+    id: tdGenId('proj'),
+    name: (name || '').trim(),
+    status: 'in_bearbeitung',
+    folderId: folderId || null,
+    erstellt: heute,
+    geaendert: heute,
+    anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
+    geruesttyp: 'fassade',
+    geruesttypName: '',
+    seiten: [],
+    technik: { lastklasse: '3', breitenklasse: 'W06' },
+    logistik: {},
+    zusatzpositionen: [],
+    notizen: '',
+    zeichnung2d: leereZeichnung()
+  };
+  const liste = loadLinkedProjects();
+  liste.push(proj);
+  return schreibeLinkedProjects(liste) ? proj : null;
+}
+
+/** Anlegen + sofort öffnen. */
+function legeZeichnungAn(name, folderId) {
+  const proj = erzeugeZeichnung(name, folderId);
+  if (!proj) return;
+  setzeAuswahlModus(false, true);
+  tdOrdnerId = folderId || '';        // die neue Zeichnung ist auch sichtbar
+  renderProjektListe();
+  oeffneZeichnung(proj.id);
+  showToast('Neue Zeichnung angelegt');
+}
+
+/** Entfernt Zeichnungen aus dem Speicher. @returns die entfernten Datensätze. */
+function loescheZeichnungen(ids) {
+  const liste   = loadLinkedProjects();
+  const entfernt = liste.filter(p => ids.indexOf(p.id) >= 0);
+  if (!entfernt.length) return [];
+  if (!schreibeLinkedProjects(liste.filter(p => ids.indexOf(p.id) < 0))) return [];
+
+  // Der Zeiger auf „zuletzt geöffnet" darf nicht auf einen gelöschten
+  // Datensatz zeigen – sonst sucht der nächste Start ein Projekt, das es
+  // nicht mehr gibt.
+  const aktuell = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
+  if (aktuell && ids.indexOf(aktuell) >= 0) localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+
+  zeichnungenEntfallen(ids);
+  return entfernt;
+}
+
+/** „Rückgängig" nach dem Löschen. */
+function stelleZeichnungenWiederHer(records) {
+  if (!records || !records.length) return;
+  const liste   = loadLinkedProjects();
+  const bekannt = new Set(liste.map(p => p.id));
+  records.forEach(r => { if (!bekannt.has(r.id)) liste.push(r); });
+  schreibeLinkedProjects(liste);
+}
+
+/** Löschen mit Sicherheitsabfrage, Toast und Rückgängig-Frist. */
+function frageZeichnungenLoeschen(ids) {
+  const ziel = loadLinkedProjects().filter(p => ids.indexOf(p.id) >= 0);
+  if (!ziel.length) return;
+
+  zeigeLoeschDialog(ziel, () => {
+    const entfernt = loescheZeichnungen(ziel.map(p => p.id));
+    if (!entfernt.length) return;
+    setzeAuswahlModus(false, true);
+    renderProjektListe();
+
+    showToast(
+      entfernt.length === 1 ? `„${tdProjektName(entfernt[0])}" gelöscht`
+                            : `${entfernt.length} Zeichnungen gelöscht`,
+      {
+        label: 'Rückgängig',
+        dauer: 7000,
+        onClick: () => {
+          stelleZeichnungenWiederHer(entfernt);
+          renderProjektListe();
+          showToast(entfernt.length === 1 ? 'Wiederhergestellt'
+                                          : `${entfernt.length} Zeichnungen wiederhergestellt`);
+        },
+        // Frist verstrichen → jetzt fallen auch die Fotos der Projekte weg.
+        // Vorher nicht: sonst käme die Zeichnung ohne ihre Bilder zurück.
+        onAblauf: () => entfernt.forEach(pr => entferneFotosZuProjekt(pr.id))
+      }
+    );
+  });
+}
+
+function benenneZeichnungUm(proj) {
+  const name = prompt('Zeichnung umbenennen:', tdProjektName(proj));
+  if (name === null) return;
+  const liste = loadLinkedProjects();
+  const rec   = liste.find(p => p.id === proj.id);
+  if (!rec) return;
+  rec.name      = name.trim();
+  rec.geaendert = new Date().toISOString().slice(0, 10);
+  if (!schreibeLinkedProjects(liste)) return;
+  // Ist die Zeichnung gerade offen, trägt der Editor den alten Namen.
+  if (rec.id === linkedProjectId) {
+    state.project = rec.name;
+    const el = document.getElementById('projectName');
+    if (el) el.value = rec.name;
+  }
+  renderProjektListe();
+  showToast('Umbenannt');
+}
+
+function dupliziereZeichnung(proj) {
+  // Der offene Editor kann neuere Daten halten als der Speicher.
+  if (proj.id === linkedProjectId) flushAutosave2d();
+  const liste = loadLinkedProjects();
+  const rec   = liste.find(p => p.id === proj.id);
+  if (!rec) return;
+  const heute = new Date().toISOString().slice(0, 10);
+  const kopie = JSON.parse(JSON.stringify(rec));
+  kopie.id        = tdGenId('proj');
+  kopie.name      = (tdProjektName(rec) + ' (Kopie)').trim();
+  kopie.erstellt  = heute;
+  kopie.geaendert = heute;
+  liste.push(kopie);
+  if (!schreibeLinkedProjects(liste)) return;
+  renderProjektListe();
+  // Fotos hängen am Projekt, nicht an der Zeichnung – sie bleiben beim Original.
+  showToast('Zeichnung dupliziert');
+}
+
+function verschiebeZeichnung(id, folderId) {
+  const liste = loadLinkedProjects();
+  const rec   = liste.find(p => p.id === id);
+  if (!rec) return;
+  rec.folderId = folderId || null;
+  if (!schreibeLinkedProjects(liste)) return;
+  renderProjektListe();
+  showToast(folderId ? 'In Ordner verschoben' : 'Aus dem Ordner genommen');
+}
+
+// ── Ordner ────────────────────────────────────────────────────────────────
+
+function ordnerAnlegen() {
+  const name = prompt('Name des neuen Ordners (z. B. 2026, Firma Müller):');
+  if (name === null || !name.trim()) return null;
+  const ordner = { id: tdGenId('folder'), name: name.trim() };
+  const liste = loadLinkedFolders();
+  liste.push(ordner);
+  if (!schreibeLinkedFolders(liste)) return null;
+  renderProjektListe();
+  showToast('Ordner angelegt');
+  return ordner;
+}
+
+function ordnerUmbenennen(id) {
+  const liste = loadLinkedFolders();
+  const rec   = liste.find(o => o.id === id);
+  if (!rec) return;
+  const name = prompt('Ordner umbenennen:', rec.name || '');
+  if (name === null || !name.trim()) return;
+  rec.name = name.trim();
+  if (!schreibeLinkedFolders(liste)) return;
+  renderProjektListe();
+}
+
+/** Löscht den Ordner, nicht seinen Inhalt: die Zeichnungen darin wandern
+ *  nach „Ohne Ordner". */
+function ordnerLoeschen(id) {
+  const ordner = loadLinkedFolders().find(o => o.id === id);
+  if (!ordner) return;
+  const projekte = loadLinkedProjects();
+  const betroffen = projekte.filter(p => p.folderId === id).length;
+  const frage = betroffen
+    ? `Ordner „${ordner.name}" löschen? ${betroffen} Zeichnung${betroffen === 1 ? '' : 'en'} darin ` +
+      'bleibt erhalten und liegt danach unter „Ohne Ordner".'
+    : `Ordner „${ordner.name}" löschen?`;
+  if (!confirm(frage)) return;
+
+  projekte.forEach(p => { if (p.folderId === id) p.folderId = null; });
+  if (betroffen && !schreibeLinkedProjects(projekte)) return;
+  if (!schreibeLinkedFolders(loadLinkedFolders().filter(o => o.id !== id))) return;
+  if (tdOrdnerId === id) tdOrdnerId = '';
+  renderProjektListe();
+  showToast('Ordner gelöscht');
+}
+
+// ============================================================================
+//  Dialoge der Zeichnungsverwaltung
+// ============================================================================
+// Bewusst eigene Dialoge statt prompt()/confirm() für die beiden Wege, die
+// hier täglich gegangen werden: Anlegen braucht zwei Angaben (Name + Ordner),
+// Löschen muss den Namen zeigen. Beide sind mit Handschuhen bedienbar
+// (44 px Ziele) und tragen die Optik der Suite.
+
+let tdNeuOffen      = false;
+let tdLoeschCb      = null;
+let tdSpeichernCb   = null;
+
+function tdOverlay(id, sichtbar) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden', !sichtbar);
+  return el;
+}
+
+// ── Neue Zeichnung ────────────────────────────────────────────────────────
+
+/** Einstieg „Neue Zeichnung" – aus der Liste wie aus dem Editor. Erst die
+ *  ungespeicherten Änderungen klären, dann fragen, was angelegt werden soll. */
+function neueZeichnungStarten() {
+  mitGesichertenAenderungen(oeffneNeueZeichnungDialog);
+}
+
+function oeffneNeueZeichnungDialog() {
+  const overlay  = document.getElementById('tdNeuOverlay');
+  const nameEl   = document.getElementById('tdNeuName');
+  const ordnerEl = document.getElementById('tdNeuOrdner');
+  const vorgabe  = tdVorgabeOrdner();
+
+  // Rückfallebene, falls die Oberfläche fehlt: anlegen muss trotzdem gehen.
+  if (!overlay || !nameEl || !ordnerEl) {
+    const n = prompt('Name der neuen Zeichnung:', tdVorschlagName());
+    if (n === null) return;
+    legeZeichnungAn(n || tdVorschlagName(), vorgabe);
+    return;
+  }
+
+  nameEl.value = tdVorschlagName();
+  ordnerEl.innerHTML = '';
+  const ohne = document.createElement('option');
+  ohne.value = '';
+  ohne.textContent = 'Ohne Ordner';
+  ordnerEl.appendChild(ohne);
+  loadLinkedFolders().forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.name || 'Ordner';
+    ordnerEl.appendChild(opt);
+  });
+  ordnerEl.value = vorgabe && loadLinkedFolders().some(o => o.id === vorgabe) ? vorgabe : '';
+
+  tdNeuOffen = true;
+  tdOverlay('tdNeuOverlay', true);
+  setTimeout(() => { nameEl.focus(); nameEl.select(); }, 40);
+}
+
+function schliesseNeueZeichnungDialog() {
+  tdNeuOffen = false;
+  tdOverlay('tdNeuOverlay', false);
+}
+
+function bestaetigeNeueZeichnung() {
+  if (!tdNeuOffen) return;
+  const nameEl   = document.getElementById('tdNeuName');
+  const ordnerEl = document.getElementById('tdNeuOrdner');
+  const name   = (nameEl && nameEl.value.trim()) || tdVorschlagName();
+  const ordner = (ordnerEl && ordnerEl.value) || null;
+  schliesseNeueZeichnungDialog();
+  legeZeichnungAn(name, ordner);
+}
+
+// ── Löschen bestätigen ────────────────────────────────────────────────────
+
+function zeigeLoeschDialog(ziel, onJa) {
+  const overlay = document.getElementById('tdLoeschOverlay');
+  const namen   = ziel.map(tdProjektName);
+
+  if (!overlay) {
+    const frage = ziel.length === 1
+      ? `Zeichnung „${namen[0]}" wirklich löschen?`
+      : `${ziel.length} Zeichnungen wirklich löschen?\n\n` + namen.join('\n');
+    if (confirm(frage)) onJa();
+    return;
+  }
+
+  const titel = document.getElementById('tdLoeschTitel');
+  const text  = document.getElementById('tdLoeschText');
+  const liste = document.getElementById('tdLoeschListe');
+  if (titel) titel.textContent = ziel.length === 1 ? 'Zeichnung löschen?' : 'Zeichnungen löschen?';
+  if (text) {
+    text.textContent = ziel.length === 1
+      ? `„${namen[0]}" wird mit allen gezeichneten Feldern und den Projektfotos entfernt.`
+      : `${ziel.length} Zeichnungen werden mit allen gezeichneten Feldern und den Projektfotos entfernt.`;
+  }
+  if (liste) {
+    liste.innerHTML = '';
+    namen.slice(0, 8).forEach(n => {
+      const li = document.createElement('li');
+      li.textContent = n;
+      liste.appendChild(li);
+    });
+    if (namen.length > 8) {
+      const li = document.createElement('li');
+      li.className = 'mehr';
+      li.textContent = `… und ${namen.length - 8} weitere`;
+      liste.appendChild(li);
+    }
+    liste.classList.toggle('hidden', ziel.length < 2);
+  }
+
+  tdLoeschCb = onJa;
+  tdOverlay('tdLoeschOverlay', true);
+  setTimeout(() => document.getElementById('tdLoeschBestaetigen')?.focus(), 40);
+}
+
+function schliesseLoeschDialog() {
+  tdLoeschCb = null;
+  tdOverlay('tdLoeschOverlay', false);
+}
+
+// ── Ungespeicherte Änderungen ─────────────────────────────────────────────
+
+/**
+ * Führt `weiter` aus – vorher aber, falls die offene Zeichnung noch
+ * ungeschriebene Änderungen hat, den Dialog Speichern / Verwerfen / Abbrechen.
+ */
+function mitGesichertenAenderungen(weiter) {
+  if (!hatUngespeicherteAenderungen()) { weiter(); return; }
+
+  const overlay = document.getElementById('tdSpeichernOverlay');
+  if (!overlay) {                       // Rückfallebene: im Zweifel sichern
+    flushAutosave2d();
+    weiter();
+    return;
+  }
+
+  const text = document.getElementById('tdSpeichernText');
+  if (text) {
+    const name = state.project || 'Die geöffnete Zeichnung';
+    text.textContent = `„${name}" hat Änderungen, die noch nicht gesichert sind.`;
+  }
+  tdSpeichernCb = weiter;
+  tdOverlay('tdSpeichernOverlay', true);
+  setTimeout(() => document.getElementById('tdSpeichernSichern')?.focus(), 40);
+}
+
+function schliesseSpeichernDialog() {
+  tdSpeichernCb = null;
+  tdOverlay('tdSpeichernOverlay', false);
+}
+
+function speichernDialogAntwort(art) {
+  const weiter = tdSpeichernCb;
+  schliesseSpeichernDialog();
+  if (art === 'abbrechen' || !weiter) return;
+  if (art === 'speichern') {
+    flushAutosave2d();
+  } else {
+    verwerfeAenderungen();
+  }
+  weiter();
+}
+
+/** Verwerfen: den ausstehenden Schreibvorgang fallen lassen und den zuletzt
+ *  gespeicherten Stand zurückholen. Ohne dieses Zurückladen stünden die
+ *  verworfenen Änderungen weiter im Arbeitsspeicher – und wären beim nächsten
+ *  Neuzeichnen doch geschrieben worden. */
+function verwerfeAenderungen() {
+  if (autosave2dTimer) { clearTimeout(autosave2dTimer); autosave2dTimer = null; }
+  if (!linkedProjectId) return;
+  resetState2d();                  // liest den Zeiger nicht – der bleibt stehen
+  loadFromLinkedProject();
+  normalizeState();
+  uebernehmeDokumentInOberflaeche();
+  renderAllNow();
+}
+
+/** Verknüpft die Dialoge einmalig (aus init()). */
+function verknuepfeZeichnungsDialoge() {
+  document.getElementById('tdNeuAbbrechen')?.addEventListener('click', schliesseNeueZeichnungDialog);
+  document.getElementById('tdNeuAnlegen')?.addEventListener('click', bestaetigeNeueZeichnung);
+  document.getElementById('tdNeuName')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); bestaetigeNeueZeichnung(); }
+  });
+  document.getElementById('tdNeuOverlay')?.addEventListener('click', e => {
+    if (e.target.id === 'tdNeuOverlay') schliesseNeueZeichnungDialog();
+  });
+
+  document.getElementById('tdLoeschAbbrechen')?.addEventListener('click', schliesseLoeschDialog);
+  document.getElementById('tdLoeschBestaetigen')?.addEventListener('click', () => {
+    const cb = tdLoeschCb;
+    schliesseLoeschDialog();
+    if (cb) cb();
+  });
+  document.getElementById('tdLoeschOverlay')?.addEventListener('click', e => {
+    if (e.target.id === 'tdLoeschOverlay') schliesseLoeschDialog();
+  });
+
+  document.getElementById('tdSpeichernAbbrechen')?.addEventListener('click', () => speichernDialogAntwort('abbrechen'));
+  document.getElementById('tdSpeichernVerwerfen')?.addEventListener('click', () => speichernDialogAntwort('verwerfen'));
+  document.getElementById('tdSpeichernSichern')?.addEventListener('click', () => speichernDialogAntwort('speichern'));
+
+  // Escape schließt den obersten offenen Dialog.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!document.getElementById('tdSpeichernOverlay')?.classList.contains('hidden')) { speichernDialogAntwort('abbrechen'); return; }
+    if (!document.getElementById('tdLoeschOverlay')?.classList.contains('hidden'))    { schliesseLoeschDialog(); return; }
+    if (tdNeuOffen) schliesseNeueZeichnungDialog();
+  });
 }
 
 // ── Bildschirmwechsel innerhalb des Moduls ─────────────────────────────────
@@ -10413,43 +11261,32 @@ const ZweiDModul = (() => {
       zeigeZeichnung();
 
       // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
-      // gehört zu diesem Projekt eine andere Zeichnung.
+      // gehört zu diesem Projekt eine andere Zeichnung. Der Wechsel läuft über
+      // dieselbe Funktion wie überall sonst – ein Dokument, ein Aufbau.
       const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) || null;
       if (id !== linkedProjectId) {
         flushAutosave2d();
         resetState2d();
         loadFromLinkedProject();
         normalizeState();
-        undoStack = [];
-        redoStack = [];
-        lastUndoSnapshot = serializeUndoState();
-        updateUndoRedoButtons();
-        document.getElementById('projectName').value = state.project;
-        document.getElementById('scaffDepth').value  = state.depth;
-        autoFit = true;
+        uebernehmeDokumentInOberflaeche();
       }
 
-      syncBackLink();
-      // Die Zeichenfläche war ausgeblendet – gemessene Größen sind veraltet.
-      _vpCache = null;
-      if (autoFit) fitCameraToContent();
-      applyCamera();
-      renderAllNow();
+      aktualisiereZeichenflaeche();
     },
 
     deaktiviere() {
       if (!gemountet) return;
       flushAutosave2d();
-      // Offene Sheets/Overlays hängen am <body> und würden sonst über dem
-      // anderen Modul stehen bleiben.
-      closeSheet();
-      closePhotosSheet();
-      if (bordbrettModus) brichBordbrettZeichnenAb();
-      if (grundrissMessen) brichGrundrissMessungAb();
+      // Offene Sheets/Menüs/Overlays hängen am <body> und würden sonst über
+      // dem anderen Modul stehen bleiben.
+      schliesseOffeneOberflaechen();
     },
 
     hatUngespeicherte() {
-      return gemountet && autosave2dTimer !== null;
+      // Nicht am Timer messen: der läuft nach jedem Neuzeichnen an. Gemeint
+      // ist, ob der Speicher einen anderen Stand hat als der Bildschirm.
+      return gemountet && hatUngespeicherteAenderungen();
     }
   };
 })();
