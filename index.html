@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gerüst-Suite</title>
+  <meta name="robots" content="noindex" />
+
+  <!-- Kurzer Einstieg für die Baustelle: die Adresse ohne Pfad
+       (…github.io/aufmass-app) landet direkt in der Anwendung.
+       Route (#/2d), und Parameter (?resume=1) werden dabei
+       mitgenommen, damit geteilte Links weiterhin genau dort ankommen,
+       wo sie ankommen sollen. -->
+  <script>
+    (function () {
+      var ziel = 'aufmass_final_app/index.html'
+               + (window.location.search || '')
+               + (window.location.hash || '');
+      window.location.replace(ziel);
+    })();
+  </script>
+  <!-- Ohne JavaScript greift die Weiterleitung des Browsers. -->
+  <meta http-equiv="refresh" content="0; url=aufmass_final_app/index.html" />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: #0E1626;
+      color: #9FB3C8;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 15px;
+      text-align: center;
+      padding: 24px;
+    }
+    a { color: #4CC9F0; }
+  </style>
+</head>
+<body>
+  <p>
+    Gerüst-Suite wird geöffnet …<br />
+    <a href="aufmass_final_app/index.html">Hier entlang</a>, falls es nicht von selbst weitergeht.
+  </p>
+</body>
+</html>
