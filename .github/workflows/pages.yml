@@ -1,0 +1,67 @@
+# Veröffentlicht die Gerüst-Suite automatisch, sobald etwas auf main landet.
+#
+# Vorher musste der Auslieferungszweig von Hand nachgezogen werden – wurde das
+# vergessen, zeigte der Link monatelang eine alte Fassung, ohne dass irgendwo
+# etwas rot geworden wäre. Das erledigt jetzt dieser Ablauf.
+#
+# `configure-pages` mit `enablement: true` stellt die Seiten-Einstellung des
+# Repositorys selbst auf „GitHub Actions" um. Damit ist egal, was dort vorher
+# eingetragen war – die Auslieferung hängt nicht mehr an einer Einstellung, die
+# man im Zweifel nicht sieht.
+
+name: Seite veröffentlichen
+
+on:
+  push:
+    branches: [main]
+  # Erlaubt es, die Veröffentlichung im Reiter „Actions" von Hand anzustoßen.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Läuft nie doppelt: eine laufende Veröffentlichung wird zu Ende gebracht,
+# ein zwischenzeitlich angestoßener Lauf wartet.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  veroeffentlichen:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.auslieferung.outputs.page_url }}
+    steps:
+      - name: Stand holen
+        uses: actions/checkout@v4
+
+      - name: Seite zusammenstellen
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r aufmass_final_app _site/
+          # Ohne diese Datei schickt GitHub jede Seite durch Jekyll. Das würde
+          # die geschweiften Klammerpaare in den JSDoc-Kommentaren von
+          # viewer2d.js als Vorlagen-Platzhalter deuten und den Auslieferungs-
+          # code verändern. Die App ist reines HTML/CSS/JS und will unverändert
+          # ausgeliefert werden.
+          touch _site/.nojekyll
+          echo "Ausgeliefert werden:"
+          find _site -type f | sort
+
+      - name: Seiten-Einstellung setzen
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Dateien hochladen
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Veröffentlichen
+        id: auslieferung
+        uses: actions/deploy-pages@v4
