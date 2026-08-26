@@ -10013,6 +10013,15 @@ function init() {
     if (v > 0) { state.depth = v; requestRender(); }
   });
 
+  // Projektliste: Knopf in der Werkzeugleiste und Suchfeld
+  document.getElementById('tdProjectBtn')?.addEventListener('click', () => {
+    Shell.gehe('#/2d/projekte');
+  });
+  document.getElementById('tdProjectSearch')?.addEventListener('input', e => {
+    tdSuche = e.target.value;
+    renderProjektListe();
+  });
+
   document.getElementById('savePlanBtn').addEventListener('click', savePlan);
   document.getElementById('loadPlanBtn').addEventListener('click', triggerLoad);
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
@@ -10143,7 +10152,7 @@ function init() {
 // in genau dieses Projekt; sonst auf den Startbildschirm.
 
 function syncBackLink() {
-  const backLink = document.querySelector('#td-root .back-link');
+  const backLink = document.querySelector('#td-zeichnung .back-link');
   if (!backLink) return;
   backLink.setAttribute('href', linkedProjectId ? '#/aufmass' : '#/');
   backLink.textContent = linkedProjectId ? '← Aufmaß' : '← Start';
@@ -10161,6 +10170,205 @@ function resetState2d() {
   bulkMode = false; bulkSelected.clear();
   invalidateEckenCache();
   invalidateViewCaches();
+}
+
+// ============================================================================
+//  Projektliste des 2D-Moduls
+// ============================================================================
+// Gezeichnet wird immer für ein bestimmtes Projekt. Vorher übernahm der
+// Zeichner stillschweigend das zuletzt geöffnete – welches das war, stand
+// nirgends, und ein anderes ließ sich hier gar nicht auswählen.
+//
+// Diese Liste zeigt dieselben Projekte und dieselbe Ordnerstruktur wie das
+// Aufmaß-Modul, aber auf das Zeichnen zugeschnitten: an jeder Karte steht,
+// ob und wie viel schon gezeichnet ist. Die Daten kommen direkt aus dem
+// gemeinsamen Speicher (siehe core.js) – das Modul greift dafür nicht in das
+// Aufmaß-Modul hinein.
+
+let tdSuche    = '';
+let tdOrdnerId = '';          // '' = alle, '__ohne__' = ohne Ordner, sonst Ordner-ID
+
+function loadLinkedFolders() {
+  try {
+    const raw = localStorage.getItem(GK.ordner);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+/** Anzeigename eines Projekts – Name, sonst die Anschrift. */
+function tdProjektName(proj) {
+  const name = (proj.name || '').trim();
+  if (name) return name;
+  const a = proj.anschrift || {};
+  const zeile = [
+    [a.strasse, a.nummer].filter(Boolean).join(' '),
+    [a.plz, a.ort].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+  return zeile || 'Projekt ohne Namen';
+}
+
+/** Felder und Fläche der hinterlegten Zeichnung. */
+function tdZeichnungStats(proj) {
+  const z = proj.zeichnung2d;
+  if (!z || !Array.isArray(z.sections)) return { felder: 0, flaeche: 0 };
+  let felder = 0, flaeche = 0;
+  z.sections.forEach(sec => (sec.bays || []).forEach(bay => {
+    felder++;
+    const hoehen = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
+    if (hoehen.length && bay.len) flaeche += bay.len * Math.min(...hoehen);
+  }));
+  return { felder, flaeche: Math.round(flaeche * 100) / 100 };
+}
+
+function tdPasstZurSuche(proj, text) {
+  if (!text) return true;
+  const a = proj.anschrift || {};
+  return [proj.name, a.bauherr, a.strasse, a.nummer, a.plz, a.ort]
+    .filter(Boolean).join(' ').toLowerCase().includes(text.toLowerCase());
+}
+
+function tdGefilterteProjekte() {
+  const alle = loadLinkedProjects();
+  return alle
+    .filter(p => {
+      if (tdOrdnerId === '__ohne__') return !p.folderId;
+      if (tdOrdnerId) return p.folderId === tdOrdnerId;
+      return true;
+    })
+    .filter(p => tdPasstZurSuche(p, tdSuche))
+    .sort((x, y) => String(y.geaendert || '').localeCompare(String(x.geaendert || '')));
+}
+
+function tdRenderOrdnerLeiste() {
+  const bar = document.getElementById('tdFolderBar');
+  if (!bar) return;
+  const projekte = loadLinkedProjects();
+  const ordner   = loadLinkedFolders();
+  bar.innerHTML = '';
+
+  const chip = (id, beschriftung, anzahl) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'td-folder-chip' + (tdOrdnerId === id ? ' aktiv' : '');
+    const t = document.createElement('span');
+    t.textContent = beschriftung;
+    b.appendChild(t);
+    const z = document.createElement('span');
+    z.className = 'td-folder-chip-zahl';
+    z.textContent = String(anzahl);
+    b.appendChild(z);
+    b.addEventListener('click', () => {
+      tdOrdnerId = id;
+      renderProjektListe();
+    });
+    bar.appendChild(b);
+  };
+
+  chip('', 'Alle Projekte', projekte.length);
+  const ohne = projekte.filter(p => !p.folderId).length;
+  if (ohne || ordner.length) chip('__ohne__', 'Ohne Ordner', ohne);
+  ordner.forEach(o => chip(o.id, o.name || 'Ordner', projekte.filter(p => p.folderId === o.id).length));
+}
+
+function tdProjektKarte(proj, ordner) {
+  const karte = document.createElement('button');
+  karte.type = 'button';
+  karte.className = 'td-project-card';
+  if (proj.id === linkedProjectId) karte.classList.add('aktuell');
+
+  const kopf = document.createElement('div');
+  kopf.className = 'td-project-kopf';
+  const name = document.createElement('span');
+  name.className = 'td-project-name';
+  name.textContent = tdProjektName(proj);
+  kopf.appendChild(name);
+  if (proj.id === linkedProjectId) {
+    const marke = document.createElement('span');
+    marke.className = 'td-project-marke';
+    marke.textContent = 'geöffnet';
+    kopf.appendChild(marke);
+  }
+  karte.appendChild(kopf);
+
+  const a = proj.anschrift || {};
+  const anschrift = [
+    [a.strasse, a.nummer].filter(Boolean).join(' '),
+    [a.plz, a.ort].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+  if (anschrift && anschrift !== tdProjektName(proj)) {
+    const z = document.createElement('span');
+    z.className = 'td-project-zeile';
+    z.textContent = anschrift;
+    karte.appendChild(z);
+  }
+
+  const ord = proj.folderId ? ordner.find(o => o.id === proj.folderId) : null;
+  if (ord) {
+    const z = document.createElement('span');
+    z.className = 'td-project-ordner';
+    z.textContent = '📁 ' + (ord.name || 'Ordner');
+    karte.appendChild(z);
+  }
+
+  const stats = tdZeichnungStats(proj);
+  const fuss = document.createElement('span');
+  fuss.className = 'td-project-stats' + (stats.felder ? '' : ' leer');
+  fuss.textContent = stats.felder
+    ? `${stats.felder} Feld${stats.felder === 1 ? '' : 'er'} · ${geruestFmtNum(stats.flaeche)} m²`
+    : 'Noch nichts gezeichnet';
+  karte.appendChild(fuss);
+
+  karte.addEventListener('click', () => oeffneProjektZumZeichnen(proj.id));
+  return karte;
+}
+
+function renderProjektListe() {
+  const grid = document.getElementById('tdProjectGrid');
+  if (!grid) return;
+  const leer     = document.getElementById('tdProjectEmpty');
+  const keineTr  = document.getElementById('tdProjectNoHits');
+  const projekte = loadLinkedProjects();
+  const ordner   = loadLinkedFolders();
+
+  tdRenderOrdnerLeiste();
+  grid.innerHTML = '';
+
+  if (!projekte.length) {
+    leer?.classList.remove('hidden');
+    keineTr?.classList.add('hidden');
+    return;
+  }
+  leer?.classList.add('hidden');
+
+  const liste = tdGefilterteProjekte();
+  keineTr?.classList.toggle('hidden', liste.length > 0);
+  liste.forEach(p => grid.appendChild(tdProjektKarte(p, ordner)));
+}
+
+/** Projekt auswählen und dessen Zeichnung öffnen. */
+function oeffneProjektZumZeichnen(id) {
+  flushAutosave2d();
+  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, id);
+  Shell.gehe('#/2d');
+}
+
+// ── Bildschirmwechsel innerhalb des Moduls ─────────────────────────────────
+
+function zeigeProjektListe() {
+  document.getElementById('td-projekte')?.classList.remove('hidden');
+  document.getElementById('td-zeichnung')?.classList.add('hidden');
+  renderProjektListe();
+  const suche = document.getElementById('tdProjectSearch');
+  if (suche) suche.value = tdSuche;
+  window.scrollTo(0, 0);
+}
+
+function zeigeZeichnung() {
+  document.getElementById('td-projekte')?.classList.add('hidden');
+  document.getElementById('td-zeichnung')?.classList.remove('hidden');
 }
 
 // ============================================================================
@@ -10187,7 +10395,22 @@ const ZweiDModul = (() => {
     },
 
     aktiviere() {
-      if (!gemountet) { this.mount(); return; }
+      this.mount();
+
+      // Route entscheidet, welcher Bildschirm des Moduls zu sehen ist.
+      if (window.location.hash === '#/2d/projekte') { zeigeProjektListe(); return; }
+
+      // Ohne gewähltes Projekt gibt es nichts zu zeichnen – dann zuerst die
+      // Liste anbieten, statt wortlos eine leere Fläche zu zeigen. Gibt es
+      // überhaupt kein Projekt, bleibt es bei der freien Zeichnung.
+      const gewaehlt = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
+      const bekannt  = gewaehlt && loadLinkedProjects().some(p => p.id === gewaehlt);
+      if (!bekannt && loadLinkedProjects().length) {
+        Shell.gehe('#/2d/projekte');
+        return;
+      }
+
+      zeigeZeichnung();
 
       // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
       // gehört zu diesem Projekt eine andere Zeichnung.
