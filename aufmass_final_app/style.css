@@ -189,163 +189,13 @@ html, body {
 }
 
 /* ============================================================
-   Projektübersicht (Startseite): Suche/Filter, Ordner, Projektkarten
+   Schwebendes Aktionsmenü (Datei-/Ordner-Aktionen)
+   ------------------------------------------------------------
+   Wird von der gemeinsamen Dateiübersicht (dateien.js) und vom
+   Status-Menü der Projektakte genutzt. Die frühere Projekt-
+   übersicht mit Ordner-Chips und Projektkarten ist entfallen –
+   ihre Aufgabe übernimmt jetzt dateien.css.
    ============================================================ */
-.overview-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.overview-search { flex: 2; min-width: 200px; }
-.overview-select { flex: 1; min-width: 140px; }
-
-.folder-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.folder-chip {
-  padding: 8px 14px;
-  min-height: 40px;
-  border: 1.5px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-card);
-  color: var(--color-text-secondary);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.folder-chip.active {
-  border-color: var(--color-primary);
-  background: var(--accent-weich);
-  color: var(--color-primary);
-}
-.folder-chip-count {
-  font-size: 0.72rem;
-  font-weight: 700;
-  opacity: 0.65;
-}
-.folder-chip-add {
-  border-style: dashed;
-  color: var(--color-primary);
-}
-.folder-chip-manage {
-  padding: 8px 12px;
-  color: var(--color-text-secondary);
-}
-
-.project-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.project-card2 {
-  position: relative;
-  background: var(--color-card);
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.15s, transform 0.1s;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.project-card2:active {
-  transform: scale(0.99);
-  box-shadow: var(--shadow-md);
-}
-
-.project-card2-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.project-card2-badge {
-  padding: 3px 8px;
-  border-radius: 7px;
-  font-size: 0.62rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-.project-card2-badge.fassade { background: #dbeafe; color: #1d4ed8; }
-.project-card2-badge.dach    { background: #fce7f3; color: #be185d; }
-.project-card2-badge.sonder  { background: #d1fae5; color: #065f46; }
-
-.project-card2-status {
-  padding: 3px 8px;
-  border-radius: 7px;
-  font-size: 0.62rem;
-  font-weight: 700;
-}
-.project-card2-status.status-in_bearbeitung { background: #fff4e0; color: #a15c00; }
-.project-card2-status.status-abgeschlossen  { background: #e3f9e5; color: #1a7a2e; }
-.project-card2-status.status-archiviert     { background: #ececee; color: #6e6e73; }
-
-.project-card2-menu-btn {
-  margin-left: auto;
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 1.2rem;
-  font-weight: 700;
-  border-radius: 8px;
-  cursor: pointer;
-  line-height: 1;
-}
-.project-card2-menu-btn:active { background: var(--color-border); }
-
-.project-card2-name {
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.project-card2-line {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.project-card2-addr { font-weight: 500; color: var(--color-text); }
-.project-card2-vz {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-.project-card2-vz-tag {
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: var(--color-primary);
-  background: var(--accent-weich);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-.project-card2-stats {
-  margin-top: 6px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--color-primary);
-}
-.project-card2-dates {
-  margin-top: 4px;
-  font-size: 0.7rem;
-  color: var(--color-text-secondary);
-}
-
-/* Schwebendes Aktionsmenü (Projekt-/Ordner-Aktionen) */
 .floating-menu-overlay {
   position: fixed;
   inset: 0;
@@ -440,13 +290,6 @@ html, body {
   color: var(--color-text-secondary);
 }
 
-.empty-icon-box {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-  background: var(--color-border);
-  margin: 0 auto 16px;
-}
 
 .empty-state h2 {
   font-size: 1.15rem;
@@ -467,13 +310,6 @@ html, body {
   color: var(--color-text-secondary);
 }
 
-.empty-icon-box {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-  background: var(--color-border);
-  margin: 0 auto 16px;
-}
 
 .empty-state h2 {
   font-size: 1.15rem;

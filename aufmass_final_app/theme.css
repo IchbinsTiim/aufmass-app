@@ -152,8 +152,6 @@ body { background: var(--bg-deep); }
 #am-root input[type="number"],
 #am-root .seite-manual-input,
 #am-root .summary-table td,
-#am-root .project-card2-stats,
-#am-root .project-card2-dates,
 #am-root .ks-input,
 #am-root .accessory-length-input,
 #am-root .meas-extra-input {
@@ -166,7 +164,6 @@ body { background: var(--bg-deep); }
 
 #am-root .type-btn,
 #am-root .chip-btn,
-#am-root .folder-chip,
 #am-root .logistik-toggle-btn {
   min-height: var(--touch);
   border: 1px solid var(--hairline);
@@ -177,11 +174,9 @@ body { background: var(--bg-deep); }
               border-color var(--t-kurz) var(--federnd),
               color var(--t-kurz) var(--federnd);
 }
-#am-root .folder-chip { border-radius: var(--r-pille); }
 
 #am-root .type-btn.active,
 #am-root .chip-btn.active,
-#am-root .folder-chip.active,
 #am-root .logistik-toggle-btn.active,
 #am-root .logistik-toggle-btn[data-active="1"] {
   background: var(--accent-weich);
@@ -189,52 +184,8 @@ body { background: var(--bg-deep); }
   color: var(--accent);
 }
 
-/* ── Projektkarten ───────────────────────────────────────────────────────── */
-
-#am-root .project-card2 {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-karte);
-  transition: transform var(--t-normal) var(--federnd),
-              border-color var(--t-normal) var(--federnd),
-              box-shadow var(--t-normal) var(--federnd);
-}
-#am-root .project-card2:hover {
-  transform: translateY(-2px);
-  border-color: var(--accent-rand);
-  box-shadow: var(--schatten-m);
-}
-
-#am-root .project-card2-name {
-  font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -.01em;
-  color: var(--text);
-}
-#am-root .project-card2-line { color: var(--muted); }
-#am-root .project-card2-addr { color: var(--text); }
-#am-root .project-card2-stats { color: var(--accent); }
-#am-root .project-card2-dates { color: var(--muted-schwach); font-size: .68rem; }
-#am-root .project-card2-menu-btn {
-  width: var(--touch);
-  height: var(--touch);
-  border-radius: var(--r-control);
-}
-
-/* Farbige Marken: auf dunklem Grund als getönte Fläche mit heller Schrift. */
-#am-root .project-card2-badge.fassade { background: rgba(96, 165, 250, .16); color: #93C5FD; }
-#am-root .project-card2-badge.dach    { background: rgba(244, 114, 182, .16); color: #F9A8D4; }
-#am-root .project-card2-badge.sonder  { background: rgba(52, 211, 153, .16);  color: #6EE7B7; }
-
-#am-root .project-card2-status.status-in_bearbeitung { background: rgba(255, 201, 60, .16); color: var(--accent-aufmass); }
-#am-root .project-card2-status.status-abgeschlossen  { background: rgba(61, 220, 151, .16); color: var(--erfolg); }
-#am-root .project-card2-status.status-archiviert     { background: rgba(159, 179, 200, .14); color: var(--muted); }
-
-#am-root .project-card2-vz-tag {
-  background: rgba(255, 255, 255, .06);
-  color: var(--muted);
-  border: 1px solid var(--hairline);
-}
+/* Die Projektkarten und die Ordnerleiste der alten Übersicht sind entfallen –
+   ihr Platz nimmt jetzt die gemeinsame Dateiübersicht ein (dateien.css). */
 
 /* ── Hausseiten / Abschnitte ─────────────────────────────────────────────── */
 
@@ -314,10 +265,6 @@ body { background: var(--bg-deep); }
 #am-root .ueberstand-setting-hint,
 #am-root .empty-state p { color: var(--muted-schwach); }
 #am-root .empty-state h2 { font-family: var(--font-display); color: var(--text); }
-#am-root .empty-icon-box {
-  background: var(--surface-hoch);
-  border: 1px solid var(--hairline);
-}
 
 #am-root .ueberstand-setting {
   background: var(--surface-tief);

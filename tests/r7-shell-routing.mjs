@@ -92,6 +92,13 @@ assert(await sichtbar('aufmass') && !(await sichtbar('hub')), 'Modul 1 ist sicht
 await page.click('.mod-tab[data-ziel="2d"]');
 await page.waitForFunction(() => document.body.dataset.modul === '2d');
 assert(await page.evaluate(() => location.hash) === '#/2d', 'Umschalter führt auf #/2d');
+assert(await page.evaluate(() => document.body.dataset.ansicht) === 'dateien',
+  'nach der Modulauswahl erscheint die Dateiübersicht, nicht der leere Editor');
+assert(await page.evaluate(() => !!document.querySelector('#td-dateienHost .dv')),
+  'die Dateiübersicht des 2D-Moduls ist aufgebaut');
+
+await page.evaluate(() => { location.hash = '#/2d/editor'; });
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
 assert(await page.evaluate(() => !!document.getElementById('planSvg').clientWidth),
   'die Zeichenfläche ist beim Aktivieren wirklich sichtbar (Kamera kann messen)');
 
@@ -101,12 +108,12 @@ await page.waitForFunction(() => document.body.dataset.modul === 'hub');
 assert(await modul() === 'hub', 'unbekannte Route landet auf dem Hub');
 
 // ── 3. Deep-Link und Neuladen ────────────────────────────────────────────
-await page.goto(URL_('#/2d'));
-await page.waitForFunction(() => document.body.dataset.modul === '2d');
-assert(await modul() === '2d', 'Deep-Link #/2d öffnet direkt Modul 2');
+await page.goto(URL_('#/2d/editor'));
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
+assert(await modul() === '2d', 'Deep-Link #/2d/editor öffnet direkt den Zeichner');
 await page.reload();
-await page.waitForFunction(() => document.body.dataset.modul === '2d');
-assert(await modul() === '2d', 'Neuladen bleibt in Modul 2');
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
+assert(await modul() === '2d', 'Neuladen bleibt im Zeichner');
 
 // ── 4. Zurück-Button des Browsers ────────────────────────────────────────
 await page.goto(URL_('#/'));
@@ -126,8 +133,8 @@ await page.waitForFunction(() => document.body.dataset.modul === 'aufmass');
 assert(await modul() === 'aufmass', 'Vorwärts funktioniert ebenso');
 
 // ── 5. Zustandserhalt beim Wechsel ───────────────────────────────────────
-await page.evaluate(() => { location.hash = '#/2d'; });
-await page.waitForFunction(() => document.body.dataset.modul === '2d');
+await page.evaluate(() => { location.hash = '#/2d/editor'; });
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
 await page.click('#uShapeBtn');
 await page.waitForTimeout(300);
 const vorher = await page.evaluate(() => ({
@@ -139,8 +146,8 @@ assert(vorher.felder > 0, `Zeichnung angelegt (${vorher.felder} Felder)`);
 
 await page.evaluate(() => { location.hash = '#/'; });
 await page.waitForFunction(() => document.body.dataset.modul === 'hub');
-await page.evaluate(() => { location.hash = '#/2d'; });
-await page.waitForFunction(() => document.body.dataset.modul === '2d');
+await page.evaluate(() => { location.hash = '#/2d/editor'; });
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
 await page.waitForTimeout(300);
 const nachher = await page.evaluate(() => ({
   felder: state.sections.reduce((n, s) => n + s.bays.length, 0),
@@ -157,10 +164,10 @@ await page.waitForFunction(() => document.body.dataset.modul === 'aufmass');
 await page.evaluate(() => AufmassModul.oeffneProjekt('p-alt'));
 await page.waitForTimeout(200);
 await page.fill('#fieldBauherr', 'Zwischenstand Bauherr');
-await page.evaluate(() => { location.hash = '#/2d'; });
-await page.waitForFunction(() => document.body.dataset.modul === '2d');
-await page.evaluate(() => { location.hash = '#/aufmass'; });
-await page.waitForFunction(() => document.body.dataset.modul === 'aufmass');
+await page.evaluate(() => { location.hash = '#/2d/editor'; });
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
+await page.evaluate(() => { location.hash = '#/aufmass/editor'; });
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
 assert(await page.inputValue('#fieldBauherr') === 'Zwischenstand Bauherr',
   'Eingaben in Modul 1 überstehen den Ausflug in Modul 2');
 assert(await page.evaluate(() => !document.getElementById('projectScreen').classList.contains('hidden')),
@@ -168,8 +175,7 @@ assert(await page.evaluate(() => !document.getElementById('projectScreen').class
 
 // ── 6. Projektwechsel lädt die zugehörige Zeichnung ──────────────────────
 await page.evaluate(() => {
-  const liste = JSON.parse(localStorage.getItem('geruest.aufmass.projekte'));
-  liste.push({
+  const daten = {
     id: 'p-zeichnung', name: 'Mit Zeichnung', status: 'in_bearbeitung',
     erstellt: '2026-02-01', geaendert: '2026-02-01', anschrift: {}, geruesttyp: 'fassade',
     seiten: [], technik: {}, logistik: {}, zusatzpositionen: [],
@@ -180,14 +186,15 @@ await page.evaluate(() => {
                           { id: 2, len: 2.57, hL: 6, hR: 6, positions: [] }] }],
       abschnitte: [], _sId: 1, _bId: 2
     }
-  });
-  localStorage.setItem('geruest.aufmass.projekte', JSON.stringify(liste));
+  };
+  const dok = Speicher.neu({ modul: 'aufmass', name: 'Mit Zeichnung', data: daten });
+  window.__dokMitZeichnung = dok.id;
   loadProjects();
   AufmassModul.oeffneProjekt('p-zeichnung');
 });
 await page.waitForTimeout(200);
-await page.evaluate(() => { location.hash = '#/2d'; });
-await page.waitForFunction(() => document.body.dataset.modul === '2d');
+await page.evaluate(() => { location.hash = '#/2d/editor'; });
+await page.waitForFunction(() => document.body.dataset.ansicht === 'editor');
 await page.waitForTimeout(400);
 const geladen = await page.evaluate(() => ({
   felder: state.sections.reduce((n, s) => n + s.bays.length, 0),
@@ -222,14 +229,16 @@ await page.evaluate(() => { location.hash = '#/aufmass'; });
 await page.waitForFunction(() => document.body.dataset.modul === 'aufmass');
 // `.empty-state` ist der einzige Klassenname, den beide Stylesheets kennen:
 // im 2D-Modul eine zentrierte Flex-Spalte, im Aufmaß-Modul ein einfacher Block.
+// Seit der Dateiverwaltung nutzt die Übersicht eigene Klassen (`.dv-leer`);
+// geprüft wird deshalb mit einem eingesetzten Prüfling, damit die Aussage
+// dieselbe bleibt: eine 2D-Regel darf im Aufmaß-Modul nicht greifen.
 const leer = await page.evaluate(() => {
-  const el = document.querySelector('#am-root .empty-state');
-  if (!el) return { fehlt: true };
-  const war = el.classList.contains('hidden');
-  el.classList.remove('hidden');
+  const el = document.createElement('div');
+  el.className = 'empty-state';
+  document.querySelector('#am-root .screen-content').appendChild(el);
   const st = getComputedStyle(el);
   const wert = { display: st.display, textAlign: st.textAlign };
-  if (war) el.classList.add('hidden');
+  el.remove();
   return wert;
 });
 assert(leer.display === 'block' && leer.textAlign === 'center',

@@ -7,10 +7,12 @@ Beide Programme leben seit der Zusammenführung in dieser einen Seite und werden
 | Route | Modul |
 |---|---|
 | `index.html#/` | Startbildschirm (Hub) |
-| `index.html#/aufmass` | Modul 1 – Aufmaß / Positionserfassung |
-| `index.html#/2d` | Modul 2 – 2D-Aufmaß / Gerüst-Zeichnung |
+| `index.html#/aufmass` | Modul 1 – Dateiübersicht |
+| `index.html#/aufmass/editor` | Modul 1 – Projektakte / Positionserfassung |
+| `index.html#/2d` | Modul 2 – Dateiübersicht |
+| `index.html#/2d/editor` | Modul 2 – 2D-Aufmaß / Gerüst-Zeichnung |
 
-`harness.open()` öffnet `#/2d`, `harness.openAufmass()` öffnet `#/aufmass`.
+`harness.open()` öffnet `#/2d/editor`, `harness.openAufmass()` öffnet `#/aufmass`.
 Die Tests starten einen kleinen statischen Server, öffnen die Seite in Chromium
 (Playwright) und prüfen Verhalten statt Implementierungsdetails.
 
@@ -101,6 +103,18 @@ Runde 7 (Shell der zusammengeführten App):
 node tests/r7-shell-routing.mjs   # Hash-Routing, Deep-Link, Neuladen, Zurück-Button,
                                   # Zustandserhalt beim Modulwechsel, Speicher-Migration,
                                   # Namensraum-Sauberkeit, 44-px-Trefferflächen
+```
+
+Runde 8 (Dateiverwaltung – siehe `DATEIVERWALTUNG.md`):
+
+```bash
+node tests/r8-dateien.mjs         # Migration der Altprojekte in den Dokumentenspeicher,
+                                  # Startseite mit Modul-Auswahl und Schnellzugriff,
+                                  # Dateiübersicht beider Module (Ordner, Brotkrumen,
+                                  # Suche, Sortierung, Kachel-/Listenansicht),
+                                  # Duplizieren/Umbenennen/Papierkorb/Import/Export,
+                                  # „Neue Zeichnung" ohne Reste des alten Dokuments,
+                                  # Vorschaubilder, Verlassen-Dialog, Neustart
 ```
 
 ## Nachweis „rechnerisch identisch"

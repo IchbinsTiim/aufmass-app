@@ -53,9 +53,11 @@ export async function open({ width = 1280, height = 900 } = {}) {
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
   await page.addInitScript(() => localStorage.setItem('av_deviceMode', 'ipad'));
-  // Zusammengeführte App: ein Einstiegspunkt, das 2D-Modul liegt auf #/2d.
-  await page.goto(`http://127.0.0.1:${port}/index.html#/2d`);
-  await page.waitForFunction(() => document.body.dataset.modul === '2d' && !!document.getElementById('planSvg'));
+  // Zusammengeführte App: ein Einstiegspunkt. Seit der Dateiverwaltung liegt
+  // die Übersicht des 2D-Moduls auf #/2d und der Zeichner auf #/2d/editor.
+  await page.goto(`http://127.0.0.1:${port}/index.html#/2d/editor`);
+  await page.waitForFunction(() => document.body.dataset.modul === '2d'
+    && document.body.dataset.ansicht === 'editor' && !!document.getElementById('planSvg'));
   return {
     page, logs,
     async close() { await browser.close(); server.close(); }
