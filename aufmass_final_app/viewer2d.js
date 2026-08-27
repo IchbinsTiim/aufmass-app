@@ -2493,10 +2493,15 @@ function renderSvg() {
       g.appendChild(sym);
     });
 
-    // Rotation handles (purple ↻) — nur für die ausgewählte Sektion
+    /* Rotation handles (purple ↻) — nur für die ausgewählte Sektion.
+
+       In der Mehrfachauswahl entfallen sie: dort bedeutet JEDER Tipp im Plan
+       „dieses Feld an- bzw. abwählen". Ein Griff, der daneben liegt und den
+       Tipp abfängt, ist genau das, was die Auswahl auf dem iPad unzuverlässig
+       gemacht hat. */
     const ROT_R     = hs(HANDLE_R * 0.85);
     const movingNow0 = drag && (drag.type === 'move' || drag.type === 'resize');
-    els.filter(e => e.type === 'rotateHandle' && e.si === selectedSi && !movingNow0).forEach(el => {
+    els.filter(e => e.type === 'rotateHandle' && e.si === selectedSi && !movingNow0 && !bulkMode).forEach(el => {
       const isActive = drag && drag.type === 'rotate' && drag.si === el.si;
 
       // Abstand zur Feldkante bildschirmbezogen – der Griff bleibt bei jedem
@@ -2554,8 +2559,14 @@ function renderSvg() {
   // 5. Blaue Schnell-Hinzufügen-Buttons (links / rechts) am ausgewählten Feld.
   //    Ein Klick fügt sofort ein weiteres Feld (Standard 2,57 m) in dieselbe
   //    Laufrichtung an – ohne Dialog. Ersetzt die früheren blauen Zieh-Griffe.
+  /* Sie liegen bewusst NEBEN dem Feld, ragen dadurch aber ein Stück über den
+     Nachbarn. Beim Zeichnen ist das richtig (man fügt am Ende an); in der
+     Mehrfachauswahl fingen sie die Tipps ab, die dem Nachbarfeld galten –
+     „ich tippe das Feld an und nichts passiert". Dort entfallen sie deshalb,
+     wie die Drehgriffe: jeder Tipp gehört der Auswahl. */
   const busyAdd = drag && (drag.type === 'move' || drag.type === 'rotate' || drag.type === 'resize');
-  const selSec  = (selectedSi !== null && !bordbrettModus) ? state.sections[selectedSi] : null;
+  const selSec  = (selectedSi !== null && !bordbrettModus && !bulkMode)
+    ? state.sections[selectedSi] : null;
   if (selSec && selSec.bays.length && !busyAdd) {
     const dir = secVec(selSec);
     const out = outVec(dir, selSec.flip);
@@ -5982,6 +5993,27 @@ function _runRender() {
     _renderNeed.sidebar = _renderNeed.sidebar || need.sidebar;
     _renderNeed.bulk    = _renderNeed.bulk    || need.bulk;
     need.sidebar = need.bulk = false;
+  }
+  /* Solange ein Finger auf der Zeichenfläche liegt und kein Griff gezogen
+     wird, bleibt das SVG stehen.
+
+     Grund ist kein Tempo, sondern Verlässlichkeit: renderSvg() ersetzt die
+     Feld-Polygone. Wird ein Polygon zwischen Drücken und Loslassen ersetzt,
+     bekommt es seinen eigenen Klick nicht mehr – der Browser reicht ihn an
+     das übergeordnete SVG weiter, wo „auf leere Fläche getippt" gilt. Genau
+     so ging beim schnellen Antippen mehrerer Felder gelegentlich ein Tipp
+     verloren (und hob dabei sogar die Auswahl auf).
+
+     Das Verschieben der Ansicht selbst braucht kein renderSvg(): Pan und
+     Pinch ändern nur die viewBox (applyCamera). Der aufgeschobene Neuaufbau
+     wird nach dem Loslassen zuverlässig nachgeholt – scheduleCameraSettle()
+     meldet ihn 60 ms später erneut an.
+
+     Beim Ziehen eines Griffs (Verschieben, Drehen, Bordbrett-Streichen) gilt
+     das NICHT: dort ist das laufende Neuzeichnen die Rückmeldung. */
+  if (!drag && canvasPointers.size && need.svg) {
+    _renderNeed.svg = true;
+    need.svg = false;
   }
   // Werkzeug-Menue: Auswahl- und Bearbeiten-Block haengen an derselben
   // Bedarfsmeldung wie die frueheren Leisten in der Seitenleiste.
