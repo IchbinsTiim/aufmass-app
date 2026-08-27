@@ -379,4 +379,52 @@ assert(errs.length === 0, 'keine JS-Fehler: ' + errs.join(' | '));
 
 await hctx.close();
 
+// ══════════════════════════════════════════════════════════════════════════
+//  Antippen im Plan: auf JEDEM Bildschirm zuverlässig
+//  --------------------------------------------------------------------------
+//  Die blauen „+"-Knöpfe und der Drehgriff liegen NEBEN dem ausgewählten Feld
+//  und ragen dabei ein Stück über den Nachbarn. Beim Zeichnen ist das richtig;
+//  in der Mehrfachauswahl fingen sie die Tipps ab, die dem Nachbarfeld galten
+//  – je weiter herausgezoomt, desto häufiger. Auf dem Handy blieb von drei
+//  Tipps einer übrig. Dort entfallen sie deshalb.
+// ══════════════════════════════════════════════════════════════════════════
+console.log('\nAntippen im Plan\n');
+
+for (const [name, w, h] of [
+  ['iPad quer',   1180,  820],
+  ['iPad hoch',    820, 1180],
+  ['Handy hoch',   390,  844],
+  ['Handy quer',   844,  390],
+  ['320 px',       320,  568]
+]) {
+  const c = await open({ width: w, height: h });
+  await seedFields(c.page, 8);
+  await c.page.click('#werkzeugBtn');
+  await c.page.waitForSelector('#werkzeugPanel.offen');
+  await c.page.click('.bulk-toggle-btn');
+  await c.page.waitForTimeout(150);
+
+  const mitte = idx => c.page.evaluate(i => {
+    const el = computeLayout().filter(e => e.type === 'bay')[i];
+    const vp = viewportRect();
+    return { x: vp.left + vp.w / 2 + (el.cx - camera.cx) * camera.scale,
+             y: vp.top  + vp.h / 2 + (el.cy - camera.cy) * camera.scale };
+  }, idx);
+
+  for (let i = 0; i < 6; i++) {
+    const p = await mitte(i);
+    await c.page.mouse.click(p.x, p.y);
+    await c.page.waitForTimeout(70);
+  }
+  const n = await c.page.evaluate(() => bulkSelected.size);
+  assert(n === 6, `${name}: sechs Felder nacheinander angetippt → ${n} markiert`);
+
+  const p0 = await mitte(0);
+  await c.page.mouse.click(p0.x, p0.y);
+  await c.page.waitForTimeout(120);
+  assert(await c.page.evaluate(() => bulkSelected.size) === 5,
+    `${name}: nochmal antippen wählt dasselbe Feld wieder ab`);
+  await c.close();
+}
+
 console.log('\nAlle Tests zu Aufgabe 10 bestanden.');

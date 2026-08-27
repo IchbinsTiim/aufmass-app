@@ -173,6 +173,8 @@ Alle Blöcke steuern dieselbe Kernlogik an (`bulkMode`/`bulkSelected`,
 |---|---|
 | Feld antippen → Bearbeiten-Sheet | ✅ |
 | Feld antippen in der Mehrfachauswahl → an-/abhaken | ✅ |
+| In der Mehrfachauswahl entfallen „+"-Knöpfe und Drehgriff: jeder Tipp gehört der Auswahl | ✅ |
+| Kein Neuaufbau des SVG, solange ein Finger aufliegt – sonst geht der Tipp verloren | ✅ |
 | Ausgewähltes Feld: kräftiger Ring in fester Bildschirmstärke + Leuchten | ✅ |
 | Mehrfachauswahl: violetter Ring **und** Haken je Feld, Zahl am Werkzeug-Knopf | ✅ |
 | Orangener Griff: Feld frei verschieben (mit Vorschau + Einrasten) | ✅ |
@@ -346,7 +348,9 @@ der Auswahl über das Zuklappen hinweg, Speichern/Laden, das PDF und den
 Handy-Modus. Sechs Bildschirmgrößen (Desktop, iPad quer/hoch, Smartphone
 hoch/quer, 320 px) werden nachgemessen statt beschrieben: kein Knopf darf aus
 dem Bild ragen, keiner unter 36 px schrumpfen, und bei offenem Menü müssen
-mindestens 140 px Zeichenfläche frei bleiben.
+mindestens 140 px Zeichenfläche frei bleiben. Ein eigener Abschnitt tippt auf
+jedem dieser Bildschirme sechs Felder nacheinander an und prüft, dass sechs
+markiert sind – das war vorher nur auf breiten Bildschirmen verlässlich.
 
 Zusätzlich zwei A/B-Vergleiche gegen die Fassung **vor** dem Zusammenführen. Sie
 rechnen dasselbe Aufmaß in beiden Ständen durch und vergleichen jede Rechengröße
