@@ -25,8 +25,8 @@ await page.evaluate(() => {
   window.__reset = () => {
     state.sections = []; _sId = 0; _bId = 0; _aId = 0;
     state.abschnitte = []; state.hideUnassigned = false;
-    state.aufmass = null; state.ecken = {}; state.bordbretter = [];
-    state.depth = 0.73; state.grundriss = null;
+    state.aufmass = null; state.ecken = {}; state.bordbrettKanten = [];
+    state.depth = 0.73;
   };
   window.__run = (x0, y0, winkel, n, len = 2.57, flip = false) => {
     let x = x0, y = y0;
@@ -115,13 +115,16 @@ const kopf = await bau(async () => {
   state.project = 'Blatttest';
   renderAll(); flushRender();
   window.__pdfSaved = null;
-  await buildPdf('technisch');
+  await buildPdf('farbe');
   return window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2]));
 });
-assert(kopf.some(t => /Planblatt B1 von \d+ .*Felder A1 – A\d+/.test(t)),
-  `die Kopfzeile nennt die Felder des Blattes: „${kopf.find(t => /Planblatt B1/.test(t)) || '–'}"`);
-assert(kopf.some(t => /Aufteilung von links nach rechts/.test(t)),
-  'die Blattübersicht erklärt die Aufteilung');
+assert(kopf.some(t => /Blatt 1 von \d+ .*Felder A1 – A\d+/.test(t)),
+  `die Kopfzeile nennt die Felder des Blattes: „${kopf.find(t => /Blatt 1 von/.test(t)) || '–'}"`);
+// Die frühere eigene Übersichtsseite ist entfallen – ein Blatt, das keine
+// Zeichnung zeigt, kostet nur Papier. Die Lage im Gesamtplan steht als kleine
+// Karte auf jedem Planblatt selbst.
+assert(kopf.some(t => /^LAGE IM GESAMTPLAN/.test(t)),
+  'jedes Planblatt zeigt selbst, welchen Ausschnitt es abbildet');
 
 // Weniger Blätter heißt engerer Maßstab – die Beschriftungen dürfen sich
 // deswegen trotzdem nicht überlagern (sie werden bei Bedarf gekürzt).
@@ -142,7 +145,7 @@ const dichte = await bau(async () => {
   const orig = window.pdfPlanLabels;
   window.pdfPlanLabels = function (...a) { const r = orig.apply(this, a); seiten.push(r); return r; };
   window.__pdfSaved = null;
-  await buildPdf('technisch');
+  await buildPdf('farbe');
   window.pdfPlanLabels = orig;
 
   let kollisionen = 0, n = 0;
@@ -197,7 +200,7 @@ const verb = await bau(async () => {
     .map(p => abstuetzMassText(p, state.sections[2].bays[0]));
 
   window.__pdfSaved = null;
-  await buildPdf('technisch');
+  await buildPdf('farbe');
   const texte = window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2]));
 
   return {
@@ -283,8 +286,10 @@ assert(Math.abs(umlauf.mitPauschale - (6 * 2.57 + 2 * 0.73)) < 0.01,
 assert(Math.abs(umlauf.ohne[0] - 7.71) < 0.005,
   'aufheben wirkt sofort – zurück auf das reine Achsmaß');
 
-// C2: EINE Linie rund um das Gerüst korrigiert alle Achsen, an denen sie
-//     entlangläuft (bisher nur die eine zugeordnete).
+/* C2: Bordbrett rund um das Gerüst.
+   Markiert wird die komplette Außenkante eines Rechtecks aus 4 + 3 + 4 + 3
+   Feldern. Erwartet wird der tatsächliche Umfang – und zwar je Achse getrennt,
+   ohne dass eine Kante doppelt zählt. */
 const rundum = await bau(() => {
   __reset();
   let p = __run(0, 0, 0, 4);
@@ -292,57 +297,41 @@ const rundum = await bau(() => {
   p = __run(p.x, p.y, 180, 4);
   __run(p.x, p.y, 270, 3);
   renderAll(); flushRender();
-  const d = state.depth * PX_PER_M, W = 4 * 257, H = 3 * 257;
-  const linie = mkBordbrett([
-    { x: -d, y: -d }, { x: W + d, y: -d }, { x: W + d, y: H + d },
-    { x: -d, y: H + d }, { x: -d, y: -d }
-  ]);
-  bordbretterListe().push(linie);
-  invalidateEckenCache();
-  const out = { beruehrt: bordbrettBeruehrteAchsen(linie).length };
-  bordbrettAufAlleAchsen(linie);
+  // Äußere Längskante jedes Feldes markieren (Kante 2).
+  allBaysFlat().forEach(b => setzeBordbrettKante(b.id, 2, true));
   renderAll(); flushRender();
-  out.alle = aufmassAchsen().map(a => a.m.laenge);
-  bordbrettZuordnen(linie, achsenListe()[0]);
-  out.eine = aufmassAchsen().map(a => a.m.laenge);
-  bordbrettZuordnen(linie, null);
-  out.aus = aufmassAchsen().map(a => a.m.laenge);
-  return out;
+  return {
+    achsen: bordbrettJeAchse().map(x => +x.laenge.toFixed(2)),
+    gesamt: +bordbrettGesamt().toFixed(2),
+    felder: allBaysFlat().length
+  };
 });
-assert(rundum.beruehrt === 4,
-  `die Linie läuft an allen ${rundum.beruehrt} Achsen entlang`);
-assert(Math.abs(rundum.alle[0] - 11.74) < 0.005 && Math.abs(rundum.alle[1] - 9.17) < 0.005
-    && Math.abs(rundum.alle[2] - 11.74) < 0.005 && Math.abs(rundum.alle[3] - 9.17) < 0.005,
-  `eine Linie rundherum korrigiert JEDE Achse an beiden Ecken (${rundum.alle.join(' / ')} m)`);
-assert(Math.abs(rundum.eine[0] - 11.74) < 0.005 && Math.abs(rundum.eine[1] - 7.71) < 0.005,
-  `auf eine Achse beschränkt wirkt sie nur dort (${rundum.eine.join(' / ')} m)`);
-assert(rundum.aus.every((v, i) => Math.abs(v - [10.28, 7.71, 10.28, 7.71][i]) < 0.005),
-  'ohne Wirkung bleibt es beim reinen Achsmaß');
+assert(rundum.achsen.length === 4,
+  `das Bordbrett verteilt sich auf alle ${rundum.achsen.length} Achsen`);
+assert(rundum.achsen.every((v, i) => Math.abs(v - [4, 3, 4, 3][i] * 2.57) < 0.005),
+  `je Achse die tatsächliche Kantenlänge (${rundum.achsen.join(' / ')} m)`);
+assert(Math.abs(rundum.gesamt - 14 * 2.57) < 0.005,
+  `Gesamt = Summe der markierten Kanten (${rundum.gesamt} m, Soll ${(14 * 2.57).toFixed(2)})`);
 
-// C3: Eine Linie, die um mehrere Wände läuft, verfälscht ihre eigene
-//     Auswertung nicht mehr (nur Punkte in der Bahn der Achse zählen).
-// Versatz („Z"): die untere Wand läuft weit über die obere hinaus. Ihre Punkte
-// projizieren auf die obere Achse weit hinter deren Ende – ohne die Beschränkung
-// auf die eigene Bahn wäre die Ecke damit „unklar" und die Korrektur entfiele.
-const bahn = await bau(() => {
+/* C3: Eine Kante, die sich zwei Felder teilen, zählt genau einmal – auch wenn
+   sie von beiden Seiten markiert wird. Ohne diese Entdopplung stünde eine
+   Stirnkante zwischen zwei Feldern zweimal im Aufmaß. */
+const doppelt = await bau(() => {
   __reset();
-  let p = __run(0, 0, 0, 3);           // obere Wand, 3 Felder
-  p = __run(p.x, p.y, 90, 2);          // Versatz nach unten
-  __run(p.x, p.y, 0, 8);               // untere Wand, 8 Felder – viel länger
+  __run(0, 0, 0, 3);
   renderAll(); flushRender();
-  const d = state.depth * PX_PER_M, L = 2.57 * PX_PER_M;
-  const linie = mkBordbrett([
-    { x: 0, y: -d }, { x: 3 * L + d, y: -d },
-    { x: 3 * L + d, y: 2 * L + d }, { x: 11 * L + d, y: 2 * L + d }
-  ]);
-  bordbretterListe().push(linie);
-  bordbrettAufAlleAchsen(linie);
-  invalidateEckenCache(); renderAll(); flushRender();
-  return aufmassAchsen().map(a => ({ name: a.name, felder: a.bays.length, laenge: a.m.laenge }));
+  state.bordbrettKanten = [];
+  const bays = allBaysFlat();
+  setzeBordbrettKante(bays[0].id, 1, true);   // Stirnkante am Ende von Feld 1
+  const einfach = bordbrettGesamt();
+  setzeBordbrettKante(bays[1].id, 3, true);   // dieselbe Strecke, von Feld 2 aus
+  return { einfach: +einfach.toFixed(2), zweifach: +bordbrettGesamt().toFixed(2),
+           eintraege: state.bordbrettKanten.length, tiefe: state.depth };
 });
-assert(bahn[0].felder === 3 && Math.abs(bahn[0].laenge - (3 * 2.57 + 0.73)) < 0.005,
-  `die kurze Achse wird trotz weit überstehender Parallelwand richtig erkannt `
-  + `(${bahn[0].laenge} m, Soll 8,44)`);
+assert(Math.abs(doppelt.einfach - doppelt.tiefe) < 0.005,
+  `eine Stirnkante ist so lang wie das Gerüst tief (${doppelt.einfach} m)`);
+assert(doppelt.eintraege === 2 && Math.abs(doppelt.zweifach - doppelt.einfach) < 0.005,
+  'dieselbe Kante von beiden Feldern markiert zählt trotzdem nur einmal');
 
 const errs = ctx.logs.filter(l => l.startsWith('[pageerror]'));
 assert(errs.length === 0, 'keine JS-Fehler: ' + errs.join(' | '));

@@ -88,7 +88,7 @@ async function measure(kind) {
     window.__pdfSaved = null;
     let orientation = 'landscape';
     try {
-      await buildPdf('technisch');
+      await buildPdf('farbe');
       const first = window.__pdfSaved.calls.find(c => c[0] === 'new');
       orientation = JSON.parse(first[1]).orientation;
     } finally {
@@ -97,12 +97,15 @@ async function measure(kind) {
     }
 
     // Erlaubter Zeichenbereich einer PLANSEITE – exakt wie in buildPdf.
+    // Die Legende steht seit der Vereinfachung UNTER dem Plan, nicht darüber.
     const pdfW = orientation === 'landscape' ? 297 : 210;
     const pdfH = orientation === 'landscape' ? 210 : 297;
     const margin = PDF_MARGIN;
-    const top = margin + PDF_HEADER_H + PDF_LEGEND_H + 2.5;
+    const legendH = pdfLegendEntries().length ? PDF_LEGEND_H : 0;
+    const top = margin + PDF_HEADER_H;
     const contentBottom = pdfH - margin - PDF_FOOTER_H;
-    const area = { x: margin, y: top, w: pdfW - 2 * margin, h: contentBottom - top - 2 };
+    const area = { x: margin, y: top, w: pdfW - 2 * margin,
+                   h: contentBottom - top - 2 - legendH };
     return { labels, locators, raw, area, pages: window.__pdfSaved.pages, orientation };
   }, kind);
 }
@@ -146,17 +149,22 @@ assert(wouldClash > 0,
   `Gegenprobe: ohne Sperrzonen gäbe es ${wouldClash} Kollisionen – die Prüfung greift also wirklich`);
 
 // 3. Die Legende steht weiterhin auf jeder Planseite – die Sperrzone darf sie
-//    nicht „wegoptimiert" haben.
+//    nicht „wegoptimiert" haben. Die Überschrift „LEGENDE" ist mit der
+//    Vereinfachung entfallen; geprüft wird deshalb, dass die Positionsarten
+//    unter dem Plan benannt sind.
 const legendCheck = await page.evaluate(async () => {
   window.__pdfSaved = null;
-  await buildPdf('technisch');
+  await buildPdf('farbe');
+  const namen = pdfLegendEntries().map(e => e.label);
   const perPage = {};
   window.__pdfSaved.calls.forEach(c => {
     if (c[0] === 'text') (perPage[c[1]] || (perPage[c[1]] = [])).push(String(c[2]));
   });
-  return Object.values(perPage).filter(t => t.includes('LEGENDE')).length;
+  return { namen, seiten: Object.values(perPage).filter(t => namen.some(n => t.includes(n))).length };
 });
-assert(legendCheck >= 1, `Legende wird weiterhin gezeichnet (${legendCheck} Seiten)`);
+assert(legendCheck.namen.length > 0 && legendCheck.seiten >= 1,
+  `Legende wird weiterhin gezeichnet (${legendCheck.seiten} Seiten: `
+  + legendCheck.namen.join(', ') + ')');
 
 assert(ctx.logs.filter(l => l.startsWith('[pageerror]')).length === 0,
   'keine JS-Fehler: ' + ctx.logs.filter(l => l.startsWith('[pageerror]')).join(' | '));

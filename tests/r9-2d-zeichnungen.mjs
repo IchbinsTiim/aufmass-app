@@ -140,10 +140,10 @@ await page.waitForFunction(() => location.hash === '#/2d');
 await page.waitForTimeout(400);
 assert(await page.evaluate(() => state.sections.reduce((n, s) => n + s.bays.length, 0)) === 3,
   'zuerst ist eine gezeichnete Zeichnung geöffnet (3 Felder)');
-// Einstieg aus dem Editor heraus: Datei → Neue Zeichnung
-await page.click('#tdFileMenuBtn');
-await page.waitForSelector('#floatingMenu');
-await page.click('#floatingMenu .floating-menu-item:has-text("Neue Zeichnung")');
+// Einstieg aus dem Editor heraus: Projekt → Neue Zeichnung
+await page.click('#tdMenuBtn');
+await page.waitForSelector('#projNeuBtn');
+await page.click('#projNeuBtn');
 await page.waitForSelector('#tdNeuOverlay:not(.hidden)');
 await page.fill('#tdNeuName', 'Während offen');
 await page.click('#tdNeuAnlegen');
@@ -196,7 +196,9 @@ await page.click(`#tdProjectGrid .td-project-card:has-text("Baustelle Nord")`);
 await page.waitForFunction(() => location.hash === '#/2d');
 await page.waitForTimeout(400);
 assert(await page.evaluate(() => linkedProjectId) === neueId, '„Baustelle Nord" ist geöffnet');
-await page.click('#tdProjectBtn');
+await page.click('#tdMenuBtn');
+await page.waitForSelector('#projWechselBtn');
+await page.click('#projWechselBtn');
 await page.waitForTimeout(300);
 await kartenMenu('Baustelle Nord', 'Löschen');
 await page.click('#tdLoeschBestaetigen');
@@ -308,14 +310,27 @@ assert((await gespeicherte()).includes('Erste Zeichnung'), 'sie ist gespeichert'
 // „Erste Zeichnung" ist offen. Eine Änderung eintippen und sofort – also
 // innerhalb der Autosave-Verzögerung – eine neue Zeichnung anstoßen.
 const dateiNeu = async () => {
-  await page.click('#tdFileMenuBtn');
-  await page.click('#floatingMenu .floating-menu-item:has-text("Neue Zeichnung")');
+  await page.click('#tdMenuBtn');
+  await page.waitForSelector('#projNeuBtn');
+  await page.click('#projNeuBtn');
 };
 const gespeicherterName = () => page.evaluate(() =>
   (JSON.parse(localStorage.getItem('geruest.aufmass.projekte') || '[]')
     .find(p => p.id === localStorage.getItem('geruest.app.aktuellesProjekt')) || {}).name);
 
-await page.fill('#projectName', 'Erste Zeichnung (getippt)');
+/* Tippt eine Änderung und hält den laufenden Autosave an.
+   Ohne das entschiede die 700-ms-Frist darüber, ob der Dialog überhaupt
+   erscheint: schreibt der Autosave zwischendurch, gibt es nichts mehr zu
+   sichern – und der Test prüfte je nach Maschinenlast etwas anderes. Genau
+   diesen Zustand („getippt, noch nicht geschrieben") soll er aber prüfen. */
+const tippeOhneAutosave = async wert => {
+  await page.fill('#projectName', wert);
+  await page.evaluate(() => {
+    if (autosave2dTimer) { clearTimeout(autosave2dTimer); autosave2dTimer = null; }
+  });
+};
+
+await tippeOhneAutosave('Erste Zeichnung (getippt)');
 await dateiNeu();
 await page.waitForSelector('#tdSpeichernOverlay:not(.hidden)', { timeout: 4000 });
 assert(true, 'ungespeicherte Änderungen führen zum Dialog statt zu stillem Verlust');
@@ -329,6 +344,7 @@ assert(await page.inputValue('#projectName') === 'Erste Zeichnung (getippt)',
   'die Eingabe bleibt dabei erhalten');
 
 // Speichern-Weg
+await tippeOhneAutosave('Erste Zeichnung (getippt)');
 await dateiNeu();
 await page.waitForSelector('#tdSpeichernOverlay:not(.hidden)', { timeout: 4000 });
 await page.click('#tdSpeichernSichern');
@@ -339,7 +355,7 @@ await page.click('#tdNeuAbbrechen');
 await page.waitForTimeout(200);
 
 // Verwerfen-Weg
-await page.fill('#projectName', 'Wieder weg');
+await tippeOhneAutosave('Wieder weg');
 await dateiNeu();
 await page.waitForSelector('#tdSpeichernOverlay:not(.hidden)', { timeout: 4000 });
 await page.click('#tdSpeichernVerwerfen');
@@ -381,7 +397,9 @@ await page.evaluate(async id => {
 }, fotoProjekt);
 assert(await fotoZahl(fotoProjekt) === 2, 'zwei Fotos hängen an der Zeichnung');
 
-await page.click('#tdProjectBtn');
+await page.click('#tdMenuBtn');
+await page.waitForSelector('#projWechselBtn');
+await page.click('#projWechselBtn');
 await page.waitForTimeout(300);
 await kartenMenu('Mit Fotos', 'Löschen');
 await page.click('#tdLoeschBestaetigen');

@@ -114,7 +114,7 @@ const AUSWERTUNG = () => {
     positionen:     aggregatePositions(allBaysFlat()),
     felder:         collectFields(),
     feldSeiten:     fieldsBySide(),
-    bordbretter:    bordbretterAufstellung(),
+    bordbrett:      bordbrettJeAchse().map(a => [a.name, +a.laenge.toFixed(3)]),
     eckZuschlag:    eckZuschlagWert(),
     innenEck:       innenEckWert()
   });
@@ -138,17 +138,9 @@ async function lauf(root, hash) {
   await page.waitForTimeout(400);
   const werte = await page.evaluate(AUSWERTUNG);
 
-  // PDF über die echte Exportstrecke erzeugen (jsPDF ist gestubbt).
-  await page.evaluate(() => buildPdf());
-  await page.waitForFunction(() => !!window.__pdfSaved, null, { timeout: 20000 });
-  const pdf = await page.evaluate(() => ({
-    seiten: window.__pdfSaved.pages,
-    aufrufe: window.__pdfSaved.calls.map(a => a.join(''))
-  }));
-
   await browser.close();
   server.close();
-  return { werte, pdf, fehler };
+  return { werte, fehler };
 }
 
 const alt = await lauf(ALT_ROOT, 'viewer2d.html');
@@ -167,20 +159,6 @@ function pruefe(name, a, b) {
 console.log('\nA/B-VERGLEICH  vorher (zwei Apps)  ↔  nachher (zusammengeführt)\n');
 console.log('Rechenergebnisse:');
 Object.keys(alt.werte).forEach(k => pruefe(k, alt.werte[k], neu.werte[k]));
-
-console.log('\nPDF-Export:');
-pruefe('Seitenzahl', alt.pdf.seiten, neu.pdf.seiten);
-pruefe('Anzahl Zeichenaufrufe', alt.pdf.aufrufe.length, neu.pdf.aufrufe.length);
-const n = Math.max(alt.pdf.aufrufe.length, neu.pdf.aufrufe.length);
-let ersteAbw = -1;
-for (let i = 0; i < n; i++) if (alt.pdf.aufrufe[i] !== neu.pdf.aufrufe[i]) { ersteAbw = i; break; }
-if (ersteAbw < 0) console.log('  ✓ alle ' + n + ' Zeichenaufrufe identisch (Text, Position, Reihenfolge, Seite)');
-else {
-  abweichungen++;
-  console.log('  ✗ erste Abweichung bei Aufruf #' + ersteAbw);
-  console.log('      vorher : ' + alt.pdf.aufrufe[ersteAbw]);
-  console.log('      nachher: ' + neu.pdf.aufrufe[ersteAbw]);
-}
 
 if (alt.fehler.length || neu.fehler.length) {
   console.log('\nJS-Fehler vorher: ' + JSON.stringify(alt.fehler));

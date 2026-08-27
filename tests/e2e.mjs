@@ -4,6 +4,10 @@ import { open, assert } from './harness.mjs';
 const ctx = await open({ width: 1440, height: 1020 });
 const { page } = ctx;
 
+// Vorlagen liegen seit der Überarbeitung im Projekt-Sheet – die Werkzeug-
+// leiste zeigt nur noch, was beim Zeichnen selbst gebraucht wird.
+await page.click('#tdMenuBtn');
+await page.waitForSelector('#uShapeBtn');
 await page.click('#uShapeBtn');
 await page.waitForTimeout(250);
 assert(await page.evaluate(() => state.sections.length > 0), 'U-Form-Vorlage erzeugt Felder');
@@ -74,7 +78,8 @@ await page.waitForTimeout(350);
 // PDF-Dialog
 await page.click('#td-exportPdfBtn');
 await page.waitForSelector('.pdf-theme-card', { timeout: 3000 });
-assert((await page.$$('.pdf-theme-card')).length === 3, 'PDF-Dialog zeigt drei Layouts');
+assert((await page.$$('.pdf-theme-card')).length === 2,
+  'PDF-Dialog zeigt zwei Ausgaben (Farbe / Schwarz-Weiß)');
 await page.evaluate(() => document.querySelector('.sheet-del').click());
 await page.waitForTimeout(300);
 

@@ -149,10 +149,12 @@ assert(z.projekt === 'p-neu' && z.felder === 5 && z.tiefe === 1.09,
   `Zeichnung des gewählten Projekts geladen (${z.felder} Felder, ${z.tiefe} m Gerüsttiefe)`);
 
 // ── 6. Projekt wechseln aus der Werkzeugleiste ───────────────────────────
-await page.click('#tdProjectBtn');
+await page.click('#tdMenuBtn');
+await page.waitForSelector('#projWechselBtn');
+await page.click('#projWechselBtn');
 await page.waitForFunction(() => location.hash === '#/2d/projekte');
 await page.waitForTimeout(400);
-assert(await page.isVisible('#td-projekte'), '„📁 Projekt" führt zurück in die Liste');
+assert(await page.isVisible('#td-projekte'), '„Zeichnung wechseln" führt zurück in die Liste');
 const markiert = await page.$$eval('#tdProjectGrid .td-project-card.aktuell',
   els => els.map(e => e.querySelector('.td-project-name').textContent));
 assert(JSON.stringify(markiert) === JSON.stringify(['Neubau Ost']),

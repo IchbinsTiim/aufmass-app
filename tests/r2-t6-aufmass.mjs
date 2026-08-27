@@ -154,18 +154,38 @@ const persisted = await page.evaluate(() => {
 assert(persisted.aktiv && persisted.wert === 0.73 && persisted.modus === 'wand' && persisted.eck,
   'die eingestellten Aufmaßregeln überleben Speichern/Laden');
 
-// ── PDF weist den Rechenweg aus ────────────────────────────────────────────
-const pdfTexts = await page.evaluate(async () => {
+/* ── PDF: Mengen nach denselben Regeln, Grundlage benannt ──────────────────
+   Die frühere Spaltentabelle „Achsmaß | Innenecke | Eckzuschlag | Feldzuschlag
+   | Aufmaßlänge" ist mit der Vereinfachung des Dokuments entfallen; auf dem
+   Blatt steht jetzt die Mengenermittlung selbst (Pos./Bezeichnung/Menge/
+   Einheit). Geprüft wird deshalb, dass die ausgewiesene Menge GENAU die nach
+   den eingestellten Regeln gerechnete ist – und dass die Regeln auf dem Blatt
+   benannt sind, damit die Zahl nachvollziehbar bleibt.                      */
+const pdfInfo = await page.evaluate(async () => {
   window.__pdfSaved = null;
-  await buildPdf('technisch');
-  return window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2]));
+  await buildPdf('farbe');
+  return {
+    texte: window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2])),
+    regeln: aufmassRuleText(),
+    gesamt: computeAufmass(visibleBaysFlat())
+  };
 });
-const joined = pdfTexts.join('\n');
-assert(joined.includes('Achsmaß'), 'PDF nennt das Achsmaß als Grundlage');
-assert(/Außenecke.*La = L \+ L1/.test(joined), 'PDF nennt die Eckregel La = L + L1');
-assert(joined.includes('Aufmaßlänge') && joined.includes('Eckzuschlag') && joined.includes('Feldzuschlag'),
-  'PDF weist Achsmaß, Eck- und Feldzuschlag getrennt aus');
-assert(/\d+ × 0,73/.test(joined), 'PDF zeigt den konfigurierten Aufschlagswert im Rechenweg');
+const joined = pdfInfo.texte.join('\n');
+assert(joined.includes('Grundlage:') && /Achsmaße der Gerüstkonstruktion/.test(joined),
+  'PDF nennt das Achsmaß als Grundlage');
+assert(/Außenecke beidseitig \+ [\d,]+ m \(La = L \+ L1\)/.test(pdfInfo.regeln),
+  'PDF nennt die Eckregel La = L + L1');
+assert(/Aufschlag 0,73 m je Wand/.test(pdfInfo.regeln),
+  'PDF nennt den konfigurierten Aufschlagswert');
+// Die Gerüstfläche des Gesamtblocks ist die nach allen Regeln gerechnete.
+const flaechen = pdfInfo.texte.map((t, i) => [t, pdfInfo.texte[i - 1]])
+  .filter(([, vor]) => vor === 'Gerüstfläche')
+  .map(([t]) => parseFloat(t.replace(/\./g, '').replace(',', '.')));
+assert(flaechen.some(f => Math.abs(f - pdfInfo.gesamt.flaeche) < 0.02),
+  `PDF weist die nach den Regeln gerechnete Fläche aus (${pdfInfo.gesamt.flaeche} m²)`);
+assert(pdfInfo.gesamt.ecken > 0 && pdfInfo.gesamt.felder > 0,
+  `Eck- und Feldzuschlag gehen in diese Zahl ein (${pdfInfo.gesamt.ecken} Ecken, `
+  + `${pdfInfo.gesamt.felder} Feldaufschläge)`);
 
 // ── Bedienung: alle Parameter sind im PDF-Dialog einstellbar ───────────────
 const dialog = await page.evaluate(() => {
