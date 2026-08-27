@@ -134,6 +134,8 @@ assert(await modul() === 'aufmass', 'Vorwärts funktioniert ebenso');
 // ── 5. Zustandserhalt beim Wechsel ───────────────────────────────────────
 await page.evaluate(() => { location.hash = '#/2d'; });
 await page.waitForFunction(() => document.body.dataset.modul === '2d');
+await page.click('#tdMenuBtn');
+await page.waitForSelector('#uShapeBtn');
 await page.click('#uShapeBtn');
 await page.waitForTimeout(300);
 const vorher = await page.evaluate(() => ({

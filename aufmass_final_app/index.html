@@ -15,11 +15,11 @@
 
   <!-- Reihenfolge zählt: core = Tokens & gemeinsame Bausteine, dann die beiden
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
-  <link rel="stylesheet" href="core.css?v=20260826" />
-  <link rel="stylesheet" href="style.css?v=20260826" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260826" />
-  <link rel="stylesheet" href="shell.css?v=20260826" />
-  <link rel="stylesheet" href="theme.css?v=20260826" />
+  <link rel="stylesheet" href="core.css?v=20260827" />
+  <link rel="stylesheet" href="style.css?v=20260827" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260827" />
+  <link rel="stylesheet" href="shell.css?v=20260827" />
+  <link rel="stylesheet" href="theme.css?v=20260827" />
 </head>
 <body data-modul="hub">
 
@@ -507,51 +507,75 @@
 
     <!-- Die Zeichnung selbst  →  #/2d -->
     <div id="td-zeichnung">
-    <header class="viewer-header">
-      <a href="#/" class="back-link">← Start</a>
-      <h1>Gerüst 2D-Ansicht</h1>
-      <p>Tippen Sie auf ein Feld, um Maße, Höhen, Abschnitt und Drehung zu bearbeiten. Der violette&nbsp;↻ Griff am ausgewählten Feld dreht per Tipp um 90°, per Ziehen frei (am Rechner auch mit der Taste&nbsp;<kbd>R</kbd>). Ziehen Sie den orangenen Punkt, um ein Feld frei zu bewegen, oder tippen Sie auf einen blauen&nbsp;+ Button (links/rechts), um ein weiteres Feld anzufügen. Mit&nbsp;„📏&nbsp;Bordbrett“ zeichnen Sie die Kante der Gerüstlage in einem Zug nach – die Linie wirkt auf jede Achse, an der sie entlangläuft, und die Eckenkorrektur (±&nbsp;Gerüsttiefe) rechnet das Programm selbst. An einer Außenecke können Sie den Umlauf auch direkt am Eck-Symbol festlegen.</p>
-    </header>
+    <!-- ══════════════════════════════════════════════════════════════════
+         Werkzeugleiste – EINE Zeile, so flach wie möglich.
 
-    <div id="toolbar">
-      <div class="tool-group">
-        <label class="tool-label">Projekt
-          <input type="text" id="projectName" placeholder="z. B. Haus Meier" />
-        </label>
-        <label class="tool-label">Gerüsttiefe (m)
-          <input type="number" id="scaffDepth" value="0.73" min="0.10" step="0.01" />
-        </label>
+         Auf dem iPad ist Bildschirmfläche die knappste Ressource: alles, was
+         hier steht, fehlt der Zeichnung. Deshalb liegen Rücksprung, Name der
+         Zeichnung und die Werkzeuge in derselben Leiste, und alles, was man
+         einmal pro Zeichnung braucht (Gerüsttiefe, Vorlagen, Datei, Projekt-
+         wechsel), liegt hinter EINEM Knopf „Projekt".
+         ══════════════════════════════════════════════════════════════════ -->
+    <div id="toolbar" role="toolbar" aria-label="Werkzeuge">
+
+      <div class="tb-titel">
+        <a href="#/" class="back-link" title="Zurück" aria-label="Zurück">←</a>
+        <input type="text" id="projectName" class="tb-name"
+               placeholder="Zeichnung benennen…" aria-label="Name der Zeichnung"
+               autocomplete="off" spellcheck="false" />
       </div>
-      <div class="tool-group presets">
-        <span class="tool-label">Vorlage:</span>
-        <button id="lShapeBtn" class="secondary">L-Form</button>
-        <button id="uShapeBtn" class="secondary">U-Form</button>
-        <button id="rectBtn" class="secondary">Rechteck</button>
+
+      <div class="tb-tools">
+        <button type="button" id="addSectionBtn" class="tb-btn primaer" title="Feld hinzufügen">
+          <span class="tb-ico" aria-hidden="true">＋</span><span class="tb-txt">Feld</span>
+        </button>
+
+        <span class="tb-trenner" aria-hidden="true"></span>
+
+        <button type="button" id="undoBtn" class="tb-btn nur-ico"
+                title="Rückgängig (Strg/Cmd+Z)" aria-label="Rückgängig" disabled>
+          <span class="tb-ico" aria-hidden="true">↶</span>
+        </button>
+        <button type="button" id="redoBtn" class="tb-btn nur-ico"
+                title="Wiederholen (Strg/Cmd+Umschalt+Z)" aria-label="Wiederholen" disabled>
+          <span class="tb-ico" aria-hidden="true">↷</span>
+        </button>
+
+        <span class="tb-trenner" aria-hidden="true"></span>
+
+        <button type="button" id="fitViewBtn" class="tb-btn" title="Alle Felder anzeigen">
+          <span class="tb-ico" aria-hidden="true">⤢</span><span class="tb-txt">Alle</span>
+        </button>
+        <button type="button" id="snapToggleBtn" class="tb-btn aktiv" aria-pressed="true"
+                title="Magnet: An – Felder rasten aneinander ein">
+          <span class="tb-ico" aria-hidden="true">🧲</span><span class="tb-txt">Magnet</span>
+        </button>
+        <button type="button" id="bordbrettBtn" class="tb-btn" aria-pressed="false"
+                title="Bordbrett: Außenkanten antippen oder überstreichen">
+          <span class="tb-ico" aria-hidden="true">▤</span><span class="tb-txt">Bordbrett</span>
+        </button>
+
+        <span class="tb-trenner" aria-hidden="true"></span>
+
+        <button type="button" id="tdMenuBtn" class="tb-btn" aria-haspopup="dialog"
+                title="Projekt: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei">
+          <span class="tb-ico" aria-hidden="true">▦</span><span class="tb-txt">Projekt</span>
+        </button>
+        <button type="button" id="td-exportPdfBtn" class="tb-btn primaer" title="PDF erzeugen">
+          <span class="tb-ico" aria-hidden="true">⤓</span><span class="tb-txt">PDF</span>
+        </button>
       </div>
-      <div class="tool-group stats">
-        <span class="area-readout" id="areaReadout" title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">Gesamtfläche: 0,00 m²</span>
-        <span class="warnings-readout hidden" id="warningsReadout" title="Felder mit fehlenden oder unvollständigen Angaben"></span>
+
+      <div class="tb-werte">
+        <span class="area-readout" id="areaReadout"
+              title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">0,00 m²</span>
+        <span class="bb-readout hidden" id="bordbrettReadout"
+              title="Summe der markierten Bordbrett-Kanten">0,00 m</span>
+        <span class="warnings-readout hidden" id="warningsReadout"
+              title="Felder mit fehlenden oder unvollständigen Angaben"></span>
       </div>
-      <div class="tool-group actions">
-        <button id="addSectionBtn" class="primary">Feld&nbsp;hinzufügen</button>
-        <button id="undoBtn" class="secondary" title="Rückgängig (Strg/Cmd+Z)" disabled>↶</button>
-        <button id="redoBtn" class="secondary" title="Wiederholen (Strg/Cmd+Umschalt+Z)" disabled>↷</button>
-        <button id="shakeUndoBtn" class="secondary" title="Schütteln zum Rückgängigmachen aktivieren">📳</button>
-        <button id="fitViewBtn" class="secondary" title="Alle gezeichneten Felder zentriert anzeigen">Alle&nbsp;Felder&nbsp;anzeigen</button>
-        <button id="snapToggleBtn" class="secondary" title="Magnetraster: An">🧲</button>
-        <button id="tdFileMenuBtn" class="secondary" title="Datei: neue Zeichnung anlegen, öffnen, sichern">📄&nbsp;Datei</button>
-        <button id="tdProjectBtn" class="secondary" title="Anderes Projekt zeichnen – zeigt die Projekte nach Ordnern">📁&nbsp;Projekt</button>
-        <button id="savePlanBtn" class="secondary">Speichern</button>
-        <button id="loadPlanBtn" class="secondary">Laden</button>
-        <button id="photosBtn" class="secondary" title="Projekt-Fotos ansehen/hinzufügen">📷 Fotos</button>
-        <button id="grundrissBtn" class="secondary" title="Grundriss als Hintergrund einblenden und ausrichten">🗺️ Grundriss</button>
-        <button id="bordbrettBtn" class="secondary" title="Linie entlang der Bordbretter zeichnen – sie korrigiert die Ecken jeder Achse, an der sie entlangläuft">📏 Bordbrett</button>
-        <button id="td-exportPdfBtn" class="primary">PDF</button>
-        <button id="deviceToggleBtn" class="secondary" title="Gerät wechseln">📱</button>
-      </div>
+
       <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
-      <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none" />
-      <input type="file" id="grundrissFileInput" accept="image/*" style="display:none" />
     </div>
 
     <div id="appLayout">
@@ -590,14 +614,14 @@
         </div>
         <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
 
-        <!-- Bedienleiste beim Zeichnen der Bordbretter-Linie -->
+        <!-- Bedienleiste im Bordbrett-Modus. Bleibt stehen, solange markiert
+             wird – ein Toast wäre nach zwei Sekunden weg. -->
         <div id="bordbrettBar" class="bordbrett-bar hidden">
-          <span id="bordbrettBarInfo" class="bordbrett-bar-info">Bordbretter-Linie</span>
-          <span class="bordbrett-bar-hint">Punkte entlang der Feldkanten antippen – sie rasten auf Kante und Ecke ein.</span>
+          <span id="bordbrettBarInfo" class="bordbrett-bar-info">Bordbrett 0,00 m</span>
+          <span class="bordbrett-bar-hint">Außenkante antippen oder mit dem Finger darüberstreichen. Nochmal tippen entfernt sie.</span>
           <div class="bordbrett-bar-actions">
-            <button id="bordbrettZurueckBtn" type="button" class="secondary">↶ Punkt</button>
-            <button id="bordbrettAbbruchBtn" type="button" class="secondary">Abbrechen</button>
-            <button id="bordbrettFertigBtn" type="button" class="primary">Fertig &amp; zuordnen</button>
+            <button id="bordbrettLeerenBtn" type="button" class="secondary">Alle entfernen</button>
+            <button id="bordbrettFertigBtn" type="button" class="primary">Fertig</button>
           </div>
         </div>
       </div>
@@ -680,9 +704,9 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="core.js?v=20260826"></script>
-  <script src="script.js?v=20260826"></script>
-  <script src="viewer2d.js?v=20260826"></script>
-  <script src="shell.js?v=20260826"></script>
+  <script src="core.js?v=20260827"></script>
+  <script src="script.js?v=20260827"></script>
+  <script src="viewer2d.js?v=20260827"></script>
+  <script src="shell.js?v=20260827"></script>
 </body>
 </html>

@@ -131,12 +131,12 @@ function textsOf(saved) {
 
 const onlyVisible = await page.evaluate(async () => {
   window.__pdfSaved = null;
-  await buildPdf('technisch', { includeHidden: false });
+  await buildPdf('farbe', { includeHidden: false });
   return window.__pdfSaved;
 });
 const withHidden = await page.evaluate(async () => {
   window.__pdfSaved = null;
-  await buildPdf('technisch', { includeHidden: true });
+  await buildPdf('farbe', { includeHidden: true });
   return window.__pdfSaved;
 });
 
@@ -149,11 +149,22 @@ assert(tVis.includes('ausgeblendet'),
 assert(tAll.includes('Ostseite') && tVis.includes('Ostseite'),
   'sichtbare Abschnitte sind in beiden Fällen enthalten');
 
-// Kennzahlen unterscheiden sich entsprechend
-const lenVis = tVis.match(/Achsmaß ([\d,]+) m/);
-const lenAll = tAll.match(/Achsmaß ([\d,]+) m/);
-assert(lenVis && lenAll && parseFloat(lenVis[1].replace(',', '.')) < parseFloat(lenAll[1].replace(',', '.')),
-  `Kennzahlen folgen dem Export-Umfang (${lenVis[1]} m sichtbar vs. ${lenAll[1]} m gesamt)`);
+// Die Mengen folgen dem Export-Umfang. Nachgewiesen an der Gerüstfläche der
+// Gesamtaufstellung – die Kennzahlen-Fußzeile auf jedem Blatt ist mit der
+// Vereinfachung des Dokuments entfallen.
+const flaeche = txt => {
+  const m = [...txt.matchAll(/Gerüstfläche\n([\d.,]+)\nm²/g)]
+    .map(x => parseFloat(x[1].replace(/\./g, '').replace(',', '.')));
+  return m.length ? Math.max(...m) : null;
+};
+const fVis = flaeche(tVis), fAll = flaeche(tAll);
+assert(fVis != null && fAll != null && fVis < fAll,
+  `Mengen folgen dem Export-Umfang (${fVis} m² sichtbar vs. ${fAll} m² gesamt)`);
+
+// Die Feldzahl in der Kopfzeile ebenso
+const felder = txt => { const m = txt.match(/(\d+) Felder/); return m ? +m[1] : null; };
+assert(felder(tVis) < felder(tAll),
+  `die Kopfzeile nennt die exportierte Feldzahl (${felder(tVis)} vs. ${felder(tAll)})`);
 
 assert(ctx.logs.filter(l => l.startsWith('[pageerror]')).length === 0,
   'keine JS-Fehler: ' + ctx.logs.filter(l => l.startsWith('[pageerror]')).join(' | '));

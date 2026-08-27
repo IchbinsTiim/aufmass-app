@@ -31,7 +31,8 @@ Seitenaufbau ohne echte PDF-Erzeugung nachvollziehen.
 ```bash
 node tests/t1-abschnitte.mjs    # Abschnitte: anlegen/zuordnen/löschen, Anzeige oben links, Persistenz
 node tests/t2-rotation.mjs 80   # Auswahl/Drehen ohne Verzögerung, Renderaufwand (Argument = Feldanzahl)
-node tests/t3-pdf.mjs           # PDF: Mehrseitigkeit, wiederholte Kopfzeile/Legende, Tabellen, Layouts
+node tests/t3-pdf.mjs           # PDF: Seite 1 Zeichnung / Seite 2 Aufmaß, Blatteinteilung,
+                                #      Achsen auf einer Seite, Tabellenumbruch, zwei Ausgaben
 node tests/fitcheck.mjs         # geometrischer Nachweis: kein Blattinhalt ragt in Kopf-/Fußzeile
 node tests/e2e.mjs              # durchgängiger Ablauf über die Oberfläche (Vorlage → Abschnitt → Drehen → PDF)
 ```
@@ -49,8 +50,11 @@ Runde 3:
 
 ```bash
 node tests/r3-t1-innenecken.mjs     # Innenecken: durchlaufende Achse −0,73 m, ausfüllende +0,73 m
-node tests/r3-t2-grundriss.mjs      # Grundriss als Hintergrundebene; Eckentyp aus dem Bild ableiten
 ```
+
+Der frühere `r3-t2-grundriss.mjs` ist mit der Grundriss-Funktion entfallen:
+ein Hintergrundbild unter der Zeichnung wurde auf der Baustelle nicht genutzt
+und kostete in der Werkzeugleiste einen Platz, den das Zeichnen besser braucht.
 
 Runde 4 (Aufmaß-Programm, nicht 2D-Zeichner):
 
@@ -63,11 +67,19 @@ node tests/r4-aufmass-positionen.mjs   # Parkplatz/Genehmigung, Umlauf-„+" mit
 Runde 5:
 
 ```bash
-node tests/r5-bordbretter.mjs      # Bordbretter-Linie zeichnen (Snapping an Feldkanten),
-                                   # einer Achse zuordnen, Ecken automatisch korrigieren
-                                   # (Innenecke − / Außenecke + Gerüsttiefe);
-                                   # Aufmaß je Gerüsthöhe getrennt zusammengefasst
+node tests/r5-bordbretter.mjs      # Bordbrett als markierte Gerüstkante: Menge aus der
+                                   # tatsächlichen Kantenlänge, gedrehte Felder, keine
+                                   # doppelt gezählte Kante, Tippen und Wischen,
+                                   # Aufmaß je Achse, Altdaten-Übernahme
 ```
+
+`r5` rechnet die Abnahmefälle nach: ein Feld 2,57 × 0,73 ergibt 2,57 m an der
+langen Kante, 3,30 m mit einer kurzen Seite dazu und 6,60 m im vollen Umlauf;
+drei Felder nebeneinander an der Unterseite 7,71 m. Ein um 90° gedrehtes Feld
+liefert an seiner echten 2,57-m-Kante weiterhin 2,57 m (nicht 0,73 m), und eine
+Kante, die sich zwei Felder teilen, zählt auch dann nur einmal, wenn sie von
+beiden Feldern aus markiert wurde. Bei 1,09 m Gerüsttiefe ändert sich der
+Umlauf entsprechend – die Tiefe ist keine Konstante.
 
 Runde 6:
 
@@ -75,7 +87,7 @@ Runde 6:
 node tests/r6-blaetter-verbreiterung.mjs   # Blatteinteilung (so wenige Blätter wie möglich,
                                            # links → rechts), Verbreiterungen (Rahmen mit Rohr,
                                            # Modul-Abstützung), Ecken an gemeinsamen Feldanfängen,
-                                           # Bordbretter-Linie über mehrere Achsen
+                                           # Bordbretter über mehrere Achsen
 ```
 
 `r6` deckt drei Punkte ab:
@@ -91,9 +103,9 @@ node tests/r6-blaetter-verbreiterung.mjs   # Blatteinteilung (so wenige Blätter
   Länge/Breite/Höhe, leere Eingaben erben die Maße des Feldes).
 * **Ecken/Bordbretter** – eine Ecke wird auch dort erkannt, wo zwei Felder am
   SELBEN Punkt beginnen oder enden (vorher fehlte dort die ±-Gerüsttiefe
-  komplett); eine Bordbretter-Linie wirkt auf alle Achsen, an denen sie
-  entlangläuft; ein Umlauf an einer Außenecke lässt sich direkt an der Ecke
-  festlegen (+ Gerüsttiefe je Seite), ohne eine Linie zu zeichnen.
+  komplett); ein Umlauf an einer Außenecke wird direkt am Eck-Symbol festgelegt
+  (+ Gerüsttiefe je Seite); Bordbretter rund um ein Gerüst verteilen sich auf
+  alle Achsen, ohne dass eine gemeinsame Kante doppelt zählt.
 
 Runde 7 (Shell der zusammengeführten App):
 
@@ -114,7 +126,7 @@ Runde 9 (Zeichnungen anlegen und löschen):
 
 ```bash
 node tests/r9-2d-zeichnungen.mjs    # „Neue Zeichnung" (Liste, Leerzustand,
-                                    # Datei-Menü), leere Zeichenfläche und leere
+                                    # Projekt-Sheet), leere Zeichenfläche und leere
                                     # Undo-History, Persistenz über den Reload,
                                     # Löschen einzeln/mehrfach mit Bestätigung
                                     # und „Rückgängig", Editor schließt beim
@@ -132,14 +144,20 @@ Fotos, deren Projekt es nicht mehr gibt, räumt der Start des Moduls auf.
 ## Nachweis „rechnerisch identisch"
 
 Zwei Vergleichsläufe rechnen dasselbe Aufmaß einmal in der Fassung **vor** dem
-Zusammenführen und einmal in der zusammengeführten App durch. Verglichen werden
-alle Rechenergebnisse **und jeder einzelne Zeichenaufruf des PDF-Exports**
-(Text, Position, Reihenfolge, Seite).
+Zusammenführen und einmal in der heutigen App durch. Verglichen werden alle
+Rechenergebnisse: Aufmaßregeln, Ecken, Eckkorrekturen, Achsen, Flächen,
+Positionen und Seitenzuordnung.
+
+Nicht mehr verglichen werden **Bordbrett** und **PDF-Aufbau**: beide wurden
+bewusst neu gebaut (Bordbrett rechnet aus der markierten Gerüstkante statt aus
+dem Verlauf einer gezeichneten Linie; das Dokument besteht aus Zeichnung und
+Aufmaßtabelle). Ein Vergleich könnte dort nur den gewollten Unterschied
+melden – geprüft werden sie in `r5-bordbretter.mjs` und `t3-pdf.mjs`.
 
 ```bash
 git worktree add /tmp/vorher <commit-vor-der-zusammenfuehrung>
 node tests/ab-vergleich-2d.mjs      /tmp/vorher   # Aufmaßregeln ATV DIN 18451,
-                                                  # Eckenkorrektur, Bordbretter, Plan-PDF
+                                                  # Eckenkorrektur, Achsen, Positionen
 node tests/ab-vergleich-aufmass.mjs /tmp/vorher   # Flächen, Längen, 50-m-Hinweise,
                                                   # Zusammenfassung, Angebots-PDF
 ```
@@ -147,15 +165,6 @@ node tests/ab-vergleich-aufmass.mjs /tmp/vorher   # Flächen, Längen, 50-m-Hinw
 Beide melden „rechnerisch identisch – keine einzige Abweichung", solange an der
 Fachlogik nichts geändert wurde. Genau das ist die Abnahmebedingung für jede
 Umbaumaßnahme an der Hülle.
-
-`r5` prüft das Testbeispiel bei 0,73 m Gerüsttiefe: eine Achse, deren
-Bordbretter-Linie durch eine Innenecke läuft, verliert am letzten Feld vor der
-Ecke 0,73 m (2,57 + 2,57 + (2,57 − 0,73) = 6,98 m); eine Achse, deren Linie um
-eine Außenecke herumläuft, gewinnt am Feld an der Ecke 0,73 m
-(2,57 + (2,57 + 0,73) = 5,87 m). Bei 1,09 m Gerüsttiefe wird entsprechend um
-1,09 m korrigiert – der Wert ist keine Konstante. Zusätzlich: 10 Felder à
-2,57 m auf einer Seite, davon 5 mit 10,20 m und 5 mit 8,20 m Höhe, erscheinen
-im PDF getrennt als 12,85 m × 10,20 m und 12,85 m × 8,20 m.
 
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
 Innenecke ergeben 2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse

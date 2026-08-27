@@ -7,82 +7,199 @@
    fuer die per JS an <body> gehaengten Sheets/Overlays, weil <body> deren
    Vorfahre ist. Inhaltlich unveraendert gegenueber der bisherigen 2D-App.
    =========================================================================== */
-/* ── Gerüst 2D-Ansicht ───────────────────────────────────────────────── */
-body[data-modul="2d"] .viewer-header {
-  padding: 1rem 1rem 0.5rem;
-  max-width: 100%;
-  text-align: left;
-}
-body[data-modul="2d"] .viewer-header h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
-body[data-modul="2d"] .viewer-header p { margin: 0; font-size: 0.85rem; color: #cccccc; }
+/* ── Werkzeugleiste ──────────────────────────────────────────────────────
+   Eine einzige, flache Zeile über der Zeichnung: Rücksprung + Name links,
+   Werkzeuge in der Mitte, Kennzahlen rechts. Alles, was sonst noch an
+   Bedienelementen da war (Erklärtext, zweite Kopfzeile, zehn gleich
+   aussehende Knöpfe), ist entfallen – die Fläche gehört der Zeichnung.    */
 
-body[data-modul="2d"] .back-link {
-  display: inline-block;
-  margin-bottom: 0.5rem;
-  color: #007aff;
-  text-decoration: none;
-  font-size: 0.95rem;
-}
-body[data-modul="2d"] .back-link:hover { text-decoration: underline; }
-
-/* ── Toolbar ─────────────────────────────────────────────────────────── */
 body[data-modul="2d"] #toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
+  align-items: center;
+  gap: 10px;
   background: #212121;
   border-bottom: 1px solid #434343;
-  padding: 0.75rem 1rem;
+  padding: 6px 10px;
   position: sticky;
   top: 0;
   z-index: 10;
+  min-height: 56px;
 }
 
-body[data-modul="2d"] .tool-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: flex-end;
-}
-body[data-modul="2d"] .tool-group.actions { margin-left: auto; }
-
-body[data-modul="2d"] .tool-group.stats { align-items: center; }
-body[data-modul="2d"] .area-readout {
+body[data-modul="2d"] .back-link {
   display: inline-flex;
   align-items: center;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: #1d2e44;
-  border: 1.5px solid #1d2e44;
-  color: #8bb5e4;
-  font-size: 0.9rem;
-  font-weight: 800;
-  white-space: nowrap;
+  justify-content: center;
+  width: 40px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  color: #007aff;
+  text-decoration: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  border-radius: 10px;
+}
+body[data-modul="2d"] .back-link:hover { background: rgba(255, 255, 255, .08); }
+
+/* Name der Zeichnung: sieht aus wie eine Überschrift, ist aber das Eingabe-
+   feld selbst – ein Tipp genügt zum Umbenennen, es gibt keinen zweiten Ort
+   dafür. */
+/* Der Titel nimmt nur so viel Platz, wie ein Name braucht – die Werkzeuge
+   sollen links stehen, nicht ans andere Ende geschoben werden. */
+body[data-modul="2d"] .tb-titel {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 18rem;
+  min-width: 110px;
+}
+body[data-modul="2d"] .tb-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #f2f5f9;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+}
+body[data-modul="2d"] .tb-name::placeholder { color: #7e8b9a; font-weight: 500; }
+body[data-modul="2d"] .tb-name:hover  { background: rgba(255, 255, 255, .06); }
+body[data-modul="2d"] .tb-name:focus  {
+  outline: none;
+  background: rgba(255, 255, 255, .10);
+  border-color: rgba(255, 255, 255, .22);
 }
 
-body[data-modul="2d"] .tool-label {
+/* ── Werkzeuge ───────────────────────────────────────────────────────────
+   Jeder Knopf ist mindestens 44 px hoch und trägt Symbol + kurzes Wort.
+   Auf schmalen Geräten fällt die Beschriftung weg, der Knopf bleibt gleich
+   groß – die Trefferfläche darf nie schrumpfen.                           */
+body[data-modul="2d"] .tb-tools {
   display: flex;
-  flex-direction: column;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #cccccc;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
-body[data-modul="2d"] .tool-label input[type="text"],
-body[data-modul="2d"] .tool-label input[type="number"] {
-  width: 9rem;
-  padding: 0.45rem 0.6rem;
+body[data-modul="2d"] .tb-tools::-webkit-scrollbar { display: none; }
+
+body[data-modul="2d"] .tb-trenner {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 26px;
+  background: #4a4a4a;
+  margin: 0 2px;
+}
+
+body[data-modul="2d"] .tb-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
   border: 1px solid #4a4a4a;
-  border-radius: 6px;
-  font-size: 0.95rem;
+  border-radius: 11px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: .86rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
 }
-body[data-modul="2d"] #scaffDepth { width: 5.5rem; }
+body[data-modul="2d"] .tb-btn.nur-ico { padding: 0; }
+body[data-modul="2d"] .tb-btn .tb-ico { font-size: 1.06rem; line-height: 1; }
+body[data-modul="2d"] .tb-btn:hover:not(:disabled) { background: #383838; }
+body[data-modul="2d"] .tb-btn:active:not(:disabled) { transform: scale(.96); }
+body[data-modul="2d"] .tb-btn:disabled { opacity: .38; cursor: not-allowed; }
+
+/* Eingeschaltete Werkzeuge (Magnet, Bordbrett) sind auf einen Blick als
+   solche erkennbar – nicht nur an einem anderen Grauton. */
+body[data-modul="2d"] .tb-btn.aktiv {
+  background: #10496f;
+  border-color: #2f8fd0;
+  color: #cfe8fb;
+}
+body[data-modul="2d"] .tb-btn.primaer {
+  background: #007aff;
+  border-color: #007aff;
+  color: #fff;
+}
+body[data-modul="2d"] .tb-btn.primaer:hover { filter: brightness(1.08); background: #007aff; }
+
+/* Schmalere Geräte (iPad hochkant, 1024er Modelle): die Beschriftungen der
+   Werkzeuge fallen weg, ihre Symbole und Tooltips bleiben. Entscheidend ist,
+   dass ALLE Werkzeuge sichtbar bleiben – ein weggescrolltes „PDF" wäre die
+   schlechtere Lösung als ein Knopf ohne Wort. Die beiden Hauptaktionen
+   („Feld", „PDF") behalten ihr Wort. */
+@media (max-width: 1100px) {
+  body[data-modul="2d"] .tb-btn:not(.primaer) .tb-txt { display: none; }
+  body[data-modul="2d"] .tb-btn:not(.primaer) { padding: 0; }
+  body[data-modul="2d"] .tb-titel { flex: 0 1 12rem; min-width: 80px; }
+  body[data-modul="2d"] .tb-trenner { margin: 0; }
+  /* Der Titel gibt nach, nicht die Werkzeuge: ein abgeschnittener Name ist
+     hinnehmbar, ein abgeschnittener Knopf nicht. */
+  body[data-modul="2d"] .tb-tools { flex: 0 0 auto; }
+}
+
+/* ── Kennzahlen ──────────────────────────────────────────────────────────
+   Nur Zahlen, die man beim Zeichnen wirklich im Auge behält.             */
+body[data-modul="2d"] .tb-werte {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+body[data-modul="2d"] .area-readout,
+body[data-modul="2d"] .bb-readout,
+body[data-modul="2d"] .warnings-readout {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: .84rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+body[data-modul="2d"] .area-readout {
+  background: #1d2e44;
+  border: 1px solid #27415f;
+  color: #8bb5e4;
+}
+body[data-modul="2d"] .bb-readout {
+  background: #10352f;
+  border: 1px solid #1c5c50;
+  color: #63d3bd;
+}
+body[data-modul="2d"] .bb-readout.hidden,
+body[data-modul="2d"] .warnings-readout.hidden { display: none; }
+
+/* Einheit hinter einem Zahlenfeld im Sheet (z. B. „m" bei der Gerüsttiefe). */
+body[data-modul="2d"] .sheet-unit {
+  align-self: center;
+  padding: 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #b1b5ba;
+}
 
 /* ── App layout ──────────────────────────────────────────────────────── */
 body[data-modul="2d"] #appLayout {
   display: flex;
-  height: calc(100vh - 155px);
+  /* Über der Zeichenfläche liegt nur noch die 56 px hohe Werkzeugleiste. */
+  height: calc(100vh - 56px);
   min-height: 400px;
 }
 
@@ -1388,92 +1505,27 @@ body[data-modul="2d"] .rot-slider::-moz-range-thumb {
   cursor: pointer;
 }
 
-/* ── Device picker overlay ───────────────────────────────────────────── */
-body[data-modul="2d"] #deviceOverlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.55);
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-body[data-modul="2d"] .device-picker {
-  background: #212121;
-  border-radius: 20px;
-  padding: 2rem 1.5rem 1.5rem;
-  width: min(360px, 92vw);
-  text-align: center;
-  box-shadow: 0 16px 56px rgba(0,0,0,0.28);
-}
-
-body[data-modul="2d"] .device-picker-title {
-  font-size: 1.45rem;
-  font-weight: 800;
-  color: #90b6e0;
-  margin-bottom: 0.35rem;
-}
-
-body[data-modul="2d"] .device-picker-sub {
-  font-size: 0.9rem;
-  color: #bdbdbd;
-  margin-bottom: 1.5rem;
-}
-
-body[data-modul="2d"] .device-picker-btns {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
-
-body[data-modul="2d"] .dev-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 1.3rem 0.5rem 1rem;
-  border: 2.5px solid #444444;
-  border-radius: 16px;
-  background: #242424;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  font-family: system-ui, sans-serif;
-}
-body[data-modul="2d"] .dev-btn:hover,
-body[data-modul="2d"] .dev-btn:active {
-  border-color: #007aff;
-  background: #1d2f44;
-}
-body[data-modul="2d"] .dev-btn .dv-icon { font-size: 2.8rem; line-height: 1; }
-body[data-modul="2d"] .dev-btn .dv-label { font-size: 1.1rem; font-weight: 800; color: #90b6e0; }
-body[data-modul="2d"] .dev-btn .dv-desc { font-size: 0.75rem; color: #b5b5b5; }
-
-body[data-modul="2d"] .device-picker-note {
-  font-size: 0.75rem;
-  color: #9e9e9e;
-}
-
 /* ── iPhone mode overrides ───────────────────────────────────────────── */
-body[data-modul="2d"][data-mode="iphone"] .tool-group.presets { display: none; }
-
+/* Auf dem Handy zählt jeder Millimeter: die Wörter neben den Symbolen
+   fallen weg, die Trefferfläche der Knöpfe bleibt unverändert bei 44 px. */
 body[data-modul="2d"][data-mode="iphone"] #toolbar {
-  padding: 0.5rem 0.75rem;
-  gap: 0.4rem;
+  padding: 5px 8px;
+  gap: 6px;
+  min-height: 52px;
 }
-
-body[data-modul="2d"][data-mode="iphone"] .tool-label input[type="text"] { width: 7rem; }
-body[data-modul="2d"][data-mode="iphone"] #scaffDepth { width: 4rem; }
-body[data-modul="2d"][data-mode="iphone"] .area-readout { padding: 0.35rem 0.5rem; font-size: 0.78rem; }
+body[data-modul="2d"][data-mode="iphone"] .tb-btn .tb-txt { display: none; }
+body[data-modul="2d"][data-mode="iphone"] .tb-btn { padding: 0; }
+body[data-modul="2d"][data-mode="iphone"] .tb-titel { flex: 1 1 90px; min-width: 80px; }
+body[data-modul="2d"][data-mode="iphone"] .tb-name { font-size: .92rem; }
+body[data-modul="2d"][data-mode="iphone"] .area-readout,
+body[data-modul="2d"][data-mode="iphone"] .bb-readout { padding: 0 7px; font-size: .76rem; }
 
 body[data-modul="2d"][data-mode="iphone"] #appLayout {
-  height: calc(100dvh - 120px);
+  height: calc(100dvh - 52px);
   min-height: 320px;
 }
 @supports not (height: 1dvh) {
-  body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100vh - 120px); }
+  body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100vh - 52px); }
 }
 
 body[data-modul="2d"][data-mode="iphone"] #sidePanel { display: none; }
@@ -1505,23 +1557,9 @@ body[data-modul="2d"][data-mode="ipad"] .bottom-sheet.open {
   transform: translateY(0);
 }
 
-/* device toggle button */
-body[data-modul="2d"] #deviceToggleBtn {
-  font-size: 1.05rem;
-  padding: 0.4rem 0.55rem;
-}
-
-/* snap toggle */
-body[data-modul="2d"] #snapToggleBtn { font-size: 1.05rem; padding: 0.4rem 0.55rem; }
-body[data-modul="2d"] #snapToggleBtn.snap-off { opacity: 0.4; text-decoration: line-through; }
-
-/* undo / redo / Schütteln-Umschalter */
-body[data-modul="2d"] #undoBtn,
-body[data-modul="2d"] #redoBtn { font-size: 1.15rem; padding: 0.4rem 0.6rem; }
-body[data-modul="2d"] #undoBtn:disabled,
-body[data-modul="2d"] #redoBtn:disabled { opacity: 0.35; cursor: not-allowed; }
-body[data-modul="2d"] #shakeUndoBtn { font-size: 1.05rem; padding: 0.4rem 0.55rem; }
-body[data-modul="2d"] #shakeUndoBtn.active { background: #ffe6a8; border-color: #c0591a; }
+/* Ausgeschalteter Magnet: das Symbol allein sagt zu wenig, deshalb bleibt der
+   Knopf sichtbar gedämpft, statt sich nur im Grauton zu unterscheiden. */
+body[data-modul="2d"] #snapToggleBtn:not(.aktiv) .tb-ico { opacity: .45; }
 
 /* ── Plausibilitätsprüfung (Warnhinweise) ─────────────────────────────── */
 body[data-modul="2d"] .warnings-readout {
@@ -1613,106 +1651,6 @@ body[data-modul="2d"] .fav-chip-rm {
   font-size: 0.85rem;
 }
 body[data-modul="2d"] .fav-save-btn { width: 100%; margin-bottom: 0.7rem; }
-
-/* ── Projekt-Fotos ─────────────────────────────────────────────────────── */
-body[data-modul="2d"] .photos-sheet { max-height: 82vh; }
-body[data-modul="2d"] .photos-add-btn {
-  width: 100%;
-  padding: 0.7rem;
-  margin-bottom: 0.7rem;
-  border: none;
-  border-radius: 9px;
-  background: #007aff;
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-body[data-modul="2d"] .photos-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 0.5rem;
-  margin-bottom: 0.7rem;
-}
-body[data-modul="2d"] .photo-tile {
-  position: relative;
-  aspect-ratio: 1;
-  border-radius: 9px;
-  overflow: hidden;
-  background: #282828;
-  border: 1.5px solid #434343;
-}
-body[data-modul="2d"] .photo-tile img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  cursor: pointer;
-  display: block;
-}
-body[data-modul="2d"] .photo-include-toggle {
-  position: absolute;
-  bottom: 3px;
-  right: 3px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0.15rem 0.35rem;
-  border-radius: 999px;
-  background: rgba(10, 47, 88, 0.78);
-  color: #fff;
-  font-size: 0.62rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-body[data-modul="2d"] .photo-include-toggle input { margin: 0; }
-body[data-modul="2d"] .photos-hint {
-  grid-column: 1 / -1;
-  text-align: center;
-  color: #adadad;
-  font-size: 0.85rem;
-}
-
-body[data-modul="2d"] .photo-lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.88);
-  z-index: 400;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-body[data-modul="2d"] .photo-lightbox-img {
-  max-width: 92vw;
-  max-height: 84vh;
-  object-fit: contain;
-  border-radius: 6px;
-}
-body[data-modul="2d"] .photo-lightbox-close,
-body[data-modul="2d"] .photo-lightbox-delete {
-  position: absolute;
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  font-weight: 700;
-}
-body[data-modul="2d"] .photo-lightbox-close {
-  top: max(16px, env(safe-area-inset-top));
-  right: 16px;
-  width: 2.4rem;
-  height: 2.4rem;
-  background: rgba(255,255,255,0.15);
-  color: #fff;
-  font-size: 1.1rem;
-}
-body[data-modul="2d"] .photo-lightbox-delete {
-  bottom: max(20px, env(safe-area-inset-bottom));
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.7rem 1.2rem;
-  background: #ff3b30;
-  color: #fff;
-  font-size: 0.95rem;
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
    Abschnitte (Unterkategorien für Gerüstfelder)
@@ -1984,7 +1922,6 @@ body[data-modul="2d"] .bulk-absch-info-label {
    blendete das „Kopieren"-Menü ein – von der App völlig unbemerkt und ohne
    dass ein Feld reagierte. Die Auswahl wird deshalb überall unterbunden,
    außer in echten Eingabefeldern.                                            */
-body[data-modul="2d"] .viewer-header,
 body[data-modul="2d"] #toolbar,
 body[data-modul="2d"] #appLayout,
 body[data-modul="2d"] #sidePanel,
@@ -2077,13 +2014,12 @@ body[data-modul="2d"] .pdf-theme-prev .ptp-l1 { top: 1.15rem; right: 0.32rem; }
 body[data-modul="2d"] .pdf-theme-prev .ptp-l2 { top: 1.75rem; right: 1.4rem; }
 body[data-modul="2d"] .pdf-theme-prev .ptp-l3 { top: 2.35rem; right: 0.9rem; }
 
-body[data-modul="2d"] .pdf-theme-prev--technisch .ptp-band {
+body[data-modul="2d"] .pdf-theme-prev--farbe .ptp-band {
   background: linear-gradient(to right, #1a4a7a 0 3px, transparent 3px);
   border-bottom: 1px solid #484d51;
   border-radius: 0;
 }
-body[data-modul="2d"] .pdf-theme-prev--kontrast .ptp-band { background: #0b3d69; }
-body[data-modul="2d"] .pdf-theme-prev--kontrast .ptp-l1 { background: #1d3144; }
+body[data-modul="2d"] .pdf-theme-prev--farbe .ptp-l1 { background: #1d3144; }
 body[data-modul="2d"] .pdf-theme-prev--monochrom .ptp-band {
   background: linear-gradient(to right, #282828 0 3px, transparent 3px);
   border-bottom: 1px solid #545454;
@@ -2225,40 +2161,11 @@ body[data-modul="2d"] .eck-choice-sub {
 }
 body[data-modul="2d"] .eck-choice.active .eck-choice-sub { color: #8ebbe1; }
 
-/* ── Bordbretter-Dialog ───────────────────────────────────────────────────── */
-body[data-modul="2d"] .bordbrett-achs-row { max-height: 40vh; overflow-y: auto; }
-
-body[data-modul="2d"] .bordbrett-verlauf {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  margin: 0.35rem 0 0.6rem 0.35rem;
-}
-body[data-modul="2d"] .bordbrett-zeile {
-  padding: 0.45rem 0.6rem;
-  border-radius: 8px;
-  background: #26303b;
-  border-left: 3px solid #45494e;
-  font-size: 0.8rem;
-  line-height: 1.35;
-  color: #d1d3d6;
-}
-body[data-modul="2d"] .bordbrett-zeile.minus { border-left-color: #b3402a; background: #44231d; color: #e49a8b; }
-body[data-modul="2d"] .bordbrett-zeile.plus { border-left-color: #29ad6c; background: #1d442d; color: #8be4b9; }
-body[data-modul="2d"] .bordbrett-zeile.warn { border-left-color: #c2691b; background: #44311d; color: #e4b58b; }
-body[data-modul="2d"] .bordbrett-zeile.summe {
-  border-left-color: #2c6fa8;
-  background: #1d3244;
-  color: #8bb8e4;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-body[data-modul="2d"] .bordbrett-zeile.neutral { color: #b8bcc0; }
-
-/* ── Bedienleiste beim Zeichnen der Bordbretter-Linie ─────────────────────── */
-/* Bewusst `fixed` statt `absolute`: die Zeichenfläche ist oft höher als das
-   Fenster, ein am Panel verankerter Balken läge dann unterhalb des sichtbaren
-   Bereichs – und der einzige Weg aus dem Zeichenmodus wäre unerreichbar. */
+/* ── Bordbrett-Modus ──────────────────────────────────────────────────────
+   Die Bedienleiste liegt `fixed` am unteren Bildschirmrand: die Zeichenfläche
+   ist oft höher als das Fenster, ein am Panel verankerter Balken läge dann
+   außerhalb des Sichtbaren – und der einzige Weg aus dem Modus heraus wäre
+   nicht erreichbar.                                                        */
 body[data-modul="2d"] .bordbrett-bar {
   position: fixed;
   left: 50%;
@@ -2266,46 +2173,57 @@ body[data-modul="2d"] .bordbrett-bar {
   transform: translateX(-50%);
   z-index: 150;
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  max-width: min(92%, 30rem);
-  padding: 0.6rem 0.8rem;
-  border-radius: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  max-width: min(94%, 40rem);
+  padding: 10px 14px;
+  border-radius: 14px;
   border: 1.5px solid #14c2c1;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+  background: #14241f;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .38);
 }
 body[data-modul="2d"] .bordbrett-bar.hidden { display: none; }
 body[data-modul="2d"] .bordbrett-bar-info {
-  font-size: 0.86rem;
-  font-weight: 700;
-  color: #8be4e3;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #6fe3d3;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 body[data-modul="2d"] .bordbrett-bar-hint {
-  font-size: 0.74rem;
-  color: #b8bcc0;
+  flex: 1 1 12rem;
+  font-size: .78rem;
+  color: #a9b6b4;
   line-height: 1.3;
 }
 body[data-modul="2d"] .bordbrett-bar-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 8px;
+  flex: 0 0 auto;
 }
-body[data-modul="2d"] .bordbrett-bar-actions button { flex: 1 1 auto; }
-body[data-modul="2d"] .bordbrett-bar-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
-
-body[data-modul="2d"] #bordbrettBtn.active {
+body[data-modul="2d"] .bordbrett-bar-actions button {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 11px;
+  font-size: .88rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid #3a5450;
+  background: #1d3330;
+  color: #cfe8e4;
+}
+body[data-modul="2d"] .bordbrett-bar-actions button.primary {
+  background: #14c2c1;
   border-color: #14c2c1;
-  background: #1d4441;
-  color: #8be4e3;
+  color: #06231f;
 }
+body[data-modul="2d"] .bordbrett-bar-actions button:disabled { opacity: .45; cursor: not-allowed; }
 
-/* ── Grundriss-Dialog ─────────────────────────────────────────────────────── */
-body[data-modul="2d"] .grundriss-slider {
-  flex: 1 1 auto;
-  min-width: 6rem;
-  accent-color: #2c6fa8;
+body[data-modul="2d"] #bordbrettBtn.aktiv {
+  border-color: #14c2c1;
+  background: #14403d;
+  color: #8be4e3;
 }
 
 /* ── Modul-Abstützung: Eingabe wie bei einem Feld (Länge/Breite/Höhe) ────────
