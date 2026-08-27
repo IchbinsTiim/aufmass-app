@@ -117,58 +117,100 @@ zusammengeführten App geprüft.
 
 ### Modul 2 – 2D-Aufmaß
 
-**Werkzeugleiste**
+**Hauptleiste** – nur, was beim Zeichnen selbst ständig gebraucht wird
 
 | Funktion | |
 |---|---|
-| Projektname, Gerüsttiefe | ✅ |
-| Vorlagen L-Form, U-Form, Rechteck | ✅ |
-| Gesamtfläche, Hinweis-Zähler | ✅ |
+| Rücksprung, Name der Zeichnung | ✅ |
 | Feld hinzufügen | ✅ |
 | Rückgängig / Wiederholen (Stapel, 60 Schritte) | ✅ |
-| Schütteln zum Rückgängigmachen (Bewegungssensor) | ✅ |
-| Alle Felder anzeigen · Magnetraster · Ansicht zurücksetzen | ✅ |
-| Speichern / Laden (JSON-Datei) | ✅ |
-| Fotos · Grundriss · Bordbrett · PDF · Gerät wechseln | ✅ |
-| Datei-Menü: neue Zeichnung, Zeichnung öffnen, als Datei speichern/laden | ✅ |
+| Alle Felder anzeigen · Magnet | ✅ |
+| Bordbrett | ✅ |
+| Projekt (Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei speichern/laden) | ✅ |
+| PDF | ✅ |
+| **Werkzeuge (Pfeil-Knopf)** – klappt das Werkzeug-Menü auf und zu | ✅ |
+| Gesamtfläche, Bordbrett-Summe, Hinweis-Zähler | ✅ |
 
-**Seitenleiste**
+Im Handy-Modus ziehen **Bordbrett, Projekt und PDF** ins Werkzeug-Menü um –
+dieselben Knöpfe, nur an einem Ort, an dem sie nicht aus dem Bildschirm laufen.
+Es gibt keine zweite PDF- oder Projekt-Taste.
+
+**Werkzeug-Menü** – aufklappbar, geschlossen kostet es keine Zeichenfläche
+
+| Block | Funktion | |
+|---|---|---|
+| Auswahl | Mehrfachauswahl ein-/ausschalten, Zähler „x von y" | ✅ |
+| Auswahl | Alle Felder auswählen · Auswahl aufheben | ✅ |
+| Auswahl | ganze Achse auswählen · alle Felder einer Position auswählen | ✅ |
+| Auswahl | bei Einzelauswahl: „Feld bearbeiten" | ✅ |
+| Bearbeiten | Höhe links/rechts setzen, „="-Kopplung, Höhe aus Auswahl übernehmen | ✅ |
+| Bearbeiten | Eigenschaften/Kategorien (Innengeländer, Netz, Dachfang, Treppenturm …) | ✅ |
+| Bearbeiten | Konsole (Typ, Lagen oder Meter) auf die Auswahl | ✅ |
+| Bearbeiten | Position kopieren · Höhe kopieren · auf Auswahl anwenden (Umfang wählbar) | ✅ |
+| Bearbeiten | Vorlage auf Auswahl anwenden · Auswahl spiegeln | ✅ |
+| Achsen | Achse anlegen, umbenennen, löschen, ein-/ausblenden, Zähler, Farbe | ✅ |
+| Achsen | Achse für die Auswahl zuweisen bzw. entfernen, aktive Achse markiert | ✅ |
+| Felder | die Feldliste (im Handy-Modus; sonst links) | ✅ |
+| Ansicht | Automatisch / Handy / Tablet | ✅ |
+
+Alle Blöcke steuern dieselbe Kernlogik an (`bulkMode`/`bulkSelected`,
+`state.abschnitte`, `POSITIONS`). Das Menü ist reine Oberfläche: Zuklappen
+ändert weder den Auswahlmodus noch die markierten Felder.
+
+**Feldliste** (links; im Handy-Modus im Werkzeug-Menü)
 
 | Funktion | |
 |---|---|
-| Abschnitte anlegen, umbenennen, löschen, Farbe, ein-/ausblenden, „alle anzeigen", Zähler | ✅ |
-| Mehrfachauswahl: Felder anhaken, Abschnitt zuweisen, Positionen auf viele Felder, Höhen übernehmen | ✅ |
-| Achsenkarte je Abschnitt mit Richtung N/O/S/W und Gesamtlänge | ✅ |
 | Feldzeile: Länge, Höhe links/rechts mit „="-Kopplung, Standardlängen, Warnzeichen | ✅ |
+| Ankreuzfeld je Feld während der Mehrfachauswahl | ✅ |
+| Achs-Marke je Feld, Hinweis auf ausgeblendete Felder | ✅ |
 | Positionen je Feld, Kopieren / Einfügen (Umfang wählbar) | ✅ |
-| Feld hinzufügen / entfernen | ✅ |
+| Feld hinzufügen / entfernen, Richtung N/O/S/W, Gesamtlänge je Achse | ✅ |
 
 **Zeichenfläche**
 
 | Funktion | |
 |---|---|
 | Feld antippen → Bearbeiten-Sheet | ✅ |
+| Feld antippen in der Mehrfachauswahl → an-/abhaken | ✅ |
+| Ausgewähltes Feld: kräftiger Ring in fester Bildschirmstärke + Leuchten | ✅ |
+| Mehrfachauswahl: violetter Ring **und** Haken je Feld, Zahl am Werkzeug-Knopf | ✅ |
 | Orangener Griff: Feld frei verschieben (mit Vorschau + Einrasten) | ✅ |
 | Violetter ↻-Griff: Tipp = 90°, Ziehen = frei | ✅ |
 | Blaue „+"-Knöpfe links/rechts: Feld anfügen | ✅ |
 | Pan, Pinch-Zoom, Mausrad/Trackpad-Zoom, Doppeltipp-Zoom | ✅ |
-| Auswahl-Info oben links (Anzahl + beteiligte Abschnitte) | ✅ |
-| Maßstabsleiste, Eck-Symbole, Bordbretter-Linien, Grundriss-Ebene | ✅ |
+| Auswahl-Info oben links (Anzahl + beteiligte Achsen) | ✅ |
+| Maßstabsleiste, Eck-Symbole, Bordbrett-Kanten | ✅ |
+| „Alle anzeigen" passt in den FREIEN Teil ein, nicht unter das offene Menü | ✅ |
 | Leerhinweis mit „Feld hinzufügen" | ✅ |
+
+**Ansicht / Handy-Modus**
+
+| Fall | Verhalten |
+|---|---|
+| Wahl „Automatisch" (Vorgabe) | Handy-Modus ab ≤ 480 px Breite **oder** ≤ 450 px Höhe (liegendes Handy) |
+| Wahl „Handy" | immer Handy-Modus, auch auf dem iPad |
+| Wahl „Tablet" | nie Handy-Modus |
+| Handy-Modus | Werkzeugleiste zweizeilig, Seitenleiste aus, Menü als Blatt von unten |
+| Fenster ≤ 899 px | Menü als Blatt von unten statt angedockt |
+| Fenster ≤ 520 px hoch | Menü seitlich angedockt statt von unten (liegendes Handy) |
+| Fenster < 1300 px, Menü offen | die Feldliste zieht ins Menü, damit die Zeichnung Platz behält |
+
+Die Wahl steht in `geruest.2d.ansichtsmodus`; `geruest.2d.geraetemodus` trägt
+nur noch das Ergebnis. Die Vorgängerfassung las die Wahl aus demselben
+Schlüssel, in den sie den erkannten Modus schrieb – wer einmal in einem
+schmalen Fenster war, blieb danach überall im Handy-Modus.
 
 **Dialoge**
 
 | Dialog | |
 |---|---|
 | Feld hinzufügen (Richtung, Standardlängen, −/+, freie Länge) | ✅ |
-| Feld bearbeiten (Richtung, Länge, Drehung mit Regler und 90/180/270, Abschnitt, Höhen, Positionen, Notiz, Kopieren/Einfügen, Favoriten, Löschen) | ✅ |
+| Feld bearbeiten (Richtung, Länge, Drehung mit Regler und 90/180/270, Achse, Höhen, Positionen, Notiz, Kopieren/Einfügen, Favoriten, Löschen) | ✅ |
 | Ecken-Sheet: Umlauf je Seite festlegen | ✅ |
-| Bordbrett-Sheet: Achsen zuordnen, auf alle Achsen, löschen | ✅ |
-| Grundriss-Sheet: Bild laden, Maßstab messen, verschieben/drehen/skalieren, Transparenz, Eckenvorschläge | ✅ |
-| Fotos-Sheet + Lightbox: aufnehmen, löschen, für PDF markieren (IndexedDB) | ✅ |
-| Mehrfach-Positionen-Sheet | ✅ |
-| PDF-Sheet: drei Layouts, ausgeblendete Abschnitte einbeziehen | ✅ |
-| Geräteauswahl iPad / iPhone | ✅ |
+| Projekt-Sheet: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei | ✅ |
+| Mehrfach-Positionen-Sheet (Menge/Lagen einmal für die ganze Auswahl) | ✅ |
+| PDF-Sheet: Farbe / Schwarz-Weiß, ausgeblendete Achsen einbeziehen | ✅ |
 
 **Rechnen (ATV DIN 18451)**
 
@@ -217,8 +259,9 @@ in demselben Datenformat (ein Projektdatensatz, die Zeichnung darin unter
 Ein Dokumentwechsel läuft über genau eine Stelle (`oeffneZeichnung`), die
 `resetState2d()` aufruft: Zeichenobjekte, Gerüstfelder, Achsen, Abschnitte,
 Auswahl und Mehrfachauswahl, Zwischenablage, Undo-/Redo-Stapel, laufende
-Gesten, Bordbrett- und Grundriss-Modus samt ihrer Event-Listener, Kamera und
-Zoom werden dabei vollständig geleert. Ein ausstehender Autosave gehört zum
+Gesten, Bordbrett-Modus samt seiner Event-Listener, Kamera und Zoom werden
+dabei vollständig geleert. Das Werkzeug-Menü bleibt bewusst außen vor: es ist
+Oberfläche, kein Dokumentzustand – ein Wechsel klappt es nicht zu. Ein ausstehender Autosave gehört zum
 alten Dokument und wird vorher ausgeführt oder verworfen – er kann nie in das
 neue hineinschreiben.
 
@@ -276,6 +319,14 @@ Daten. **Es geht nichts verloren.**
 | `av_2d_pdf_include_hidden` | `geruest.2d.pdfMitAusgeblendeten` |
 | `av_deviceMode` | `geruest.2d.geraetemodus` |
 
+Zwei Schlüssel sind seit der Werkzeug-Menü-Überarbeitung hinzugekommen; sie
+haben keine Vorgänger und beginnen leer:
+
+| Schlüssel | Inhalt |
+|---|---|
+| `geruest.2d.ansichtsmodus` | die Wahl des Nutzers: `auto` (Vorgabe) · `handy` · `tablet` |
+| `geruest.2d.werkzeugMenue` | Werkzeug-Menü offen (`1`) oder zu (`0`) |
+
 Die Projekt-Fotos liegen unverändert in der IndexedDB-Datenbank `av2d_photos_db`
 (siehe § 6).
 
@@ -288,9 +339,14 @@ npm install playwright
 node tests/<datei>.mjs
 ```
 
-**387 Prüfungen, alle grün** – 355 aus dem Bestand (unverändert, nur die
-Einstiegsadressen der Testhülle zeigen jetzt auf `index.html#/…`) und 32 neue zur
-Shell.
+**17 Testdateien, 557 Prüfungen, alle grün.** Davon prüft `r10-werkzeugmenue`
+die Werkzeug-Menü-Überarbeitung: den Pfeil-Knopf, die Mehrfachauswahl über den
+Plan (fünf Felder → gemeinsame Höhe 9,40 m → Achse → Position), das Fortbestehen
+der Auswahl über das Zuklappen hinweg, Speichern/Laden, das PDF und den
+Handy-Modus. Sechs Bildschirmgrößen (Desktop, iPad quer/hoch, Smartphone
+hoch/quer, 320 px) werden nachgemessen statt beschrieben: kein Knopf darf aus
+dem Bild ragen, keiner unter 36 px schrumpfen, und bei offenem Menü müssen
+mindestens 140 px Zeichenfläche frei bleiben.
 
 Zusätzlich zwei A/B-Vergleiche gegen die Fassung **vor** dem Zusammenführen. Sie
 rechnen dasselbe Aufmaß in beiden Ständen durch und vergleichen jede Rechengröße

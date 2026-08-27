@@ -79,11 +79,14 @@ body[data-modul="2d"] .tb-name:focus  {
    Jeder Knopf ist mindestens 44 px hoch und trägt Symbol + kurzes Wort.
    Auf schmalen Geräten fällt die Beschriftung weg, der Knopf bleibt gleich
    groß – die Trefferfläche darf nie schrumpfen.                           */
+/* Der Titel gibt nach, nicht die Werkzeuge: ein abgeschnittener Name ist
+   hinnehmbar, ein abgeschnittener Knopf nicht. Deshalb `flex: 0 0 auto` –
+   die Leiste behält ihre volle Breite und schiebt den Namen zusammen. */
 body[data-modul="2d"] .tb-tools {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -142,14 +145,11 @@ body[data-modul="2d"] .tb-btn.primaer:hover { filter: brightness(1.08); backgrou
    dass ALLE Werkzeuge sichtbar bleiben – ein weggescrolltes „PDF" wäre die
    schlechtere Lösung als ein Knopf ohne Wort. Die beiden Hauptaktionen
    („Feld", „PDF") behalten ihr Wort. */
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   body[data-modul="2d"] .tb-btn:not(.primaer) .tb-txt { display: none; }
   body[data-modul="2d"] .tb-btn:not(.primaer) { padding: 0; }
   body[data-modul="2d"] .tb-titel { flex: 0 1 12rem; min-width: 80px; }
   body[data-modul="2d"] .tb-trenner { margin: 0; }
-  /* Der Titel gibt nach, nicht die Werkzeuge: ein abgeschnittener Name ist
-     hinnehmbar, ein abgeschnittener Knopf nicht. */
-  body[data-modul="2d"] .tb-tools { flex: 0 0 auto; }
 }
 
 /* ── Kennzahlen ──────────────────────────────────────────────────────────
@@ -195,12 +195,27 @@ body[data-modul="2d"] .sheet-unit {
   color: #b1b5ba;
 }
 
-/* ── App layout ──────────────────────────────────────────────────────── */
+/* ── App layout ──────────────────────────────────────────────────────────
+   Die Zeichenansicht ist eine Spalte: oben die Werkzeugleiste (so hoch, wie
+   sie eben sein muss – auf schmalen Geräten zwei Zeilen), darunter der Rest.
+
+   Vorher stand hier eine Rechnung mit fester Leistenhöhe. Sie musste an drei
+   Stellen gleich gepflegt werden und war falsch, sobald die Leiste umbrach.
+   Jetzt verteilt der Umbruch selbst: `flex: 1` nimmt genau, was übrig ist. */
+body[data-modul="2d"] #td-zeichnung {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 420px;
+}
+@supports (height: 1dvh) {
+  body[data-modul="2d"] #td-zeichnung { height: 100dvh; }
+}
+
 body[data-modul="2d"] #appLayout {
   display: flex;
-  /* Über der Zeichenfläche liegt nur noch die 56 px hohe Werkzeugleiste. */
-  height: calc(100vh - 56px);
-  min-height: 400px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── Side panel ──────────────────────────────────────────────────────── */
@@ -225,58 +240,11 @@ body[data-modul="2d"] #noSectionsHint {
 }
 body[data-modul="2d"] #noSectionsHint.hidden { display: none; }
 
-/* ── Mehrfachauswahl-Leiste ──────────────────────────────────────────── */
+/* ── Sammelbearbeitung (Block „Bearbeiten" im Werkzeug-Menü) ─────────── */
 body[data-modul="2d"] #bulkBar {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-}
-body[data-modul="2d"] .bulk-toggle-btn {
-  align-self: flex-start;
-  padding: 0.4rem 0.7rem;
-  border: 1.5px solid #6a4bd1;
-  border-radius: 8px;
-  background: #212121;
-  color: #6a4bd1;
-  font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-body[data-modul="2d"] .bulk-toggle-btn.active {
-  background: #6a4bd1;
-  color: #fff;
-}
-body[data-modul="2d"] .bulk-info {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #a69ad5;
-}
-body[data-modul="2d"] .bulk-sel-row {
-  display: flex;
-  gap: 0.35rem;
-}
-body[data-modul="2d"] .bulk-sel-btn {
-  padding: 0.25rem 0.55rem;
-  border: 1.5px solid #6a4bd1;
-  border-radius: 6px;
-  background: #271d44;
-  color: #6a4bd1;
-  font-size: 0.72rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-body[data-modul="2d"] .bulk-hint {
-  font-size: 0.75rem;
-  color: #c4c4bd;
-  margin: 0;
-}
-body[data-modul="2d"] .bulk-section-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #6a4bd1;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  margin-top: 0.2rem;
 }
 body[data-modul="2d"] .bulk-chip-row {
   display: flex;
@@ -806,23 +774,20 @@ body[data-modul="2d"] .bay-popup-overlay {
   z-index: 999;
 }
 
-/* ── Responsive: mobile stacked ──────────────────────────────────────── */
+/* ── Responsive: schmale Fenster ─────────────────────────────────────────
+   Unter 680 px steht die Feldliste über der Zeichnung statt daneben; beide
+   teilen sich die Spaltenhöhe, statt eine feste Höhe zu bekommen. */
 @media (max-width: 680px) {
-  body[data-modul="2d"] #appLayout {
-    flex-direction: column;
-    height: auto;
-  }
+  body[data-modul="2d"] #appLayout { flex-direction: column; }
   body[data-modul="2d"] #sidePanel {
     width: 100%;
     max-width: 100%;
+    flex: 0 0 auto;
     border-right: none;
     border-bottom: 1px solid #434343;
-    max-height: 45vh;
+    max-height: 38vh;
   }
-  body[data-modul="2d"] #viewerPanel {
-    height: 55vw;
-    min-height: 300px;
-  }
+  body[data-modul="2d"] #viewerPanel { flex: 1 1 auto; min-height: 240px; }
 }
 
 /* ── Hint / presets strip ────────────────────────────────────────────── */
@@ -1520,14 +1485,6 @@ body[data-modul="2d"][data-mode="iphone"] .tb-name { font-size: .92rem; }
 body[data-modul="2d"][data-mode="iphone"] .area-readout,
 body[data-modul="2d"][data-mode="iphone"] .bb-readout { padding: 0 7px; font-size: .76rem; }
 
-body[data-modul="2d"][data-mode="iphone"] #appLayout {
-  height: calc(100dvh - 52px);
-  min-height: 320px;
-}
-@supports not (height: 1dvh) {
-  body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100vh - 52px); }
-}
-
 body[data-modul="2d"][data-mode="iphone"] #sidePanel { display: none; }
 
 body[data-modul="2d"][data-mode="iphone"] #viewerPanel {
@@ -1668,13 +1625,6 @@ body[data-modul="2d"] .absch-head {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-}
-body[data-modul="2d"] .absch-title {
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: #bfc3c6;
 }
 body[data-modul="2d"] .absch-add-btn {
   padding: 0.28rem 0.6rem;
@@ -1900,18 +1850,6 @@ body[data-modul="2d"] .sel-info-note {
   font-size: 0.66rem;
   font-style: italic;
   color: #a4a9ae;
-}
-
-body[data-modul="2d"] .bulk-absch-info {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.28rem;
-}
-body[data-modul="2d"] .bulk-absch-info-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #b1b5ba;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2788,4 +2726,541 @@ body[data-modul="2d"] .td-projekte-leer-btn:active { transform: scale(.98); }
   body[data-modul="2d"] .td-projekte-titelzeile { align-items: stretch; }
   body[data-modul="2d"] .td-neu-btn { width: 100%; justify-content: center; }
   .td-dialog-aktionen .td-dialog-btn { flex: 1; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Werkzeug-Menü
+   --------------------------------------------------------------------------
+   Aufklappbares Panel für alles, was nicht ständig gebraucht wird: Auswahl,
+   Sammelbearbeitung, Achsen, Feldliste (im Handy-Modus) und Ansicht.
+
+   Zwei Ausprägungen:
+     ≥ 900 px   angedockt rechts neben der Zeichenfläche – die Zeichnung
+                bleibt vollständig sichtbar und bedienbar, Felder lassen sich
+                weiter antippen, während das Menü offen ist.
+     < 900 px   Blatt von unten (iPad hochkant, Handy). Es liegt ÜBER der
+                Zeichnung, lässt aber deren oberen Teil frei; ohne Abdunklung,
+                damit auch dort weiter ausgewählt werden kann.
+
+   Geschlossen kostet es keinen Millimeter: `display:none`.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+body[data-modul="2d"] #werkzeugPanel {
+  display: none;
+  flex: 0 0 340px;
+  width: 340px;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #242424;
+  border-left: 1px solid #434343;
+}
+body[data-modul="2d"] #werkzeugPanel.offen { display: flex; }
+
+body[data-modul="2d"] .wz-kopf {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem 0.55rem 0.85rem;
+  border-bottom: 1px solid #3d4044;
+  background: #1f1f1f;
+}
+body[data-modul="2d"] .wz-titel {
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #eaf0f6;
+}
+body[data-modul="2d"] .wz-close {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #4a4a4a;
+  border-radius: 11px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .wz-close:hover { background: #383838; }
+
+body[data-modul="2d"] .wz-inhalt {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.6rem 0.6rem 1.6rem;
+}
+
+/* Ein Block je Aufgabe – als eigene Karte, damit auf einem 11-Zoll-Bildschirm
+   erkennbar bleibt, wo eine Aufgabe endet und die nächste beginnt. */
+body[data-modul="2d"] .wz-gruppe {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid #3d4044;
+  border-radius: 12px;
+  background: #212121;
+}
+body[data-modul="2d"] .wz-gruppe:empty { display: none; }
+
+body[data-modul="2d"] .wz-kopfzeile {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+body[data-modul="2d"] .wz-kopf-ico { font-size: 0.95rem; line-height: 1; }
+body[data-modul="2d"] .wz-kopf-txt {
+  flex: 1 1 auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #cbd4dd;
+}
+
+body[data-modul="2d"] .wz-unterlabel {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #8ea6bd;
+}
+
+body[data-modul="2d"] .wz-hinweis {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #a3a8ae;
+}
+body[data-modul="2d"] .wz-hinweis strong { color: #dbe6f1; }
+
+/* Zeigt vor jeder Sammelaktion, worauf sie wirkt. */
+body[data-modul="2d"] .wz-ziel {
+  align-self: flex-start;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #3f7fbf;
+  border-radius: 999px;
+  background: #10496f;
+  color: #cfe8fb;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+/* ── Knöpfe ──────────────────────────────────────────────────────────────
+   Alles mindestens 44 px hoch: der Daumen mit Arbeitshandschuh ist das Maß,
+   nicht der Mauszeiger.                                                    */
+body[data-modul="2d"] .wz-aktion-reihe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+body[data-modul="2d"] .wz-aktion {
+  flex: 1 1 9rem;
+  min-height: 44px;
+  padding: 0 0.7rem;
+  border: 1px solid #4a4a4a;
+  border-radius: 11px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .wz-aktion:hover:not(:disabled) { background: #383838; }
+body[data-modul="2d"] .wz-aktion:active:not(:disabled) { transform: scale(.97); }
+body[data-modul="2d"] .wz-aktion:disabled { opacity: .38; cursor: not-allowed; }
+body[data-modul="2d"] .wz-aktion-klein { flex: 1 1 100%; min-height: 40px; font-size: 0.78rem; }
+
+/* Der Hauptschalter der Mehrfachauswahl: der meistgesuchte Knopf des Menüs,
+   deshalb über die volle Breite und im eingeschalteten Zustand kräftig
+   gefüllt – auf einen Blick unterscheidbar, auch bei Sonne auf dem Display. */
+body[data-modul="2d"] .wz-hauptschalter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 0.8rem;
+  border: 2px solid #8f74ff;
+  border-radius: 13px;
+  background: #241d3d;
+  color: #c3b1ff;
+  font-size: 0.92rem;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .wz-hauptschalter.active {
+  background: #6a4bd1;
+  border-color: #b9a5ff;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(143, 116, 255, .25);
+}
+body[data-modul="2d"] .wz-schalter-ico { font-size: 1.1rem; line-height: 1; }
+
+/* Zähler der Mehrfachauswahl – groß genug, um ihn im Vorbeigehen zu lesen. */
+body[data-modul="2d"] .wz-zaehler {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #3d4044;
+  border-radius: 10px;
+  background: #1b1b1b;
+}
+body[data-modul="2d"] .wz-zaehler.voll {
+  border-color: #8f74ff;
+  background: #241d3d;
+}
+body[data-modul="2d"] .wz-zaehler-zahl {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #c3b1ff;
+  font-variant-numeric: tabular-nums;
+}
+body[data-modul="2d"] .wz-zaehler-txt { font-size: 0.8rem; color: #b9bfc6; }
+
+/* Chips zum Auswählen ganzer Achsen bzw. aller Felder einer Position. */
+body[data-modul="2d"] .wz-chip-reihe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+body[data-modul="2d"] .wz-achs-chip {
+  --absch-color: #8a97a5;
+  min-height: 38px;
+  padding: 0 0.7rem;
+  border: 1.5px solid var(--absch-color);
+  border-left-width: 6px;
+  border-radius: 10px;
+  background: #1b1b1b;
+  color: #dbe3ea;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .wz-achs-chip:hover { background: #262626; }
+
+/* Ansicht: drei Schalter nebeneinander (Automatisch / Handy / Tablet). */
+body[data-modul="2d"] .wz-segment {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #3d4044;
+  border-radius: 12px;
+  background: #1b1b1b;
+}
+body[data-modul="2d"] .wz-segment-btn {
+  flex: 1 1 0;
+  min-height: 42px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #b9bfc6;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .wz-segment-btn:hover { background: #262626; }
+body[data-modul="2d"] .wz-segment-btn.active {
+  background: #007aff;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, .3);
+}
+
+/* ── Knopf in der Werkzeugleiste ─────────────────────────────────────────── */
+body[data-modul="2d"] .werkzeug-btn { position: relative; }
+body[data-modul="2d"] .wz-pfeil {
+  display: inline-block;
+  font-size: 1.25rem;
+  line-height: 1;
+  transition: transform .18s ease;
+}
+body[data-modul="2d"] .werkzeug-btn.wz-mehrfach {
+  border-color: #8f74ff;
+  color: #c3b1ff;
+}
+/* Läuft eine Mehrfachauswahl, steht die Zahl am Knopf – auch bei
+   zugeklapptem Menü ist damit sichtbar, dass etwas markiert ist. */
+body[data-modul="2d"] .wz-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #6a4bd1;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+body[data-modul="2d"] .wz-badge.hidden { display: none; }
+
+/* ── Aktive Achse in der Liste ───────────────────────────────────────────── */
+body[data-modul="2d"] .absch-row.absch-aktiv .absch-pick {
+  border-color: var(--absch-color);
+  border-width: 2px;
+  border-left-width: 6px;
+  background: #16283a;
+  box-shadow: 0 0 0 2px rgba(120, 175, 230, .22);
+}
+body[data-modul="2d"] .absch-aktiv-mark {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--absch-color);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Blatt von unten: iPad hochkant, Handy ──────────────────────────────── */
+@media (max-width: 899px) {
+  body[data-modul="2d"] #werkzeugPanel.offen {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    flex: none;
+    height: 60vh;
+    max-height: 560px;
+    z-index: 60;
+    border-left: none;
+    border-top: 1px solid #4a4a4a;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 34px rgba(0, 0, 0, .5);
+    animation: wz-hoch .2s ease-out;
+  }
+  @supports (height: 1dvh) {
+    body[data-modul="2d"] #werkzeugPanel.offen { height: 60dvh; }
+  }
+  /* Greifbarer Rand oben, damit das Blatt als solches gelesen wird. */
+  body[data-modul="2d"] .wz-kopf {
+    border-radius: 18px 18px 0 0;
+    padding-top: 0.7rem;
+  }
+}
+
+@keyframes wz-hoch {
+  from { transform: translateY(18%); opacity: .4; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* ── Feldliste im Handy-Modus ────────────────────────────────────────────
+   Die Seitenleiste entfällt dort; dasselbe Element zieht ins Menü ein und
+   wird hier als gewöhnlicher Block dargestellt (keine zweite Liste).      */
+body[data-modul="2d"] .wz-felder-slot { display: contents; }
+body[data-modul="2d"] #werkzeugPanel #sidePanel {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  border: 1px solid #3d4044;
+  border-radius: 12px;
+  background: #212121;
+  padding: 0.6rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Handy-Modus
+   --------------------------------------------------------------------------
+   Auf 320–430 px Breite passen Werkzeugleiste, Name und Kennzahlen nicht in
+   EINE Zeile, ohne dass Knöpfe schrumpfen oder aus dem Bild laufen. Deshalb
+   zwei Zeilen: oben Rücksprung, Name und Kennzahl, darunter die Werkzeuge in
+   voller Trefferfläche. Bordbrett, Projekt und PDF sind ins Werkzeug-Menü
+   umgezogen (siehe syncToolbarOrt), sodass die zweite Zeile mit sechs
+   Knöpfen auch auf einem 320-px-Bildschirm vollständig sichtbar bleibt.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+body[data-modul="2d"][data-mode="iphone"] #toolbar,
+body[data-modul="2d"] #toolbar.tb-zweizeilig {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  min-height: 0;
+  padding: 5px 8px 7px;
+}
+body[data-modul="2d"][data-mode="iphone"] .tb-titel,
+body[data-modul="2d"] .tb-zweizeilig .tb-titel { order: 1; flex: 1 1 8rem; }
+body[data-modul="2d"][data-mode="iphone"] .tb-werte,
+body[data-modul="2d"] .tb-zweizeilig .tb-werte { order: 2; }
+body[data-modul="2d"][data-mode="iphone"] .tb-tools,
+body[data-modul="2d"] .tb-zweizeilig .tb-tools {
+  order: 3;
+  flex: 1 1 100%;
+  justify-content: space-between;
+  gap: 4px;
+  overflow: visible;
+}
+/* Trennstriche kosten Platz, den die Knöpfe brauchen. */
+body[data-modul="2d"][data-mode="iphone"] .tb-trenner { display: none; }
+/* „Feld" behält sein Wort (Hauptaktion), der Rest bleibt Symbol. */
+body[data-modul="2d"][data-mode="iphone"] .tb-btn.primaer { padding: 0 10px; }
+body[data-modul="2d"][data-mode="iphone"] .tb-btn.primaer .tb-txt { display: inline; }
+
+/* Im Handy-Modus ist das Menü IMMER das Blatt von unten – auch wenn der
+   Bildschirm breit genug für die angedockte Fassung wäre (der Nutzer hat
+   „Handy" ausdrücklich gewählt, um die Zeichenfläche zu maximieren). */
+body[data-modul="2d"][data-mode="iphone"] #werkzeugPanel.offen {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: auto;
+  flex: none;
+  height: 50vh;
+  max-height: 440px;
+  z-index: 60;
+  border-left: none;
+  border-top: 1px solid #4a4a4a;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -10px 34px rgba(0, 0, 0, .5);
+}
+@supports (height: 1dvh) {
+  body[data-modul="2d"][data-mode="iphone"] #werkzeugPanel.offen { height: 50dvh; }
+}
+body[data-modul="2d"][data-mode="iphone"] .wz-kopf { border-radius: 18px 18px 0 0; }
+
+/* Die ausgelagerten Werkzeugleisten-Knöpfe im Menü: volle Breite statt
+   Symbol-Kachel, damit sie dort wie Menüeinträge lesbar sind. */
+body[data-modul="2d"] .wz-aktionen-slot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+body[data-modul="2d"] .wz-aktionen-slot .tb-btn {
+  flex: 1 1 9rem;
+  min-height: 44px;
+  padding: 0 0.7rem;
+  justify-content: flex-start;
+  font-size: 0.82rem;
+}
+body[data-modul="2d"] .wz-aktionen-slot .tb-btn .tb-txt { display: inline; }
+body[data-modul="2d"] #wzAktionen.hidden { display: none; }
+
+/* Auch ohne Handy-Modus reicht unter 800 px die Breite nicht für Leiste,
+   Name und Kennzahlen in einer Zeile – dann bricht sie ebenso um. Der
+   Klassenname wird nicht gesetzt, sondern hier per Medienabfrage erzwungen;
+   so gibt es dafür keinen zweiten Zustand in JavaScript. */
+@media (max-width: 800px) {
+  body[data-modul="2d"] #toolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    min-height: 0;
+    padding: 5px 8px 7px;
+  }
+  body[data-modul="2d"] .tb-titel { order: 1; flex: 1 1 8rem; }
+  body[data-modul="2d"] .tb-werte { order: 2; }
+  body[data-modul="2d"] .tb-tools {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: space-between;
+    gap: 4px;
+    overflow-x: auto;
+  }
+  body[data-modul="2d"] .tb-trenner { display: none; }
+}
+
+/* ── Trefferflächen im Werkzeug-Menü ─────────────────────────────────────
+   Die Bauteile stammen aus der früheren Seitenleiste, wo sie mit der Maus
+   bedient wurden. Im Menü werden sie mit dem Daumen bedient – deshalb hier
+   durchgehend mindestens 40 px hoch.                                      */
+body[data-modul="2d"] #werkzeugPanel .bulk-pos-chip,
+body[data-modul="2d"] #werkzeugPanel .fav-chip-name,
+body[data-modul="2d"] #werkzeugPanel .paste-scope-chip,
+body[data-modul="2d"] #werkzeugPanel .bulk-ktype-btn,
+body[data-modul="2d"] #werkzeugPanel .bulk-klagen-btn,
+body[data-modul="2d"] #werkzeugPanel .bulk-kbill-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
+}
+body[data-modul="2d"] #werkzeugPanel .bulk-height-apply-btn,
+body[data-modul="2d"] #werkzeugPanel .bulk-kons-add-btn,
+body[data-modul="2d"] #werkzeugPanel .bulk-paste-apply-btn,
+body[data-modul="2d"] #werkzeugPanel .absch-add-btn,
+body[data-modul="2d"] #werkzeugPanel .absch-showall-btn,
+body[data-modul="2d"] #werkzeugPanel .absch-pick,
+body[data-modul="2d"] #werkzeugPanel .bay-height-inp { min-height: 44px; }
+body[data-modul="2d"] #werkzeugPanel .absch-mini-btn,
+body[data-modul="2d"] #werkzeugPanel .absch-eye-btn,
+body[data-modul="2d"] #werkzeugPanel .bay-height-eq {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+}
+
+/* Die Feldkarten stammen aus der Seitenleiste. Zieht die Liste ins Menü ein,
+   werden ihre Knöpfe mit dem Daumen bedient – also ebenfalls mindestens
+   40 px hoch. */
+body[data-modul="2d"] #werkzeugPanel .dir-btn,
+body[data-modul="2d"] #werkzeugPanel .quick-btn,
+body[data-modul="2d"] #werkzeugPanel .bay-pos-chip,
+body[data-modul="2d"] #werkzeugPanel .bay-pos-edit,
+body[data-modul="2d"] #werkzeugPanel .bay-pos-copy,
+body[data-modul="2d"] #werkzeugPanel .bay-pos-paste,
+body[data-modul="2d"] #werkzeugPanel .add-bay,
+body[data-modul="2d"] #werkzeugPanel .remove-btn {
+  min-height: 40px;
+  padding: 0 0.6rem;
+}
+body[data-modul="2d"] #werkzeugPanel .remove-btn.small { min-width: 40px; }
+
+/* ── Flache Bildschirme: Menü seitlich statt von unten ───────────────────
+   Ein liegendes Handy ist gut 390 px hoch. Ein Blatt von unten ließe davon
+   keine Zeichenfläche übrig. Dort dockt das Menü deshalb rechts an: die
+   Zeichnung behält die volle Höhe und rund die halbe Breite.
+
+   Steht nach den Handy-Regeln, damit es sie überschreibt.                 */
+@media (max-height: 520px) {
+  body[data-modul="2d"] #werkzeugPanel.offen,
+  body[data-modul="2d"][data-mode="iphone"] #werkzeugPanel.offen {
+    position: static;
+    flex: 0 0 min(52vw, 380px);
+    width: min(52vw, 380px);
+    height: auto;
+    max-height: none;
+    border-top: none;
+    border-left: 1px solid #4a4a4a;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  body[data-modul="2d"] .wz-kopf { border-radius: 0; padding-top: 0.5rem; }
+}
+
+/* Auf einem 320-px-Gerät ist die Beschriftung des Hauptschalters breiter als
+   der Knopf – sie kürzt sich, statt ihn zu sprengen. */
+body[data-modul="2d"] .wz-schalter-txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

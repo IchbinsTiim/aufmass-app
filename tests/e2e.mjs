@@ -12,6 +12,11 @@ await page.click('#uShapeBtn');
 await page.waitForTimeout(250);
 assert(await page.evaluate(() => state.sections.length > 0), 'U-Form-Vorlage erzeugt Felder');
 
+// Werkzeug-Menü öffnen: Auswahl, Achsen und Sammelbearbeitung liegen dort.
+await page.click('#werkzeugBtn');
+await page.waitForSelector('#werkzeugPanel.offen');
+assert(await page.evaluate(() => werkzeugOffen), 'Werkzeug-Menü öffnet über den Pfeil-Knopf');
+
 // Abschnitt über die Oberfläche anlegen (prompt beantworten)
 page.on('dialog', d => d.accept('Nordseite'));
 await page.click('.absch-add-btn');
@@ -36,8 +41,8 @@ for (const i of [0, 1]) {
 }
 assert(await page.evaluate(() => bulkSelected.size === 2), 'zwei Felder direkt im Plan angehakt');
 
-// Abschnitt der Auswahl zuweisen
-await page.evaluate(() => [...document.querySelectorAll('#bulkBar .bulk-pos-chip')]
+// Achse/Abschnitt der Auswahl zuweisen – die Chips stehen im Achsen-Block
+await page.evaluate(() => [...document.querySelectorAll('#abschnittBar .bulk-pos-chip')]
   .find(c => c.textContent === 'Nordseite').click());
 await page.waitForTimeout(250);
 assert(await page.evaluate(() => allBaysFlat().filter(b => b.abschnittId).length === 2),
@@ -46,6 +51,16 @@ assert(await page.evaluate(() => allBaysFlat().filter(b => b.abschnittId).length
 const info = await page.textContent('#selectionInfo');
 assert(/2 Felder ausgewählt/.test(info) && /Nordseite/.test(info),
   'Anzeige oben links: ' + info.replace(/\s+/g, ' '));
+
+// Auswahl überlebt das Zuklappen des Menüs (das Menü ist nur die Oberfläche)
+await page.click('#werkzeugBtn');
+await page.waitForTimeout(200);
+assert(await page.evaluate(() => !werkzeugOffen && bulkMode && bulkSelected.size === 2),
+  'Auswahl bleibt erhalten, wenn das Menü zugeklappt wird');
+await page.click('#werkzeugBtn');
+await page.waitForSelector('#werkzeugPanel.offen');
+assert(await page.evaluate(() => bulkSelected.size === 2),
+  'nach dem Wiederaufklappen ist dieselbe Auswahl markiert');
 
 // Mehrfachauswahl beenden, Feld antippen, drehen
 await page.click('.bulk-toggle-btn');

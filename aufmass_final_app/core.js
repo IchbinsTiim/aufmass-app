@@ -32,7 +32,13 @@ const GK = {
   einfuegenOptionen:    'geruest.2d.einfuegenOptionen',
   pdfDesign:            'geruest.2d.pdfDesign',
   pdfMitAusgeblendeten: 'geruest.2d.pdfMitAusgeblendeten',
-  geraetemodus:         'geruest.2d.geraetemodus'
+  // Ergebnis der Gerätewahl („iphone"/„ipad") – wird geschrieben, damit ältere
+  // Auswertungen und Tests weiterhin ablesen können, wie die App gerade läuft.
+  geraetemodus:         'geruest.2d.geraetemodus',
+  // Die WAHL des Nutzers: „auto" (Bildschirm entscheidet), „handy", „tablet".
+  ansichtsmodus:        'geruest.2d.ansichtsmodus',
+  // Werkzeug-Menü offen/zu – bleibt über Neuladen hinweg erhalten.
+  werkzeugMenue:        'geruest.2d.werkzeugMenue'
 };
 
 // Alte Schlüssel → neue Schlüssel. Beim ersten Start nach dem Zusammenführen

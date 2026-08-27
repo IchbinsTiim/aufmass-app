@@ -336,12 +336,13 @@ body { background: var(--bg-deep); }
 
 body[data-modul="2d"] #td-root { padding-top: var(--chrome-h); }
 
-/* Die feste Höhenrechnung des Layouts um die Kopfzone ergänzen. Über der
-   Zeichenfläche liegt nur noch die Werkzeugleiste. */
-body[data-modul="2d"] #appLayout { height: calc(100vh - 56px - var(--chrome-h)); }
-body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100dvh - 52px - var(--chrome-h)); }
-@supports not (height: 1dvh) {
-  body[data-modul="2d"][data-mode="iphone"] #appLayout { height: calc(100vh - 52px - var(--chrome-h)); }
+/* Die Zeichenansicht ist eine Spalte über die volle Fensterhöhe abzüglich der
+   Kopfzone der Suite. Wie hoch die Werkzeugleiste darin ist (eine Zeile oder
+   im Handy-Modus zwei), verteilt der Umbruch selbst – hier steht keine
+   Leistenhöhe mehr. */
+body[data-modul="2d"] #td-zeichnung { height: calc(100vh - var(--chrome-h)); }
+@supports (height: 1dvh) {
+  body[data-modul="2d"] #td-zeichnung { height: calc(100dvh - var(--chrome-h)); }
 }
 
 /* ── Werkzeugleiste ──────────────────────────────────────────────────────── */
@@ -428,12 +429,60 @@ body[data-modul="2d"] .bay-row {
   border-radius: var(--r-karte-klein);
 }
 
+/* ── Werkzeug-Menü ───────────────────────────────────────────────────────
+   Es liegt neben bzw. über der Zeichenfläche und nimmt deshalb dieselbe
+   dunkle Werkzeug-Umgebung auf wie die Leiste darüber. */
+body[data-modul="2d"] #werkzeugPanel {
+  background: var(--surface);
+  border-left: 1px solid var(--hairline);
+}
+body[data-modul="2d"] .wz-kopf {
+  background: rgba(14, 22, 38, .92);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-bottom: 1px solid var(--hairline);
+}
+body[data-modul="2d"] .wz-titel { font-family: var(--font-display); color: var(--text); }
+body[data-modul="2d"] .wz-close {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+}
+body[data-modul="2d"] .wz-close:hover { background: rgba(255, 255, 255, .13); }
+
+body[data-modul="2d"] .wz-gruppe,
+body[data-modul="2d"] #werkzeugPanel #sidePanel,
 body[data-modul="2d"] #abschnittBar,
 body[data-modul="2d"] #bulkBar {
   background: var(--surface-tief);
   border: 1px solid var(--hairline);
   border-radius: var(--r-karte-klein);
   color: var(--text);
+}
+body[data-modul="2d"] .wz-aktion {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  min-height: var(--touch);
+}
+body[data-modul="2d"] .wz-aktion:hover:not(:disabled) { background: rgba(255, 255, 255, .13); }
+body[data-modul="2d"] .wz-ziel {
+  background: var(--accent-weich);
+  border: 1px solid var(--accent-rand);
+  color: var(--accent-2d);
+  font-family: var(--font-mono);
+}
+body[data-modul="2d"] .wz-segment {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+}
+body[data-modul="2d"] .wz-segment-btn { color: var(--muted); }
+body[data-modul="2d"] .wz-segment-btn.active {
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
 }
 
 /* ── Zeichenfläche: helle Papierfläche im dunklen Rahmen ─────────────────── */
