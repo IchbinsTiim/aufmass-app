@@ -1191,20 +1191,49 @@ function clampScale(s) {
   return Math.min(CAM_MAX_SCALE, Math.max(CAM_MIN_SCALE, s));
 }
 
+/**
+ * Der Teil der Zeichenfläche, der WIRKLICH frei liegt.
+ *
+ * Angedockt steht das Werkzeug-Menü neben der Zeichnung und verdeckt nichts.
+ * Als Blatt von unten (Handy, iPad hochkant) liegt es darüber – „alle Felder
+ * anzeigen" würde die Zeichnung sonst mittig in eine Fläche einpassen, deren
+ * untere Hälfte niemand sieht.
+ *
+ * Nur fürs Einpassen gedacht: Treffer und Umrechnungen brauchen weiterhin das
+ * echte Rechteck aus viewportRect().
+ */
+function freierViewport() {
+  const vp = viewportRect();
+  const panel = document.getElementById('werkzeugPanel');
+  if (!panel || !panel.classList.contains('offen')) return vp;
+  const pr = panel.getBoundingClientRect();
+  if (!pr.width || !pr.height) return vp;
+  // Liegt es rechts daneben (angedockt), überlappt es die Zeichnung nicht.
+  if (pr.left >= vp.left + vp.w - 1) return vp;
+  const frei = pr.top - vp.top;
+  if (frei >= vp.h - 1) return vp;
+  return { left: vp.left, top: vp.top, w: vp.w, h: Math.max(140, frei) };
+}
+
 /** Setzt die Kamera so, dass der gesamte Inhalt zentriert sichtbar ist. */
 function fitCameraToContent() {
-  const vp = viewportRect();
-  const b  = contentBounds();
+  const vp  = viewportRect();
+  const vis = freierViewport();
+  const b   = contentBounds();
   if (!b) {
     camera.cx = 0; camera.cy = 0;
-    camera.scale = clampScale(Math.min(vp.w / 800, vp.h / 600));
+    camera.scale = clampScale(Math.min(vis.w / 800, vis.h / 600));
     return;
   }
-  camera.cx = b.minX + b.w / 2;
-  camera.cy = b.minY + b.h / 2;
-  const sx = vp.w / Math.max(b.w, 1);
-  const sy = vp.h / Math.max(b.h, 1);
+  const sx = vis.w / Math.max(b.w, 1);
+  const sy = vis.h / Math.max(b.h, 1);
   camera.scale = clampScale(Math.min(sx, sy) * CAM_FIT_MARGIN);
+  // Die Kamera zielt auf die Mitte der GESAMTEN Fläche. Damit der Inhalt in
+  // der Mitte des FREIEN Bereichs landet, wird der Versatz beider Mitten
+  // herausgerechnet.
+  const dyPx = (vis.top + vis.h / 2) - (vp.top + vp.h / 2);
+  camera.cx = b.minX + b.w / 2;
+  camera.cy = b.minY + b.h / 2 - dyPx / camera.scale;
 }
 
 /** Hält den Kameramittelpunkt in Reichweite des Inhalts (kein „Verlaufen“). */
@@ -2021,10 +2050,12 @@ function renderSvg() {
     const poly = svgEl('polygon', {
       points: ptsStr(el.pts),
       fill: isBulkSelected ? '#6a4bd1' : (isSelected ? '#8ec4f5' : baseFill),
-      'fill-opacity': isBulkSelected ? 0.30 : 1,
-      stroke: isBulkSelected ? '#6a4bd1' : (isSelected ? '#0a2f58' : baseStrk),
+      'fill-opacity': isBulkSelected ? 0.42 : 1,
+      stroke: isBulkSelected ? '#8f74ff' : (isSelected ? '#0a5fd0' : baseStrk),
       'stroke-width': (isSelected || isBulkSelected) ? 4 : 2,
-      style: isSelected ? 'filter:drop-shadow(0 0 6px rgba(0,122,255,0.75))' : '',
+      style: isSelected     ? 'filter:drop-shadow(0 0 7px rgba(10,95,208,0.85))'
+           : isBulkSelected ? 'filter:drop-shadow(0 0 7px rgba(143,116,255,0.85))'
+           : '',
       cursor: 'pointer'
     });
     poly.addEventListener('click', ev => {
@@ -2032,6 +2063,54 @@ function renderSvg() {
       handleBayTap(el.si, el.bi);
     });
     g.appendChild(poly);
+
+    /* ── Auswahl deutlich zeigen ──────────────────────────────────────────
+       Auf dem iPad in der Sonne trägt ein Farbunterschied allein nicht weit
+       genug. Ausgewählte Felder bekommen deshalb zusätzlich einen kräftigen
+       Ring in FESTER Bildschirmstärke (also unabhängig vom Zoom) und die
+       Mehrfachauswahl obendrein einen Haken in der Feldmitte – zwei
+       Merkmale, die auch schräg von oben und mit Handschuh erkennbar sind.
+       Die Ringe reagieren auf keinen Tipp; sie liegen nur oben auf.       */
+    if (isSelected || isBulkSelected) {
+      const ringFarbe = isBulkSelected ? '#8f74ff' : '#0a5fd0';
+      g.appendChild(svgEl('polygon', {
+        points: ptsStr(el.pts), fill: 'none',
+        stroke: '#ffffff', 'stroke-width': hs(7),
+        'stroke-linejoin': 'round', 'pointer-events': 'none', opacity: 0.55
+      }));
+      g.appendChild(svgEl('polygon', {
+        points: ptsStr(el.pts), fill: 'none',
+        stroke: ringFarbe, 'stroke-width': hs(3.5),
+        'stroke-linejoin': 'round', 'pointer-events': 'none'
+      }));
+    }
+
+    if (isBulkSelected) {
+      // Der Haken sitzt in der oberen RECHTEN Ecke des Feldes: die linke ist
+      // von der Feldbezeichnung belegt, die Mitte vom Längenmaß und vom
+      // Verschiebe-Griff. So verdeckt nichts den Auswahlnachweis.
+      const r    = Math.min(Math.max(depth * 0.22, hs(10)), hs(17));
+      const pad  = r * 1.35;
+      const maxX = Math.max(...el.pts.map(q => q.x));
+      const minY = Math.min(...el.pts.map(q => q.y));
+      const hx = maxX - pad, hy = minY + pad;
+      g.appendChild(svgEl('circle', {
+        cx: hx, cy: hy, r: r * 1.2,
+        fill: '#ffffff', 'pointer-events': 'none'
+      }));
+      g.appendChild(svgEl('circle', {
+        cx: hx, cy: hy, r,
+        fill: '#6a4bd1', 'pointer-events': 'none'
+      }));
+      const hk = svgEl('text', {
+        x: hx, y: hy,
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+        'font-size': r * 1.5, 'font-family': 'system-ui, sans-serif',
+        fill: '#ffffff', 'font-weight': '800', 'pointer-events': 'none'
+      });
+      hk.textContent = '\u2713';
+      g.appendChild(hk);
+    }
 
     // ── Verbreiterungen ───────────────────────────────────────────────────
     // Sie gehören zum Feld und werden deshalb direkt daran gezeichnet: die
@@ -2837,7 +2916,9 @@ function handleBayTap(si, bi) {
 
   selectedSi = si;
   selectedBi = bi;
-  requestRender();            // Auswahl + Dreh-/Anfüge-Griffe sofort anzeigen
+  // Auswahl + Dreh-/Anfuege-Griffe sofort anzeigen; das Werkzeug-Menue zeigt
+  // dasselbe Feld als Ziel seiner Aktionen.
+  requestRender({ svg: true, bulk: true });
   openEditSheet(si, bi);
 }
 
@@ -4431,6 +4512,324 @@ function currentSelectionBays() {
   return bay ? [bay] : [];
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Werkzeug-Menü
+   --------------------------------------------------------------------------
+   Ein Knopf (der Pfeil ganz rechts in der Werkzeugleiste) klappt ein Panel
+   auf, in dem alles liegt, was beim Zeichnen nicht ständig gebraucht wird,
+   aber ohne Suchen erreichbar sein muss:
+
+     Auswahl     Mehrfachauswahl an/aus, alle auswählen, Auswahl aufheben
+     Bearbeiten  Höhe, Kategorien, Konsole, Kopieren, Vorlagen, Spiegeln
+     Achsen      Abschnitte anlegen, zuweisen, umbenennen, ein-/ausblenden
+     Felder      die Feldliste (nur im Handy-Modus, sonst links)
+     Ansicht     Handy-/Tablet-Modus
+
+   Das Panel ist NICHT modal: die Mehrfachauswahl wird durch Antippen der
+   Felder im Plan bedient, und dabei soll das Menü offen bleiben und live
+   mitzählen. Es schließt nur über seinen eigenen Knopf (oder Esc).
+
+   Der Auswahlzustand (bulkMode/bulkSelected) hängt NICHT am Menü: Zuklappen
+   ändert nichts an der Auswahl, Aufklappen zeigt sie unverändert wieder.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let werkzeugOffen = false;
+
+function ladeWerkzeugOffen() {
+  try { return localStorage.getItem(GK.werkzeugMenue) === '1'; }
+  catch (_) { return false; }
+}
+
+/** Öffnet/schließt das Menü. `merken: false` für Zustände, die nicht die Wahl
+ *  des Nutzers sind (z. B. Aufräumen beim Dokumentwechsel). */
+function setWerkzeugPanel(offen, { merken = true } = {}) {
+  werkzeugOffen = !!offen;
+  const panel = document.getElementById('werkzeugPanel');
+  const btn   = document.getElementById('werkzeugBtn');
+  if (panel) panel.classList.toggle('offen', werkzeugOffen);
+  if (btn) {
+    btn.classList.toggle('aktiv', werkzeugOffen);
+    btn.setAttribute('aria-expanded', String(werkzeugOffen));
+    const pfeil = btn.querySelector('.wz-pfeil');
+    if (pfeil) pfeil.textContent = werkzeugOffen ? '⌄' : '›';
+  }
+  document.body.classList.toggle('wz-offen', werkzeugOffen);
+  if (merken) { try { localStorage.setItem(GK.werkzeugMenue, werkzeugOffen ? '1' : '0'); } catch (_) {} }
+  // Auf schmalen Geraeten zieht die Feldliste mit ins Menue, damit die
+  // Zeichnung nicht zwischen zwei Leisten eingeklemmt wird.
+  syncSidePanelOrt();
+  // Beim Aufklappen den Inhalt frisch aufbauen – die Auswahl kann sich
+  // zwischenzeitlich über den Plan geändert haben.
+  if (werkzeugOffen) renderWerkzeugPanel();
+  // Die Zeichenflaeche wird schmaler bzw. wieder breiter.
+  _vpCache = null;
+  if (autoFit) fitCameraToContent();
+  applyCamera();
+}
+
+function toggleWerkzeugPanel() { setWerkzeugPanel(!werkzeugOffen); }
+
+/** Kleine Zahl am Werkzeug-Knopf: so ist auch bei zugeklapptem Menü sichtbar,
+ *  dass gerade eine Mehrfachauswahl läuft und wie viele Felder darin sind. */
+function updateWerkzeugBadge() {
+  const badge = document.getElementById('werkzeugBadge');
+  const btn   = document.getElementById('werkzeugBtn');
+  if (!badge) return;
+  const an = bulkMode;
+  badge.textContent = an ? String(bulkSelected.size) : '';
+  badge.classList.toggle('hidden', !an);
+  if (btn) btn.classList.toggle('wz-mehrfach', an);
+}
+
+/** Baut alle Blöcke des Menüs neu auf. */
+function renderWerkzeugPanel() {
+  renderWzAuswahl();
+  renderBulkBar();
+  renderAbschnittBar();
+  renderWzAnsicht();
+}
+
+/* ── Block „Auswahl" ─────────────────────────────────────────────────────────
+   Der Einstieg in alles Weitere. Er beantwortet drei Fragen auf einen Blick:
+   Ist die Mehrfachauswahl an? Wie viele Felder sind markiert? Wie werde ich
+   sie wieder los?                                                           */
+
+function renderWzAuswahl() {
+  const el = document.getElementById('wzAuswahl');
+  if (!el) return;
+  el.innerHTML = '';
+  el.appendChild(wzKopf('Auswahl', '☑'));
+
+  const alleBays = visibleBaysFlat();
+
+  // Der Hauptschalter. Bewusst groß und über die volle Breite: er ist der
+  // meistgesuchte Knopf des ganzen Menüs.
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'bulk-toggle-btn wz-hauptschalter' + (bulkMode ? ' active' : '');
+  toggleBtn.setAttribute('aria-pressed', String(bulkMode));
+  toggleBtn.innerHTML = '';
+  const tIco = document.createElement('span');
+  tIco.className = 'wz-schalter-ico';
+  tIco.textContent = bulkMode ? '✕' : '☑';
+  const tTxt = document.createElement('span');
+  tTxt.className = 'wz-schalter-txt';
+  tTxt.textContent = bulkMode ? 'Mehrfachauswahl beenden' : 'Mehrfachauswahl aktivieren';
+  toggleBtn.appendChild(tIco); toggleBtn.appendChild(tTxt);
+  toggleBtn.addEventListener('click', () => {
+    bulkMode = !bulkMode;
+    // Bordbrett-Modus und Mehrfachauswahl deuten denselben Tipp verschieden
+    // (Kante gegen Feld) und schließen sich deshalb gegenseitig aus.
+    if (bulkMode && bordbrettModus) beendeBordbrettModus();
+    if (!bulkMode) { bulkSelected.clear(); bulkHL = null; bulkHR = null; }
+    renderAll();
+  });
+  el.appendChild(toggleBtn);
+
+  if (!bulkMode) {
+    // Einzelauswahl: zeigen, WAS ausgewählt ist, und den direkten Weg ins
+    // Bearbeiten-Blatt anbieten.
+    const sel = currentSelectionBays();
+    const zeile = document.createElement('p');
+    zeile.className = 'wz-hinweis';
+    if (sel.length) {
+      zeile.innerHTML = '';
+      const stark = document.createElement('strong');
+      stark.textContent = 'Feld ' + bayLabel(state.sections[selectedSi], selectedBi);
+      zeile.appendChild(stark);
+      zeile.appendChild(document.createTextNode(' ausgewählt'));
+      el.appendChild(zeile);
+
+      const bearbBtn = document.createElement('button');
+      bearbBtn.type = 'button';
+      bearbBtn.className = 'wz-aktion';
+      bearbBtn.textContent = '✎ Feld bearbeiten';
+      bearbBtn.addEventListener('click', () => openEditSheet(selectedSi, selectedBi));
+      el.appendChild(bearbBtn);
+    } else {
+      zeile.textContent = 'Feld im Plan antippen zum Bearbeiten – oder oben die '
+                        + 'Mehrfachauswahl einschalten und mehrere Felder markieren.';
+      el.appendChild(zeile);
+    }
+    return;
+  }
+
+  // Mehrfachauswahl aktiv ------------------------------------------------
+  const zaehler = document.createElement('div');
+  zaehler.className = 'wz-zaehler' + (bulkSelected.size ? ' voll' : '');
+  const zNum = document.createElement('span');
+  zNum.className = 'wz-zaehler-zahl';
+  zNum.textContent = String(bulkSelected.size);
+  const zTxt = document.createElement('span');
+  zTxt.className = 'wz-zaehler-txt';
+  zTxt.textContent = `von ${alleBays.length} Feld${alleBays.length === 1 ? '' : 'ern'} ausgewählt`;
+  zaehler.appendChild(zNum); zaehler.appendChild(zTxt);
+  el.appendChild(zaehler);
+
+  const hinweis = document.createElement('p');
+  hinweis.className = 'wz-hinweis';
+  hinweis.textContent = 'Felder im Plan antippen – angetippt = markiert, nochmal antippen = wieder abgewählt.';
+  el.appendChild(hinweis);
+
+  const reihe = document.createElement('div');
+  reihe.className = 'wz-aktion-reihe';
+
+  const alleBtn = document.createElement('button');
+  // Der Zweitname `bulk-sel-btn` bleibt: „Alle"/„Keine" heissen seit jeher so
+  // und werden in den Abnahmetests darueber angesprochen. Das Aussehen kommt
+  // von `wz-aktion` – zwei Namen, ein Knopf.
+  alleBtn.type = 'button'; alleBtn.className = 'wz-aktion bulk-sel-btn';
+  alleBtn.textContent = '⬚ Alle Felder auswählen';
+  alleBtn.disabled = !alleBays.length;
+  alleBtn.addEventListener('click', () => {
+    alleBays.forEach(b => bulkSelected.add(b.id));
+    renderAll();
+    showToast(alleBays.length + ' Feld' + (alleBays.length === 1 ? '' : 'er') + ' ausgewählt');
+  });
+
+  const keineBtn = document.createElement('button');
+  keineBtn.type = 'button'; keineBtn.className = 'wz-aktion bulk-sel-btn';
+  keineBtn.textContent = '⨯ Auswahl aufheben';
+  keineBtn.disabled = !bulkSelected.size;
+  keineBtn.addEventListener('click', () => { bulkSelected.clear(); renderAll(); });
+
+  reihe.appendChild(alleBtn); reihe.appendChild(keineBtn);
+  el.appendChild(reihe);
+
+  // Auswahl über eine Achse/einen Abschnitt: „alle Felder der Achse B".
+  const achsen = abschnitteList();
+  if (achsen.length) {
+    const lbl = document.createElement('div');
+    lbl.className = 'wz-unterlabel';
+    lbl.textContent = 'Achse/Abschnitt komplett auswählen';
+    el.appendChild(lbl);
+
+    const row = document.createElement('div');
+    row.className = 'wz-chip-reihe';
+    const counts = abschnittCounts();
+    achsen.forEach(a => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'wz-achs-chip';
+      chip.style.setProperty('--absch-color', a.color);
+      chip.textContent = `${a.name} (${counts[a.id] || 0})`;
+      chip.addEventListener('click', () => waehleAbschnittFelder(a.id));
+      row.appendChild(chip);
+    });
+    if (counts['']) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'wz-achs-chip';
+      chip.style.setProperty('--absch-color', '#8a97a5');
+      chip.textContent = `Ohne Achse (${counts['']})`;
+      chip.addEventListener('click', () => waehleAbschnittFelder(null));
+      row.appendChild(chip);
+    }
+    el.appendChild(row);
+  }
+
+  // Auswahl über eine Position: „alle Felder mit Dachfang".
+  const posMitFeldern = POSITIONS.filter(p =>
+    alleBays.some(b => (b.positions || []).some(x => x.cat === p.key)));
+  if (posMitFeldern.length) {
+    const lbl = document.createElement('div');
+    lbl.className = 'wz-unterlabel';
+    lbl.textContent = 'Alle Felder mit einer Position auswählen';
+    el.appendChild(lbl);
+
+    const row = document.createElement('div');
+    row.className = 'wz-chip-reihe';
+    posMitFeldern.forEach(p => {
+      const treffer = alleBays.filter(b => (b.positions || []).some(x => x.cat === p.key));
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'wz-achs-chip';
+      chip.style.setProperty('--absch-color', p.color);
+      chip.textContent = `${p.label} (${treffer.length})`;
+      chip.addEventListener('click', () => {
+        bulkSelected.clear();
+        treffer.forEach(b => bulkSelected.add(b.id));
+        renderAll();
+        showToast(`${treffer.length} Feld${treffer.length === 1 ? '' : 'er'} mit „${p.label}" ausgewählt`);
+      });
+      row.appendChild(chip);
+    });
+    el.appendChild(row);
+  }
+}
+
+/** Alle (sichtbaren) Felder einer Achse/eines Abschnitts markieren –
+ *  dieselbe Aktion wie der Klick auf die Achszeile weiter unten. */
+function waehleAbschnittFelder(id) {
+  if (id && isAbschnittHidden(id)) setAbschnittHidden(id, false);
+  if (bordbrettModus) beendeBordbrettModus();
+  bulkMode = true;
+  bulkSelected.clear();
+  visibleBaysFlat().forEach(b => {
+    const match = id ? b.abschnittId === id : !abschnittById(b.abschnittId);
+    if (match) bulkSelected.add(b.id);
+  });
+  renderAll();
+  showToast(`${bulkSelected.size} Feld${bulkSelected.size === 1 ? '' : 'er'} aus „${abschnittName(id)}" ausgewählt`);
+}
+
+/** Überschrift eines Menüblocks. */
+function wzKopf(text, ico) {
+  const h = document.createElement('div');
+  h.className = 'wz-kopfzeile';
+  if (ico) {
+    const i = document.createElement('span');
+    i.className = 'wz-kopf-ico'; i.textContent = ico; i.setAttribute('aria-hidden', 'true');
+    h.appendChild(i);
+  }
+  const t = document.createElement('span');
+  t.className = 'wz-kopf-txt'; t.textContent = text;
+  h.appendChild(t);
+  return h;
+}
+
+/* ── Block „Ansicht" – der Handy-Modus ───────────────────────────────────────
+   Drei Schalter statt eines Ja/Nein: „Automatisch" ist die Vorgabe und trifft
+   in fast allen Fällen zu; „Handy" und „Tablet" sind die ausdrückliche
+   Ansage, wenn der Bildschirm etwas anderes nahelegt als der Nutzer will
+   (z. B. Handy-Modus auf dem iPad, um die Zeichenfläche zu maximieren).    */
+
+function renderWzAnsicht() {
+  const el = document.getElementById('wzAnsicht');
+  if (!el) return;
+  el.innerHTML = '';
+  el.appendChild(wzKopf('Ansicht', '📱'));
+
+  const wahl = getAnsichtWahl();
+  const jetzt = document.body.dataset.mode === 'iphone' ? 'Handy-Modus' : 'Tablet/Desktop';
+
+  const row = document.createElement('div');
+  row.className = 'wz-segment';
+  [
+    ['auto',   'Automatisch', 'Der Bildschirm entscheidet – die übliche Einstellung'],
+    ['handy',  'Handy',       'Immer Handy-Modus: größte Zeichenfläche, alle Werkzeuge im Menü'],
+    ['tablet', 'Tablet',      'Nie Handy-Modus: Feldliste links, Menü rechts angedockt']
+  ].forEach(([val, label, titel]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'wz-segment-btn' + (wahl === val ? ' active' : '');
+    b.dataset.ansicht = val;
+    b.textContent = label;
+    b.title = titel;
+    b.setAttribute('aria-pressed', String(wahl === val));
+    b.addEventListener('click', () => setAnsichtWahl(val));
+    row.appendChild(b);
+  });
+  el.appendChild(row);
+
+  const info = document.createElement('p');
+  info.className = 'wz-hinweis';
+  info.id = 'wzAnsichtInfo';
+  info.textContent = `Aktiv: ${jetzt}` + (wahl === 'auto' ? ` (${window.innerWidth} × ${window.innerHeight} px)` : '');
+  el.appendChild(info);
+}
+
 /* ── Abschnitts-Verwaltung (Seitenleiste) ────────────────────────────────────
    Abschnitte anlegen, umbenennen, löschen – und mit einem Klick alle Felder
    eines Abschnitts in die Mehrfachauswahl übernehmen. */
@@ -4440,36 +4839,88 @@ function renderAbschnittBar() {
   if (!el) return;
   el.innerHTML = '';
 
-  const head = document.createElement('div');
-  head.className = 'absch-head';
-
-  const title = document.createElement('span');
-  title.className = 'absch-title';
-  title.textContent = 'Abschnitte';
+  const head = wzKopf('Achsen / Abschnitte', '🧭');
+  head.classList.add('absch-head');
 
   const addBtn = document.createElement('button');
   addBtn.type = 'button'; addBtn.className = 'absch-add-btn';
-  addBtn.textContent = '+ Abschnitt';
-  addBtn.title = 'Neuen Abschnitt anlegen (z. B. „Nordseite")';
+  addBtn.textContent = '+ Achse';
+  addBtn.title = 'Neue Achse / neuen Abschnitt anlegen (z. B. „Achse A", „Nordseite")';
   addBtn.addEventListener('click', () => {
-    const name = prompt('Name des Abschnitts (z. B. „Nordseite", „Abschnitt A"):',
-                        `Abschnitt ${abschnitteList().length + 1}`);
+    const name = prompt('Name der Achse / des Abschnitts (z. B. „Achse A", „Nordseite"):',
+                        `Achse ${String.fromCharCode(65 + abschnitteList().length)}`);
     if (name === null) return;
     const a = addAbschnitt(name.trim());
-    // Direkt nutzbar: liegt eine Auswahl vor, wandert sie gleich in den neuen
-    // Abschnitt – das ist der mit Abstand häufigste nächste Schritt.
+    // Direkt nutzbar: liegt eine Auswahl vor, wandert sie gleich in die neue
+    // Achse – das ist der mit Abstand häufigste nächste Schritt.
     const sel = currentSelectionBays();
     if (sel.length) {
       assignAbschnitt(sel, a.id);
-      showToast(`Abschnitt „${a.name}" angelegt · ${sel.length} Feld${sel.length === 1 ? '' : 'er'} zugeordnet`);
+      showToast(`Achse „${a.name}" angelegt · ${sel.length} Feld${sel.length === 1 ? '' : 'er'} zugeordnet`);
     } else {
-      showToast(`Abschnitt „${a.name}" angelegt`);
+      showToast(`Achse „${a.name}" angelegt`);
     }
     renderAll();
   });
 
-  head.appendChild(title); head.appendChild(addBtn);
+  head.appendChild(addBtn);
   el.appendChild(head);
+
+  /* ── Zuweisen: Achse für die aktuelle Auswahl ──────────────────────────
+     Der Kernfall aus der Praxis: fünf Felder markieren → Achse B zuweisen.
+     Deshalb steht er GANZ OBEN in diesem Block und nicht am Ende einer
+     langen Liste.                                                        */
+  const sel = currentSelectionBays().filter(isBayVisible);
+  if (sel.length) {
+    const zuLabel = document.createElement('div');
+    zuLabel.className = 'wz-unterlabel';
+    zuLabel.textContent = `Achse für ${sel.length} ausgewählte${sel.length === 1 ? 's' : ''} Feld${sel.length === 1 ? '' : 'er'}`;
+    el.appendChild(zuLabel);
+
+    const abschRow = document.createElement('div');
+    abschRow.className = 'bulk-chip-row';
+    const curIds = abschnittSummary(sel).ids;
+    const mkAbschChip = (id, name, color) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      const isAll = id
+        ? sel.every(b => b.abschnittId === id)
+        : sel.every(b => !abschnittById(b.abschnittId));
+      const isSome = !isAll && (id ? curIds.includes(id)
+                                   : sel.some(b => !abschnittById(b.abschnittId)));
+      chip.className = 'bulk-pos-chip' + (isAll ? ' active' : '') + (isSome ? ' partial' : '');
+      chip.textContent = name;
+      chip.style.setProperty('--pos-color', color);
+      chip.title = isAll ? 'Alle ausgewählten Felder liegen bereits auf dieser Achse'
+                         : `${sel.length} Feld${sel.length === 1 ? '' : 'er'} dieser Achse zuordnen`;
+      chip.addEventListener('click', () => {
+        assignAbschnitt(sel, id);
+        renderAll();
+        showToast(id
+          ? `${sel.length} Feld${sel.length === 1 ? '' : 'er'} → „${name}"`
+          : `Achse bei ${sel.length} Feld${sel.length === 1 ? '' : 'ern'} entfernt`);
+      });
+      abschRow.appendChild(chip);
+    };
+    abschnitteList().forEach(a => mkAbschChip(a.id, a.name, a.color));
+    mkAbschChip(null, 'Ohne Abschnitt', '#8a97a5');
+
+    const newAbschBtn = document.createElement('button');
+    newAbschBtn.type = 'button';
+    newAbschBtn.className = 'bulk-pos-chip absch-new-chip';
+    newAbschBtn.textContent = '+ neue Achse';
+    newAbschBtn.addEventListener('click', () => {
+      const name = prompt('Name der Achse / des Abschnitts (z. B. „Achse A", „Nordseite"):',
+                          `Achse ${String.fromCharCode(65 + abschnitteList().length)}`);
+      if (name === null) return;
+      const a = addAbschnitt(name.trim());
+      assignAbschnitt(sel, a.id);
+      renderAll();
+      showToast(`${sel.length} Feld${sel.length === 1 ? '' : 'er'} → „${a.name}"`);
+    });
+    abschRow.appendChild(newAbschBtn);
+    el.appendChild(abschRow);
+  }
 
   // Sammelknopf, sobald irgendetwas ausgeblendet ist – so ist der Weg zurück
   // zur vollständigen Ansicht immer einen Klick entfernt.
@@ -4479,7 +4930,7 @@ function renderAbschnittBar() {
     showAll.type = 'button';
     showAll.className = 'absch-showall-btn';
     showAll.textContent = `👁 Alle einblenden (${nHidden} ausgeblendet)`;
-    showAll.title = 'Alle ausgeblendeten Abschnitte wieder anzeigen';
+    showAll.title = 'Alle ausgeblendeten Achsen wieder anzeigen';
     showAll.addEventListener('click', () => { showAllAbschnitte(); renderAll(); });
     el.appendChild(showAll);
   }
@@ -4488,23 +4939,31 @@ function renderAbschnittBar() {
   if (!list.length) {
     const hint = document.createElement('p');
     hint.className = 'absch-hint';
-    hint.textContent = 'Noch keine Abschnitte. Felder ohne Abschnitt funktionieren normal weiter.';
+    hint.textContent = 'Noch keine Achsen. Felder ohne Achse funktionieren normal weiter '
+                     + 'und erscheinen im Aufmaß unter der Wand, auf der sie liegen.';
     el.appendChild(hint);
     return;
   }
 
-  const counts = abschnittCounts();
+  const counts   = abschnittCounts();
+  // Welche Achse ist gerade „aktiv"? Die der aktuellen Auswahl. Das ist keine
+  // zweite Zustandsgröße, sondern eine Ableitung – deshalb kann sie nie von
+  // der tatsächlichen Zuordnung abweichen.
+  const aktivIds = new Set(abschnittSummary(sel).ids);
+  const aktivOhne = sel.length > 0 && sel.some(b => !abschnittById(b.abschnittId));
+
   const wrap = document.createElement('div');
   wrap.className = 'absch-list';
 
   const makeRow = (a, count) => {
     const id     = a ? a.id : null;
     const hidden = a ? !!a.hidden : !!state.hideUnassigned;
+    const aktiv  = a ? aktivIds.has(a.id) : aktivOhne;
     const row = document.createElement('div');
-    row.className = 'absch-row' + (hidden ? ' absch-hidden' : '');
+    row.className = 'absch-row' + (hidden ? ' absch-hidden' : '') + (aktiv ? ' absch-aktiv' : '');
     row.style.setProperty('--absch-color', a ? a.color : '#8a97a5');
 
-    // Sichtbarkeit: blendet die Felder dieses Abschnitts auf der Zeichenfläche
+    // Sichtbarkeit: blendet die Felder dieser Achse auf der Zeichenfläche
     // aus/ein. Die Felder selbst bleiben unverändert erhalten.
     const eye = document.createElement('button');
     eye.type = 'button';
@@ -4512,8 +4971,8 @@ function renderAbschnittBar() {
     eye.textContent = hidden ? '🙈' : '👁';
     eye.setAttribute('aria-pressed', String(!hidden));
     eye.title = hidden
-      ? 'Abschnitt einblenden (Felder sind nur ausgeblendet, nicht gelöscht)'
-      : 'Abschnitt ausblenden (Felder bleiben erhalten)';
+      ? 'Achse einblenden (Felder sind nur ausgeblendet, nicht gelöscht)'
+      : 'Achse ausblenden (Felder bleiben erhalten)';
     eye.addEventListener('click', () => {
       setAbschnittHidden(id, !hidden);
       showToast(hidden
@@ -4534,32 +4993,27 @@ function renderAbschnittBar() {
     cnt.className = 'absch-count';
     cnt.textContent = count + ' Feld' + (count === 1 ? '' : 'er');
 
-    // Klick auf die Zeile: alle Felder dieses Abschnitts markieren
+    // Klick auf die Zeile: alle Felder dieser Achse markieren
     // (schaltet die Mehrfachauswahl bei Bedarf ein).
     const pick = document.createElement('button');
     pick.type = 'button'; pick.className = 'absch-pick';
-    pick.title = 'Alle Felder dieses Abschnitts auswählen';
+    pick.title = 'Alle Felder dieser Achse auswählen';
     pick.appendChild(dot); pick.appendChild(nameEl); pick.appendChild(cnt);
-    pick.addEventListener('click', () => {
-      // Ein ausgeblendeter Abschnitt wird zuerst wieder eingeblendet – sonst
-      // markierte man Felder, die man nicht sieht.
-      if (hidden) setAbschnittHidden(id, false);
-      bulkMode = true;
-      bulkSelected.clear();
-      allBaysFlat().forEach(b => {
-        const match = a ? b.abschnittId === a.id : !abschnittById(b.abschnittId);
-        if (match) bulkSelected.add(b.id);
-      });
-      renderAll();
-    });
+    if (aktiv) {
+      const mark = document.createElement('span');
+      mark.className = 'absch-aktiv-mark';
+      mark.textContent = 'aktiv';
+      pick.appendChild(mark);
+    }
+    pick.addEventListener('click', () => waehleAbschnittFelder(id));
     row.appendChild(pick);
 
     if (a) {
       const ren = document.createElement('button');
       ren.type = 'button'; ren.className = 'absch-mini-btn';
-      ren.textContent = '✎'; ren.title = 'Abschnitt umbenennen';
+      ren.textContent = '✎'; ren.title = 'Achse umbenennen';
       ren.addEventListener('click', () => {
-        const next = prompt('Neuer Name für den Abschnitt:', a.name);
+        const next = prompt('Neuer Name für die Achse / den Abschnitt:', a.name);
         if (next === null) return;
         const trimmed = next.trim();
         if (!trimmed) return;
@@ -4570,11 +5024,11 @@ function renderAbschnittBar() {
       const del = document.createElement('button');
       del.type = 'button'; del.className = 'absch-mini-btn danger';
       del.textContent = '×';
-      del.title = 'Abschnitt löschen (Felder bleiben erhalten)';
+      del.title = 'Achse löschen (Felder bleiben erhalten)';
       del.addEventListener('click', () => {
-        if (count && !confirm(`Abschnitt „${a.name}" löschen?\n\nDie ${count} zugeordneten Felder bleiben erhalten und gelten danach als „Ohne Abschnitt".`)) return;
+        if (count && !confirm(`Achse „${a.name}" löschen?\n\nDie ${count} zugeordneten Felder bleiben erhalten und gelten danach als „Ohne Abschnitt".`)) return;
         deleteAbschnitt(a.id);
-        showToast(`Abschnitt „${a.name}" gelöscht`);
+        showToast(`Achse „${a.name}" gelöscht`);
         renderAll();
       });
 
@@ -4846,231 +5300,49 @@ function openBulkPosSheet(catKey, bays) {
   requestAnimationFrame(() => sheet.classList.add('open'));
 }
 
-/** Leiste über der Feldliste: Mehrfachauswahl an/aus + Sammel-Aktionen.
- *  Erlaubt, EINE Position (Konsole, Netz, Tunnelrahmen …) auf beliebig viele,
- *  auch nicht benachbarte Felder anzuwenden, ohne deren Höhen oder sonstige
- *  Positionen zu verändern – Ergänzung zu Kopieren/Einfügen (das ein ganzes
- *  Feld 1:1 auf ein einzelnes Ziel überträgt). */
+/** Block „Bearbeiten" im Werkzeug-Menü: alles, was auf die aktuelle Auswahl
+ *  wirkt – Höhe, Kategorien, Konsolen, Kopieren, Vorlagen, Spiegeln.
+ *
+ *  Ziel ist IMMER `currentSelectionBays()`: bei eingeschalteter
+ *  Mehrfachauswahl die angehakten Felder, sonst das einzeln ausgewählte.
+ *  Dadurch tut derselbe Knopf in beiden Fällen dasselbe, und es gibt nur
+ *  eine Auswahlquelle. */
 function renderBulkBar() {
   const el = document.getElementById('bulkBar');
   if (!el) return;
   el.innerHTML = '';
+  el.appendChild(wzKopf('Bearbeiten', '✎'));
 
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.className = 'bulk-toggle-btn' + (bulkMode ? ' active' : '');
-  toggleBtn.textContent = bulkMode ? '✕ Mehrfachauswahl beenden' : '☑ Mehrere Felder bearbeiten';
-  toggleBtn.addEventListener('click', () => {
-    bulkMode = !bulkMode;
-    if (!bulkMode) { bulkSelected.clear(); bulkHL = null; bulkHR = null; }
-    renderAll();
-  });
-  el.appendChild(toggleBtn);
-  if (!bulkMode) return;
+  // Sammelaktionen wirken ausschließlich auf SICHTBARE Felder – Felder einer
+  // ausgeblendeten Achse sollen sich nicht unbemerkt mitverändern.
+  const selectedBays = currentSelectionBays().filter(isBayVisible);
 
-  // Sammelaktionen wirken ausschließlich auf SICHTBARE Felder – Felder eines
-  // ausgeblendeten Abschnitts sollen sich nicht unbemerkt mitverändern.
-  const bays = visibleBaysFlat();
-  if (!bays.length) {
-    const hint = document.createElement('p');
-    hint.className = 'bulk-hint';
-    hint.textContent = allBaysFlat().length
-      ? 'Alle Abschnitte ausgeblendet – zuerst einen Abschnitt einblenden.'
-      : 'Zuerst Felder anlegen.';
-    el.appendChild(hint);
-    return;
-  }
-
-  const info = document.createElement('div');
-  info.className = 'bulk-info';
-  const nHiddenBays = allBaysFlat().length - bays.length;
-  info.textContent = `${bulkSelected.size} von ${bays.length} Feldern ausgewählt`
-    + (nHiddenBays ? ` · ${nHiddenBays} ausgeblendet` : '');
-  el.appendChild(info);
-
-  // Abschnitts-Zuordnung der Auswahl – dieselbe Information wie in der Anzeige
-  // oben links auf der Zeichenfläche, hier direkt über den Sammel-Aktionen.
-  {
-    const selNow = bays.filter(b => bulkSelected.has(b.id));
-    if (selNow.length) {
-      const sum = abschnittSummary(selNow);
-      const line = document.createElement('div');
-      line.className = 'bulk-absch-info';
-      const lab = document.createElement('span');
-      lab.className = 'bulk-absch-info-label';
-      lab.textContent = sum.names.length > 1 ? 'Abschnitte:' : 'Abschnitt:';
-      line.appendChild(lab);
-      const add = (name, color) => {
-        const c = document.createElement('span');
-        c.className = 'sel-info-chip';
-        c.style.setProperty('--absch-color', color);
-        c.textContent = name;
-        line.appendChild(c);
-      };
-      sum.ids.forEach(id => add(abschnittName(id), abschnittColor(id)));
-      if (sum.hasUnassigned) add('Ohne Abschnitt', '#8a97a5');
-      el.appendChild(line);
-    }
-  }
-
-  const selRow = document.createElement('div');
-  selRow.className = 'bulk-sel-row';
-  const allBtn = document.createElement('button');
-  allBtn.type = 'button'; allBtn.className = 'bulk-sel-btn';
-  allBtn.textContent = 'Alle';
-  allBtn.addEventListener('click', () => { bays.forEach(b => bulkSelected.add(b.id)); renderAll(); });
-  const noneBtn = document.createElement('button');
-  noneBtn.type = 'button'; noneBtn.className = 'bulk-sel-btn';
-  noneBtn.textContent = 'Keine';
-  noneBtn.addEventListener('click', () => { bulkSelected.clear(); renderAll(); });
-  selRow.appendChild(allBtn); selRow.appendChild(noneBtn);
-  el.appendChild(selRow);
-
-  const selectedBays = bays.filter(b => bulkSelected.has(b.id));
   if (!selectedBays.length) {
     const hint = document.createElement('p');
-    hint.className = 'bulk-hint';
-    hint.textContent = 'Felder unten in der Liste ankreuzen, dann hier eine Position anwenden.';
+    hint.className = 'wz-hinweis';
+    hint.textContent = allBaysFlat().length
+      ? 'Kein Feld ausgewählt. Feld im Plan antippen – oder oben die Mehrfachauswahl '
+        + 'einschalten und mehrere Felder markieren.'
+      : 'Zuerst Felder anlegen („+ Feld" in der Werkzeugleiste).';
     el.appendChild(hint);
     return;
   }
 
-  // Abschnitt der gesamten Auswahl zuweisen bzw. entfernen.
-  const abschLabel = document.createElement('div');
-  abschLabel.className = 'bulk-section-label';
-  abschLabel.textContent = 'Abschnitt für Auswahl';
-  el.appendChild(abschLabel);
+  // Woran wird gerade gearbeitet? Eine Zeile, die bei jeder Aktion darüber
+  // steht – auf der Baustelle die wichtigste Rückmeldung des Menüs.
+  const ziel = document.createElement('div');
+  ziel.className = 'wz-ziel';
+  ziel.textContent = bulkMode
+    ? `wirkt auf ${selectedBays.length} ausgewählte${selectedBays.length === 1 ? 's' : ''} Feld${selectedBays.length === 1 ? '' : 'er'}`
+    : `wirkt auf Feld ${bayLabel(state.sections[selectedSi], selectedBi)}`;
+  el.appendChild(ziel);
 
-  const abschRow = document.createElement('div');
-  abschRow.className = 'bulk-chip-row';
-  const curIds = abschnittSummary(selectedBays).ids;
-  const mkAbschChip = (id, name, color) => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    const isAll = id
-      ? selectedBays.every(b => b.abschnittId === id)
-      : selectedBays.every(b => !abschnittById(b.abschnittId));
-    const isSome = !isAll && (id ? curIds.includes(id)
-                                 : selectedBays.some(b => !abschnittById(b.abschnittId)));
-    chip.className = 'bulk-pos-chip' + (isAll ? ' active' : '') + (isSome ? ' partial' : '');
-    chip.textContent = name;
-    chip.style.setProperty('--pos-color', color);
-    chip.addEventListener('click', () => {
-      assignAbschnitt(selectedBays, id);
-      renderAll();
-      showToast(id
-        ? `${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'er'} → „${name}"`
-        : `Abschnitt bei ${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'ern'} entfernt`);
-    });
-    abschRow.appendChild(chip);
-  };
-  abschnitteList().forEach(a => mkAbschChip(a.id, a.name, a.color));
-  mkAbschChip(null, 'Ohne Abschnitt', '#8a97a5');
-
-  const newAbschBtn = document.createElement('button');
-  newAbschBtn.type = 'button';
-  newAbschBtn.className = 'bulk-pos-chip absch-new-chip';
-  newAbschBtn.textContent = '+ neuer Abschnitt';
-  newAbschBtn.addEventListener('click', () => {
-    const name = prompt('Name des Abschnitts (z. B. „Nordseite"):',
-                        `Abschnitt ${abschnitteList().length + 1}`);
-    if (name === null) return;
-    const a = addAbschnitt(name.trim());
-    assignAbschnitt(selectedBays, a.id);
-    renderAll();
-    showToast(`${selectedBays.length} Feld${selectedBays.length === 1 ? '' : 'er'} → „${a.name}"`);
-  });
-  abschRow.appendChild(newAbschBtn);
-  el.appendChild(abschRow);
-
-  /* Kopiertes Feld auf die gesamte Auswahl anwenden. Bisher musste das
-     kopierte Feld bei jedem Ziel einzeln über das Bearbeiten-Sheet eingefügt
-     werden – bei zwanzig gleichen Feldern zwanzig Mal. Hier genügt ein Klick;
-     WAS übertragen wird, legen die Chips darüber fest (Ausstattung, nicht
-     Ort: Position und Drehung bleiben immer feldspezifisch). */
-  const cpLabel = document.createElement('div');
-  cpLabel.className = 'bulk-section-label';
-  cpLabel.textContent = 'Kopiertes Feld auf Auswahl anwenden';
-  el.appendChild(cpLabel);
-
-  if (!copiedBayData) {
-    const cpHint = document.createElement('p');
-    cpHint.className = 'bulk-hint';
-    cpHint.textContent = 'Noch kein Feld kopiert – ein Feld antippen und dort '
-                       + '„Position kopieren" wählen.';
-    el.appendChild(cpHint);
-  } else {
-    const cpWrap = document.createElement('div');
-    cpWrap.className = 'bulk-paste-form';
-
-    const cpApply = document.createElement('button');
-    cpApply.type = 'button'; cpApply.className = 'bulk-paste-apply-btn';
-    const syncCpApply = () => {
-      const n = selectedBays.length;
-      const any = PASTE_FIELDS.some(([k]) => pasteOpts[k]);
-      cpApply.textContent = '📋 Auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' anwenden';
-      cpApply.disabled = !any;
-      cpApply.title = any ? 'Übernommen wird: ' + pasteScopeText()
-                          : 'Mindestens eine Eigenschaft auswählen';
-    };
-
-    cpWrap.appendChild(buildPasteScopeRow(syncCpApply));
-
-    const cpInfo = document.createElement('div');
-    cpInfo.className = 'bulk-paste-info';
-    const nPos = (copiedBayData.positions || []).length;
-    cpInfo.textContent = `Kopiert: ${nPos} Zusatzbauteil${nPos === 1 ? '' : 'e'}`
-      + `  ·  Höhen ${copiedBayData.hL != null ? fmtQty(copiedBayData.hL) : '–'}`
-      + ` / ${copiedBayData.hR != null ? fmtQty(copiedBayData.hR) : '–'} m`
-      + `  ·  Länge ${fmtQty(copiedBayData.len || 0)} m`;
-    cpWrap.appendChild(cpInfo);
-
-    syncCpApply();
-    cpApply.addEventListener('click', () => {
-      const n = pasteBayPositionsToAll(selectedBays);
-      renderAll();
-      showToast(`Auf ${n} Feld${n === 1 ? '' : 'er'} angewendet · ${pasteScopeText()}`);
-    });
-    cpWrap.appendChild(cpApply);
-    el.appendChild(cpWrap);
-  }
-
-  // Vorlage auf die gesamte Auswahl anwenden: überschreibt Höhen + Positionen
-  // aller markierten Felder mit einem Klick.
-  const favBulkLabel = document.createElement('div');
-  favBulkLabel.className = 'bulk-section-label';
-  favBulkLabel.textContent = 'Vorlage auf Auswahl anwenden';
-  el.appendChild(favBulkLabel);
-
-  const favBulkWrap = document.createElement('div');
-  favBulkWrap.className = 'fav-chip-row';
-  const favs = loadFavorites();
-  if (!favs.length) {
-    const hint = document.createElement('span');
-    hint.className = 'bay-pos-empty';
-    hint.textContent = 'Noch keine Vorlagen gespeichert (im Bearbeiten-Sheet eines Feldes anlegen)';
-    favBulkWrap.appendChild(hint);
-  } else {
-    favs.forEach(fav => {
-      const chip = document.createElement('button');
-      chip.type = 'button'; chip.className = 'fav-chip-name';
-      chip.textContent = fav.name;
-      chip.title = 'Auf ' + selectedBays.length + ' Feld' + (selectedBays.length === 1 ? '' : 'er') + ' anwenden';
-      chip.addEventListener('click', () => {
-        selectedBays.forEach(bay => applyFavoriteToBay(fav, bay));
-        renderAll();
-        showToast('Vorlage „' + fav.name + '" auf ' + selectedBays.length + ' Feldern angewendet');
-      });
-      favBulkWrap.appendChild(chip);
-    });
-  }
-  el.appendChild(favBulkWrap);
-
-  // Höhe für die gesamte Auswahl: einmal eingeben, per Klick auf alle
-  // markierten Felder übertragen – ohne deren sonstige Positionen anzutasten.
+  // ── Höhe ───────────────────────────────────────────────────────────────
+  // Einmal eingeben, per Klick auf alle markierten Felder übertragen – ohne
+  // deren sonstige Positionen anzutasten.
   const heightLabel = document.createElement('div');
-  heightLabel.className = 'bulk-section-label';
-  heightLabel.textContent = 'Höhe für Auswahl übernehmen';
+  heightLabel.className = 'wz-unterlabel';
+  heightLabel.textContent = 'Höhe setzen';
   el.appendChild(heightLabel);
 
   const heightForm = document.createElement('div');
@@ -5122,6 +5394,23 @@ function renderBulkBar() {
   heightRow.appendChild(bulkHRight.field);
   heightForm.appendChild(heightRow);
 
+  // Höhe aus der Auswahl übernehmen: sind alle markierten Felder gleich hoch,
+  // stehen die Werte auf Knopfdruck in den Feldern – Tippfehler entfallen.
+  const hUebernehmen = document.createElement('button');
+  hUebernehmen.type = 'button';
+  hUebernehmen.className = 'wz-aktion wz-aktion-klein';
+  hUebernehmen.textContent = '↧ Höhe aus Auswahl übernehmen';
+  hUebernehmen.title = 'Übernimmt die Höhen des ersten ausgewählten Feldes in die Eingabefelder';
+  hUebernehmen.addEventListener('click', () => {
+    const q = selectedBays[0];
+    bulkHL = q.hL != null ? q.hL : null;
+    bulkHR = q.hR != null ? q.hR : null;
+    bulkHLeft.input.value  = bulkHL == null ? '' : bulkHL.toFixed(2);
+    bulkHRight.input.value = bulkHR == null ? '' : bulkHR.toFixed(2);
+    syncApplyHeightBtn();
+  });
+  heightForm.appendChild(hUebernehmen);
+
   syncApplyHeightBtn();
   applyHeightBtn.addEventListener('click', () => {
     selectedBays.forEach(bay => {
@@ -5129,17 +5418,18 @@ function renderBulkBar() {
       if (bulkHR != null) bay.hR = bulkHR;
     });
     renderAll();
-    showToast('Höhe auf ' + selectedBays.length + ' Feldern übernommen');
+    showToast('Höhe auf ' + selectedBays.length + ' Feld'
+      + (selectedBays.length === 1 ? '' : 'ern') + ' übernommen');
   });
   heightForm.appendChild(applyHeightBtn);
   el.appendChild(heightForm);
 
-  // Einfache Positionen: Chip togglet die Kategorie auf ALLEN ausgewählten
-  // Feldern gleichzeitig ein/aus. Menge bleibt je Feld automatisch (Länge/
-  // Höhe/Feldlänge) – wie beim einzelnen "+ Positionen"-Toggle.
+  // ── Kategorien / Zusatzbauteile ────────────────────────────────────────
+  // Chip togglet die Kategorie auf ALLEN ausgewählten Feldern gleichzeitig
+  // ein/aus. Menge bleibt je Feld automatisch (Länge/Höhe/Feldlänge).
   const posLabel = document.createElement('div');
-  posLabel.className = 'bulk-section-label';
-  posLabel.textContent = 'Position für Auswahl';
+  posLabel.className = 'wz-unterlabel';
+  posLabel.textContent = 'Eigenschaften / Kategorien';
   el.appendChild(posLabel);
 
   const chipRow = document.createElement('div');
@@ -5158,10 +5448,7 @@ function renderBulkBar() {
     chip.addEventListener('click', () => {
       // Haben ALLE das Bauteil schon → Klick entfernt es (wie bisher).
       // Sonst öffnet sich der Einstell-Dialog, in dem Menge bzw. Lagen EINMAL
-      // für die gesamte Auswahl festgelegt werden. Früher wurde das Bauteil
-      // ohne jede Angabe angelegt: die Feldlänge floss nicht ein und die
-      // Lagen-Abfrage fehlte, sodass jedes Feld einzeln nachbearbeitet
-      // werden musste.
+      // für die gesamte Auswahl festgelegt werden.
       if (allHave) {
         selectedBays.forEach(bay => {
           normalizeBay(bay);
@@ -5169,7 +5456,8 @@ function renderBulkBar() {
           if (idx >= 0) bay.positions.splice(idx, 1);
         });
         renderAll();
-        showToast(p.label + ' bei ' + selectedBays.length + ' Feldern entfernt');
+        showToast(p.label + ' bei ' + selectedBays.length + ' Feld'
+          + (selectedBays.length === 1 ? '' : 'ern') + ' entfernt');
         return;
       }
       openBulkPosSheet(p.key, selectedBays);
@@ -5178,12 +5466,11 @@ function renderBulkBar() {
   });
   el.appendChild(chipRow);
 
-  // Konsole: braucht Typ + Lagen/Meter, daher eigenes Mini-Formular statt
-  // einfachem Toggle-Chip. "+ Hinzufügen" legt auf jedem ausgewählten Feld
-  // eine neue Konsolen-Position mit dieser Konfiguration an.
+  // ── Konsole ────────────────────────────────────────────────────────────
+  // Braucht Typ + Lagen/Meter, daher eigenes Mini-Formular statt Toggle-Chip.
   const konsLabel = document.createElement('div');
-  konsLabel.className = 'bulk-section-label';
-  konsLabel.textContent = 'Konsole für Auswahl hinzufügen';
+  konsLabel.className = 'wz-unterlabel';
+  konsLabel.textContent = 'Konsole hinzufügen';
   el.appendChild(konsLabel);
 
   const konsForm = document.createElement('div');
@@ -5269,31 +5556,144 @@ function renderBulkBar() {
       });
     });
     renderAll();
-    showToast('Konsole auf ' + selectedBays.length + ' Feldern ergänzt');
+    showToast('Konsole auf ' + selectedBays.length + ' Feld'
+      + (selectedBays.length === 1 ? '' : 'ern') + ' ergänzt');
   });
   konsForm.appendChild(addKonsBtn);
-
   el.appendChild(konsForm);
 
-  // Auswahl spiegeln: dupliziert genau die angehakten Felder (auch nicht
-  // benachbarte) gespiegelt zur gegenüberliegenden Seite – Ergänzung zur
-  // Einzelfeld-Spiegelung im Bearbeiten-Sheet (die nur die zusammenhängende
-  // Wand erfasst).
+  // ── Kopieren / Einfügen ────────────────────────────────────────────────
+  // „Position kopieren" nimmt die komplette Ausstattung eines Feldes auf,
+  // „Höhe kopieren" nur dessen Höhen. Beide legen im selben Zwischenspeicher
+  // ab und unterscheiden sich allein im Umfang, den sie einstellen – so
+  // bleibt es EIN Kopierweg und nicht zwei.
+  const cpLabel = document.createElement('div');
+  cpLabel.className = 'wz-unterlabel';
+  cpLabel.textContent = 'Kopieren & übertragen';
+  el.appendChild(cpLabel);
+
+  const cpBtnRow = document.createElement('div');
+  cpBtnRow.className = 'wz-aktion-reihe';
+
+  const quelle = selectedBays[0];
+  const posBtn = document.createElement('button');
+  posBtn.type = 'button'; posBtn.className = 'wz-aktion';
+  posBtn.textContent = '📋 Position kopieren';
+  posBtn.title = selectedBays.length > 1
+    ? `Nimmt das erste ausgewählte Feld als Vorlage (Höhen, Zusatzbauteile, Achse, Notiz)`
+    : 'Höhen, Zusatzbauteile, Achse und Notiz dieses Feldes kopieren';
+  posBtn.addEventListener('click', () => {
+    pasteOpts.positionen = true; pasteOpts.hoehen = true;
+    savePasteOpts();
+    copyBayPositions(quelle);
+  });
+
+  const hBtn = document.createElement('button');
+  hBtn.type = 'button'; hBtn.className = 'wz-aktion';
+  hBtn.textContent = '📐 Höhe kopieren';
+  hBtn.title = 'Nur die Höhen dieses Feldes kopieren – Zusatzbauteile der Ziele bleiben unangetastet';
+  hBtn.addEventListener('click', () => {
+    pasteOpts.hoehen = true;
+    pasteOpts.positionen = false; pasteOpts.abschnitt = false;
+    pasteOpts.notiz = false; pasteOpts.laenge = false;
+    savePasteOpts();
+    copyBayPositions(quelle);
+  });
+
+  cpBtnRow.appendChild(posBtn); cpBtnRow.appendChild(hBtn);
+  el.appendChild(cpBtnRow);
+
+  if (!copiedBayData) {
+    const cpHint = document.createElement('p');
+    cpHint.className = 'wz-hinweis';
+    cpHint.textContent = 'Noch nichts kopiert. Nach dem Kopieren erscheint hier „auf Auswahl anwenden".';
+    el.appendChild(cpHint);
+  } else {
+    const cpWrap = document.createElement('div');
+    cpWrap.className = 'bulk-paste-form';
+
+    const cpApply = document.createElement('button');
+    cpApply.type = 'button'; cpApply.className = 'bulk-paste-apply-btn';
+    const syncCpApply = () => {
+      const n = selectedBays.length;
+      const any = PASTE_FIELDS.some(([k]) => pasteOpts[k]);
+      cpApply.textContent = '📋 Auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' anwenden';
+      cpApply.disabled = !any;
+      cpApply.title = any ? 'Übernommen wird: ' + pasteScopeText()
+                          : 'Mindestens eine Eigenschaft auswählen';
+    };
+
+    cpWrap.appendChild(buildPasteScopeRow(syncCpApply));
+
+    const cpInfo = document.createElement('div');
+    cpInfo.className = 'bulk-paste-info';
+    const nPos = (copiedBayData.positions || []).length;
+    cpInfo.textContent = `Kopiert: ${nPos} Zusatzbauteil${nPos === 1 ? '' : 'e'}`
+      + `  ·  Höhen ${copiedBayData.hL != null ? fmtQty(copiedBayData.hL) : '–'}`
+      + ` / ${copiedBayData.hR != null ? fmtQty(copiedBayData.hR) : '–'} m`
+      + `  ·  Länge ${fmtQty(copiedBayData.len || 0)} m`;
+    cpWrap.appendChild(cpInfo);
+
+    syncCpApply();
+    cpApply.addEventListener('click', () => {
+      const n = pasteBayPositionsToAll(selectedBays);
+      renderAll();
+      showToast(`Auf ${n} Feld${n === 1 ? '' : 'er'} angewendet · ${pasteScopeText()}`);
+    });
+    cpWrap.appendChild(cpApply);
+    el.appendChild(cpWrap);
+  }
+
+  // ── Vorlagen ───────────────────────────────────────────────────────────
+  // Überschreibt Höhen + Positionen aller markierten Felder mit einem Klick.
+  const favBulkLabel = document.createElement('div');
+  favBulkLabel.className = 'wz-unterlabel';
+  favBulkLabel.textContent = 'Vorlage anwenden';
+  el.appendChild(favBulkLabel);
+
+  const favBulkWrap = document.createElement('div');
+  favBulkWrap.className = 'fav-chip-row';
+  const favs = loadFavorites();
+  if (!favs.length) {
+    const hint = document.createElement('span');
+    hint.className = 'bay-pos-empty';
+    hint.textContent = 'Noch keine Vorlagen gespeichert (im Bearbeiten-Blatt eines Feldes anlegen)';
+    favBulkWrap.appendChild(hint);
+  } else {
+    favs.forEach(fav => {
+      const chip = document.createElement('button');
+      chip.type = 'button'; chip.className = 'fav-chip-name';
+      chip.textContent = fav.name;
+      chip.title = 'Auf ' + selectedBays.length + ' Feld' + (selectedBays.length === 1 ? '' : 'er') + ' anwenden';
+      chip.addEventListener('click', () => {
+        selectedBays.forEach(bay => applyFavoriteToBay(fav, bay));
+        renderAll();
+        showToast('Vorlage „' + fav.name + '" auf ' + selectedBays.length + ' Feld'
+          + (selectedBays.length === 1 ? '' : 'ern') + ' angewendet');
+      });
+      favBulkWrap.appendChild(chip);
+    });
+  }
+  el.appendChild(favBulkWrap);
+
+  // ── Spiegeln ───────────────────────────────────────────────────────────
+  // Dupliziert genau die ausgewählten Felder (auch nicht benachbarte)
+  // gespiegelt zur gegenüberliegenden Seite.
   const mirrorLabel = document.createElement('div');
-  mirrorLabel.className = 'bulk-section-label';
+  mirrorLabel.className = 'wz-unterlabel';
   mirrorLabel.textContent = 'Auswahl spiegeln';
   el.appendChild(mirrorLabel);
 
   const mirrorSelRow = document.createElement('div');
-  mirrorSelRow.className = 'bulk-sel-row';
+  mirrorSelRow.className = 'wz-aktion-reihe';
   const selBayIds = new Set(selectedBays.map(b => b.id));
   const mirrorHSelBtn = document.createElement('button');
-  mirrorHSelBtn.type = 'button'; mirrorHSelBtn.className = 'bulk-sel-btn';
+  mirrorHSelBtn.type = 'button'; mirrorHSelBtn.className = 'wz-aktion';
   mirrorHSelBtn.textContent = '⇋ Horizontal';
   mirrorHSelBtn.title = 'Ausgewählte Felder horizontal gespiegelt kopieren';
   mirrorHSelBtn.addEventListener('click', () => mirrorBaySelection(selBayIds, 'v'));
   const mirrorVSelBtn = document.createElement('button');
-  mirrorVSelBtn.type = 'button'; mirrorVSelBtn.className = 'bulk-sel-btn';
+  mirrorVSelBtn.type = 'button'; mirrorVSelBtn.className = 'wz-aktion';
   mirrorVSelBtn.textContent = '⇵ Vertikal';
   mirrorVSelBtn.title = 'Ausgewählte Felder vertikal gespiegelt kopieren';
   mirrorVSelBtn.addEventListener('click', () => mirrorBaySelection(selBayIds, 'h'));
@@ -5583,10 +5983,16 @@ function _runRender() {
     _renderNeed.bulk    = _renderNeed.bulk    || need.bulk;
     need.sidebar = need.bulk = false;
   }
-  if (need.bulk)    renderBulkBar();
-  if (need.sidebar) { renderAbschnittBar(); renderSections(); }
+  // Werkzeug-Menue: Auswahl- und Bearbeiten-Block haengen an derselben
+  // Bedarfsmeldung wie die frueheren Leisten in der Seitenleiste.
+  if (need.bulk)    { renderWzAuswahl(); renderBulkBar(); }
+  if (need.sidebar) renderSections();
+  // Die Achsenliste zeigt auch die Zuweisung fuer die aktuelle Auswahl an und
+  // muss deshalb bei BEIDEN Anlaessen mitziehen.
+  if (need.bulk || need.sidebar) renderAbschnittBar();
   if (need.svg)     renderSvg();
   renderSelectionInfo();
+  updateWerkzeugBadge();
 }
 
 /** Zeichnen anfordern. Mehrere Aufrufe innerhalb eines Frames werden zu einem
@@ -8298,25 +8704,143 @@ async function buildPdfDocument(themeName) {
   doc.save(`${title.replace(/[\\/:*?"<>|\s]+/g, '_')}_2d.pdf`);
 }
 
-/* ── Gerätemodus ─────────────────────────────────────────────────────────────
-   Nur zwei Ausprägungen: „iphone" (schmal – Seitenleiste aus, Werkzeuge ohne
-   Beschriftung) und „ipad" (alles andere). Früher gab es dafür einen eigenen
-   Knopf samt Auswahldialog. Der ist entfallen: die Bildschirmbreite sagt es
-   zuverlässiger als eine Frage beim ersten Start, und der Knopf kostete in
-   der Werkzeugleiste einen Platz, an dem jetzt Arbeit stattfindet.
+/* ── Ansicht / Handy-Modus ───────────────────────────────────────────────────
+   Die Darstellung kennt zwei Ausprägungen:
 
-   Eine ausdrücklich gespeicherte Wahl (auch aus früheren Fassungen oder aus
-   den Tests) hat weiterhin Vorrang.                                        */
+     „iphone"  Handy-Modus: Seitenleiste aus, Werkzeuge nur mit Symbol, das
+               Werkzeug-Menü fährt als Blatt von unten ein, die Feldliste zieht
+               dort mit ein. Die Zeichenfläche bekommt den ganzen Rest.
+     „ipad"    Tablet/Desktop: Feldliste links, Werkzeug-Menü rechts angedockt.
 
-const IPHONE_MAX_BREITE = 430;   // px – darunter gilt „Handy"
+   WAS gilt, entscheidet der Nutzer – nicht die App allein. Die Wahl steht im
+   Werkzeug-Menü unter „Ansicht" und kennt drei Werte:
 
-function getMode() { return localStorage.getItem(GK.geraetemodus); }
+     'auto'    Bildschirm entscheidet (Vorgabe)
+     'handy'   immer Handy-Modus – auch auf dem iPad, z. B. um die
+               Zeichenfläche maximal groß zu bekommen
+     'tablet'  nie Handy-Modus
 
-function erkannterModus() { return window.innerWidth <= IPHONE_MAX_BREITE ? 'iphone' : 'ipad'; }
+   Eine frühere Fassung schrieb den ERKANNTEN Modus in denselben Schlüssel, aus
+   dem sie ihn auch wieder las. Wer einmal in einem schmalen Fenster war, blieb
+   danach dauerhaft im Handy-Modus. Deshalb liegt die Wahl jetzt in einem
+   eigenen Schlüssel; `GK.geraetemodus` trägt nur noch das Ergebnis.        */
 
-function applyMode(m) {
+const HANDY_MAX_BREITE = 480;   // px – schmaler gilt als Handy (Hochformat)
+const HANDY_MAX_HOEHE  = 450;   // px – flacher gilt als Handy (Querformat)
+
+const ANSICHT_WAHLEN = ['auto', 'handy', 'tablet'];
+
+/** Die ausdrückliche Wahl des Nutzers (Vorgabe: 'auto'). */
+function getAnsichtWahl() {
+  const v = localStorage.getItem(GK.ansichtsmodus);
+  return ANSICHT_WAHLEN.includes(v) ? v : 'auto';
+}
+
+function setAnsichtWahl(v) {
+  localStorage.setItem(GK.ansichtsmodus, ANSICHT_WAHLEN.includes(v) ? v : 'auto');
+  applyMode();
+  renderWzAnsicht();
+}
+
+/** Was der Bildschirm hergibt – Hochformat über die Breite, Querformat über
+ *  die Höhe (ein liegendes Handy ist breit, aber nur ~390 px hoch). */
+function erkannterModus() {
+  return (window.innerWidth <= HANDY_MAX_BREITE || window.innerHeight <= HANDY_MAX_HOEHE)
+    ? 'iphone' : 'ipad';
+}
+
+/** Der tatsächlich geltende Modus aus Wahl + Bildschirm. */
+function effektiverModus() {
+  const w = getAnsichtWahl();
+  if (w === 'handy')  return 'iphone';
+  if (w === 'tablet') return 'ipad';
+  return erkannterModus();
+}
+
+/** Bisheriger Name, weiterhin gültig: der zuletzt angewendete Modus. */
+function getMode() { return document.body.dataset.mode || localStorage.getItem(GK.geraetemodus); }
+
+function applyMode() {
+  const m = effektiverModus();
+  const vorher = document.body.dataset.mode;
   document.body.dataset.mode = m;
   localStorage.setItem(GK.geraetemodus, m);
+  if (vorher !== m) {
+    syncSidePanelOrt();
+    syncToolbarOrt();
+    // Die Zeichenfläche ändert dabei ihre Größe – Kamera nachziehen.
+    _vpCache = null;
+    if (autoFit) fitCameraToContent();
+    applyCamera();
+  }
+  return m;
+}
+
+/* Im Handy-Modus haben nicht alle Werkzeuge nebeneinander Platz, ohne dass
+   Knöpfe aus dem Bildschirm laufen oder unter 44 px schrumpfen. Bordbrett,
+   Projekt und PDF ziehen deshalb ins Werkzeug-Menü um – als DIESELBEN Knöpfe,
+   mit denselben Ereignissen. Es gibt keine zweite PDF- oder Projekt-Taste.
+
+   Wiedereinsetzen geschieht rückwärts entlang der Ankerliste: so ist der
+   Anker beim Einhängen garantiert schon wieder an seinem Platz.            */
+const HANDY_AUSGELAGERT = [
+  ['bordbrettBtn',    'tbTrennerProjekt'],
+  ['tdMenuBtn',       'td-exportPdfBtn'],
+  ['td-exportPdfBtn', 'tbTrennerWerkzeug']
+];
+
+function syncToolbarOrt() {
+  const slot  = document.getElementById('wzAktionenSlot');
+  const tools = document.querySelector('#toolbar .tb-tools');
+  const box   = document.getElementById('wzAktionen');
+  if (!slot || !tools) return;
+  const handy = document.body.dataset.mode === 'iphone';
+
+  if (handy) {
+    HANDY_AUSGELAGERT.forEach(([id]) => {
+      const b = document.getElementById(id);
+      if (b && b.parentElement !== slot) slot.appendChild(b);
+    });
+  } else {
+    [...HANDY_AUSGELAGERT].reverse().forEach(([id, ankerId]) => {
+      const b = document.getElementById(id);
+      const anker = document.getElementById(ankerId);
+      if (!b || b.parentElement === tools) return;
+      if (anker && anker.parentElement === tools) tools.insertBefore(b, anker);
+      else tools.appendChild(b);
+    });
+  }
+  box?.classList.toggle('hidden', !handy);
+}
+
+/* Die Feldliste lebt auf breiten Geräten links, im Handy-Modus im
+   Werkzeug-Menü. Umgehängt wird DASSELBE Element: es gibt weiterhin nur eine
+   Feldliste, mit denselben Zeilen, Ankreuzfeldern und Ereignissen. */
+/* Wann gehoert die Feldliste ins Menue statt an den linken Rand?
+
+     – im Handy-Modus immer (dort gibt es keinen linken Rand)
+     – sonst, solange das Menue offen ist und das Fenster schmaler als
+       1300 px ist: Feldliste (300) + Menue (340) wuerden der Zeichnung sonst
+       zwei Drittel wegnehmen. Zugeklappt kehrt die Liste sofort zurueck.
+
+   Auf breiten Bildschirmen bleibt alles wie gewohnt nebeneinander.        */
+const FELDLISTE_DOCK_AB = 1300;   // px Fensterbreite
+
+function feldlisteImMenue() {
+  return document.body.dataset.mode === 'iphone'
+      || (werkzeugOffen && window.innerWidth < FELDLISTE_DOCK_AB);
+}
+
+function syncSidePanelOrt() {
+  const side   = document.getElementById('sidePanel');
+  const slot   = document.getElementById('wzFelder');
+  const layout = document.getElementById('appLayout');
+  if (!side || !slot || !layout) return;
+  if (feldlisteImMenue()) {
+    if (side.parentElement !== slot) slot.appendChild(side);
+  } else if (side.parentElement !== layout) {
+    layout.insertBefore(side, layout.firstChild);
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -8481,10 +9005,28 @@ function init() {
   document.getElementById('zoomResetBtn')?.addEventListener('click', resetCanvasView);
   document.getElementById('fitViewBtn')?.addEventListener('click', resetCanvasView);
 
-  // Gerätemodus: gespeicherte Wahl, sonst aus der Bildschirmbreite.
-  applyMode(getMode() || erkannterModus());
+  /* ── Werkzeug-Menue ────────────────────────────────────────────────────
+     Ein Knopf, ein Menue: Aufklappen und Zuklappen liegen auf demselben
+     Pfeil. Der Auswahlzustand bleibt davon unberuehrt. */
+  document.getElementById('werkzeugBtn')?.addEventListener('click', toggleWerkzeugPanel);
+  document.getElementById('werkzeugCloseBtn')?.addEventListener('click',
+    () => setWerkzeugPanel(false));
+
+  // Ansicht/Handy-Modus: die Wahl steht im Menue, die Erkennung zieht bei
+  // Drehen und Groessenaenderung nach.
+  applyMode();
+  syncSidePanelOrt();
+  syncToolbarOrt();
+  let _modusTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_modusTimer);
+    _modusTimer = setTimeout(() => { applyMode(); syncSidePanelOrt(); renderWzAnsicht(); }, 150);
+  });
+
+  setWerkzeugPanel(ladeWerkzeugOffen(), { merken: false });
 
   renderAllNow();
+  renderWzAnsicht();
 }
 
 // ── Rücksprung-Ziel der Kopfzeile ──────────────────────────────────────────
@@ -9393,7 +9935,10 @@ function verknuepfeZeichnungsDialoge() {
     if (e.key !== 'Escape') return;
     if (!document.getElementById('tdSpeichernOverlay')?.classList.contains('hidden')) { speichernDialogAntwort('abbrechen'); return; }
     if (!document.getElementById('tdLoeschOverlay')?.classList.contains('hidden'))    { schliesseLoeschDialog(); return; }
-    if (tdNeuOffen) schliesseNeueZeichnungDialog();
+    if (tdNeuOffen) { schliesseNeueZeichnungDialog(); return; }
+    // Zuletzt das Werkzeug-Menue: es ist der unterste Deckel ueber der
+    // Zeichenflaeche und soll erst schliessen, wenn nichts darueber liegt.
+    if (werkzeugOffen) setWerkzeugPanel(false);
   });
 }
 

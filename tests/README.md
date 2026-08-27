@@ -135,6 +135,27 @@ node tests/r9-2d-zeichnungen.mjs    # „Neue Zeichnung" (Liste, Leerzustand,
                                     # Ordner anlegen/löschen, Fotos ohne Projekt
 ```
 
+Runde 10 (Werkzeug-Menü, Mehrfachauswahl, Achsen, Handy-Modus):
+
+```bash
+node tests/r10-werkzeugmenue.mjs    # Pfeil-Knopf klappt auf/zu; Auswahl,
+                                    # Bearbeiten, Achsen und Ansicht im Menü;
+                                    # fünf Felder im Plan markieren, gemeinsame
+                                    # Höhe/Achse/Position setzen; Auswahl über
+                                    # Achse bzw. Position; Auswahl überlebt das
+                                    # Zuklappen; Speichern/Laden und PDF; Handy-
+                                    # Modus (Wahl, ausgelagerte Knöpfe, Feldliste
+                                    # im Menü); sechs Bildschirmgrößen
+```
+
+`r10` misst die Bildschirme nach, statt sie zu beschreiben: auf Desktop, iPad
+quer/hoch, Smartphone hoch/quer und einem 320-px-Gerät darf kein Knopf aus dem
+Bild ragen, keiner unter 36 px schrumpfen und bei offenem Menü müssen
+mindestens 140 px Zeichenfläche frei bleiben. Der Abschnitt „Handy-Modus"
+bedient anschließend Bordbrett, Konsole, Dachfang, Undo/Redo, Magnet, Drehen,
+Projekt-Blatt und PDF ausschließlich über die Oberfläche des Handy-Modus –
+also über die Knöpfe, die dort ins Menü umgezogen sind.
+
 `r9` prüft ausdrücklich, dass gelöschte Zeichnungen nach einem Reload nicht
 wieder auftauchen und dass keine verwaisten Datensätze zurückbleiben: die
 Projektfotos (IndexedDB) fallen mit der Zeichnung weg – aber erst nach Ablauf

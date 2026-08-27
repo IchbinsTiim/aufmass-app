@@ -15,11 +15,11 @@
 
   <!-- Reihenfolge zählt: core = Tokens & gemeinsame Bausteine, dann die beiden
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
-  <link rel="stylesheet" href="core.css?v=20260827" />
-  <link rel="stylesheet" href="style.css?v=20260827" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260827" />
-  <link rel="stylesheet" href="shell.css?v=20260827" />
-  <link rel="stylesheet" href="theme.css?v=20260827" />
+  <link rel="stylesheet" href="core.css?v=20260828" />
+  <link rel="stylesheet" href="style.css?v=20260828" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260828" />
+  <link rel="stylesheet" href="shell.css?v=20260828" />
+  <link rel="stylesheet" href="theme.css?v=20260828" />
 </head>
 <body data-modul="hub">
 
@@ -555,7 +555,7 @@
           <span class="tb-ico" aria-hidden="true">▤</span><span class="tb-txt">Bordbrett</span>
         </button>
 
-        <span class="tb-trenner" aria-hidden="true"></span>
+        <span class="tb-trenner" id="tbTrennerProjekt" aria-hidden="true"></span>
 
         <button type="button" id="tdMenuBtn" class="tb-btn" aria-haspopup="dialog"
                 title="Projekt: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei">
@@ -563,6 +563,19 @@
         </button>
         <button type="button" id="td-exportPdfBtn" class="tb-btn primaer" title="PDF erzeugen">
           <span class="tb-ico" aria-hidden="true">⤓</span><span class="tb-txt">PDF</span>
+        </button>
+
+        <span class="tb-trenner" id="tbTrennerWerkzeug" aria-hidden="true"></span>
+
+        <!-- Der Pfeil öffnet das Werkzeug-Menü: Auswahl, Sammelbearbeitung,
+             Achsen/Abschnitte, Positionen und die Ansicht (Handy-Modus).
+             Er bleibt bewusst der LETZTE Knopf der Leiste – dort sucht man
+             ein „mehr". Ein zweiter Tipp schließt das Menü wieder. -->
+        <button type="button" id="werkzeugBtn" class="tb-btn werkzeug-btn"
+                aria-expanded="false" aria-controls="werkzeugPanel"
+                title="Werkzeuge: Auswahl, Höhe, Achsen, Positionen, Ansicht">
+          <span class="tb-ico wz-pfeil" aria-hidden="true">›</span><span class="tb-txt">Werkzeuge</span>
+          <span class="wz-badge hidden" id="werkzeugBadge" aria-hidden="true"></span>
         </button>
       </div>
 
@@ -579,10 +592,10 @@
     </div>
 
     <div id="appLayout">
-      <!-- Left: section editor -->
+      <!-- Left: section editor (Feldliste). Abschnitte und Sammelbearbeitung
+           sind ins Werkzeug-Menü gewandert – dort sind sie auf jedem Gerät
+           erreichbar, auch wenn diese Leiste im Handy-Modus entfällt. -->
       <aside id="sidePanel">
-        <div id="abschnittBar"></div>
-        <div id="bulkBar"></div>
         <div id="sectionsContainer"></div>
         <p id="noSectionsHint" class="hint">Tippen Sie auf „Feld hinzufügen“ oder wählen Sie eine Vorlage.</p>
       </aside>
@@ -625,6 +638,48 @@
           </div>
         </div>
       </div>
+
+      <!-- ══════════════════════════════════════════════════════════════════
+           Werkzeug-Menü – alles, was seltener als beim Zeichnen selbst
+           gebraucht wird, aber trotzdem ohne Suchen erreichbar sein muss.
+
+           Es liegt NEBEN der Zeichenfläche (breite Geräte) bzw. als Blatt
+           darunter (Handy) und ist bewusst nicht modal: die Mehrfachauswahl
+           wird durch Antippen der Felder im Plan bedient, das Menü bleibt
+           dabei offen und zeigt live, was ausgewählt ist. Geschlossen kostet
+           es keinen Millimeter Zeichenfläche.
+
+           Alle Blöcke steuern dieselbe Kernlogik an wie bisher
+           (bulkMode/bulkSelected, state.abschnitte, POSITIONS) – es gibt
+           keine zweite Auswahl- oder Achsenverwaltung.
+           ══════════════════════════════════════════════════════════════ -->
+      <aside id="werkzeugPanel" aria-label="Werkzeuge">
+        <div class="wz-kopf">
+          <span class="wz-titel">Werkzeuge</span>
+          <button type="button" id="werkzeugCloseBtn" class="wz-close"
+                  title="Werkzeug-Menü schließen" aria-label="Werkzeug-Menü schließen">✕</button>
+        </div>
+        <div class="wz-inhalt">
+          <div id="wzAuswahl"    class="wz-gruppe"></div>
+          <!-- Im Handy-Modus ziehen Bordbrett, Projekt und PDF aus der
+               Werkzeugleiste hierher um – dieselben Knöpfe, nur an einem
+               Ort, an dem sie nicht aus dem Bildschirm laufen. -->
+          <div id="wzAktionen" class="wz-gruppe hidden">
+            <div class="wz-kopfzeile">
+              <span class="wz-kopf-ico" aria-hidden="true">⚙</span>
+              <span class="wz-kopf-txt">Weitere Werkzeuge</span>
+            </div>
+            <div id="wzAktionenSlot" class="wz-aktionen-slot"></div>
+          </div>
+          <div id="bulkBar"      class="wz-gruppe"></div>
+          <div id="abschnittBar" class="wz-gruppe"></div>
+          <!-- Im Handy-Modus zieht die Feldliste (#sidePanel) hier ein,
+               weil die Seitenleiste dort entfällt. Ein Umhängen desselben
+               Elements – keine zweite Liste. -->
+          <div id="wzFelder"     class="wz-felder-slot"></div>
+          <div id="wzAnsicht"    class="wz-gruppe"></div>
+        </div>
+      </aside>
     </div>
     </div>
   </section>
@@ -704,9 +759,9 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="core.js?v=20260827"></script>
-  <script src="script.js?v=20260827"></script>
-  <script src="viewer2d.js?v=20260827"></script>
-  <script src="shell.js?v=20260827"></script>
+  <script src="core.js?v=20260828"></script>
+  <script src="script.js?v=20260828"></script>
+  <script src="viewer2d.js?v=20260828"></script>
+  <script src="shell.js?v=20260828"></script>
 </body>
 </html>
