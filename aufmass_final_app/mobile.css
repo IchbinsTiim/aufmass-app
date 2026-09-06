@@ -1,0 +1,855 @@
+/* ===========================================================================
+   Handy-Fassung der Gerüst-Suite
+   ---------------------------------------------------------------------------
+   Wird als LETZTES Stylesheet geladen und legt sich als eigene Ebene über
+   core / style / viewer2d / shell / theme. Kein Bauteil wird ersetzt, keine
+   Fachlogik angefasst: dieselbe Anwendung, dieselben Knöpfe, dieselben IDs –
+   nur für eine Hand, einen Daumen und einen Arbeitshandschuh geordnet.
+
+   Aktiv ausschließlich, wenn `mobile.js` `body[data-handy="1"]` setzt
+   (Bildschirm ≤ 720 px breit oder ≤ 460 px hoch). Auf Tablet und Desktop ist
+   diese Datei damit vollständig wirkungslos.
+
+   Leitlinien der Fassung
+     1  Der Daumen bedient unten, die Augen lesen oben.
+     2  Nichts unter 44 px, nichts außerhalb des Bildschirms, kein Querlauf.
+     3  Eine lange Seite ist kein Ersatz für Navigation – die Projektakte
+        bekommt eine Sprungleiste und faltbare Karten.
+     4  Auf der Zeichenfläche gewinnt jeder Millimeter: dort verschwindet
+        alles, was nicht gezeichnet wird.
+
+   Aufbau
+     A  Grundlagen (Sicherheitsabstände, Kopfzone, Schriftgrößen)
+     B  Navigationsleiste unten (ersetzt die Umschalter-Pille)
+     C  Startbildschirm (Hub)
+     D  Modul 1 – Aufmaß: Übersicht
+     E  Modul 1 – Aufmaß: Projektakte (Sprungleiste, Faltkarten, Aktionen)
+     F  Modul 1 – Formularbausteine (Überläufe, Trefferflächen)
+     G  Modul 2 – 2D-Aufmaß
+     H  Dialoge, Blätter, Toast
+     I  Querformat und sehr schmale Geräte
+   =========================================================================== */
+
+
+/* ===========================================================================
+   A  Grundlagen
+   =========================================================================== */
+
+body[data-handy="1"] {
+  /* Die Umschalter-Pille schwebt auf dem Handy nicht mehr über dem Inhalt –
+     sie ist nach unten in die Navigationsleiste gewandert. Die Kopfzone
+     schrumpft damit auf den Sicherheitsabstand des Geräts (Notch). */
+  --chrome-h: env(safe-area-inset-top, 0px);
+
+  /* Höhen der beiden festen Leisten am unteren Rand. Es ist immer nur eine
+     davon sichtbar – gestapelte Leisten fressen den halben Bildschirm. */
+  --handy-nav-h:     calc(58px + env(safe-area-inset-bottom, 0px));
+  --handy-aktion-h:  calc(68px + env(safe-area-inset-bottom, 0px));
+
+  /* Seitenrand: schmal genug für Zahlenkolonnen, breit genug, dass der
+     Daumen beim Halten nichts auslöst. */
+  --handy-rand:      14px;
+
+  /* Höhe der klebenden Kopfzeile der Projektakte inkl. Sprungleiste –
+     Sprungziele müssen darunter frei stehen. */
+  --handy-kopf-h:    56px;
+}
+
+/* Kein seitlicher Überlauf: was zu breit ist, bricht um – nichts schiebt die
+   Seite auf. Einzige Ausnahme sind die bewusst wischbaren Leisten (unten). */
+body[data-handy="1"] {
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Der Verlauf unter der früheren Pille wird nicht mehr gebraucht. */
+body[data-handy="1"][data-modul="aufmass"]::before,
+body[data-handy="1"][data-modul="2d"]::before { display: none; }
+
+/* Ohne Pille braucht keine Modulansicht mehr Platz für sie. */
+body[data-handy="1"][data-modul="aufmass"] #am-root,
+body[data-handy="1"][data-modul="2d"]      #td-root {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* iOS zoomt jedes Eingabefeld heran, dessen Schrift kleiner als 16 px ist –
+   und kehrt danach nicht von selbst zurück. Deshalb tragen ALLE Eingaben auf
+   dem Handy mindestens 16 px. Die Felder sind unten entsprechend geweitet. */
+body[data-handy="1"] input,
+body[data-handy="1"] select,
+body[data-handy="1"] textarea {
+  font-size: 16px;
+}
+
+/* Anfassbares darf nicht als Text markiert werden – auf der Baustelle wird
+   getippt und gewischt, nicht kopiert. */
+body[data-handy="1"] button,
+body[data-handy="1"] .chip-btn,
+body[data-handy="1"] .type-btn,
+body[data-handy="1"] .tb-btn {
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* Wischbare Leisten: eine Zeile, sauber einrastend, ohne Bildlaufbalken. */
+body[data-handy="1"] .handy-wischleiste {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+body[data-handy="1"] .handy-wischleiste::-webkit-scrollbar { display: none; }
+body[data-handy="1"] .handy-wischleiste > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+
+/* ===========================================================================
+   B  Navigationsleiste unten
+   ---------------------------------------------------------------------------
+   Die Umschalter-Pille saß oben links und kostete auf jedem Bildschirm eine
+   volle Zeile – dort, wo das Handy am wenigsten Platz und der Daumen die
+   längste Strecke hat. Dieselben drei Ziele stehen jetzt unten: Start,
+   Aufmaß, 2D. Es ist derselbe Hash-Router, es sind dieselben Adressen.
+   =========================================================================== */
+
+body[data-handy="1"] #modSwitcher { display: none; }
+
+#handyNav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 940;
+  display: none;
+  height: var(--handy-nav-h);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: rgba(14, 22, 38, .93);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-top: 1px solid var(--hairline);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, .35);
+}
+
+/* Sichtbar nur dort, wo Navigation überhaupt Sinn ergibt: Hub, Aufmaß-Listen
+   und Projektakte, 2D-Zeichnungsübersicht. In der Zeichnung selbst nicht. */
+body[data-handy="1"][data-handy-nav="1"] #handyNav { display: flex; }
+
+#handyNav a {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  text-decoration: none;
+  color: var(--muted-schwach);
+  font-family: var(--font-text);
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--t-kurz) var(--federnd);
+}
+#handyNav a svg { width: 22px; height: 22px; display: block; }
+#handyNav a .handy-nav-punkt {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: transparent;
+  margin-top: -2px;
+}
+#handyNav a:active { transform: scale(.96); }
+
+/* Das aktive Ziel trägt die Farbe seines Moduls – dieselbe Zuordnung wie auf
+   dem Startbildschirm: Gelb für das Aufmaß, Cyan für die Zeichnung. */
+#handyNav a[aria-current="page"]                  { color: var(--text); }
+#handyNav a[aria-current="page"] .handy-nav-punkt { background: currentColor; }
+#handyNav a[data-ziel="aufmass"][aria-current="page"] { color: var(--accent-aufmass); }
+#handyNav a[data-ziel="2d"][aria-current="page"]      { color: var(--accent-2d); }
+#handyNav a[data-ziel="hub"][aria-current="page"]     { color: #7FA8D9; }
+
+/* Unter der Leiste darf nichts liegenbleiben: jede scrollende Fläche endet
+   oberhalb davon. */
+body[data-handy="1"][data-handy-nav="1"] #am-root .screen-content,
+body[data-handy="1"][data-handy-nav="1"] #hub-root,
+body[data-handy="1"][data-handy-nav="1"] #td-projekte {
+  padding-bottom: calc(var(--handy-nav-h) + 20px);
+}
+
+
+/* ===========================================================================
+   C  Startbildschirm (Hub)
+   ---------------------------------------------------------------------------
+   Auf dem Handy zählt, wie schnell man im richtigen Modul ist. Die Schlagzeile
+   wird kürzer, die Kacheln werden zu zwei kräftigen Zeilen – beide zusammen
+   passen ohne Scrollen auf ein Gerät ab 640 px Höhe.
+   =========================================================================== */
+
+/* Ohne Pille entfällt der Platz, der für sie freigehalten war – das waren
+   auf dem Handy 78 px ungenutzter Rand über der Schlagzeile. */
+body[data-handy="1"] #hub-root {
+  justify-content: flex-start;
+  /* Mittig, solange alles hineinpasst – „safe" schaltet bei Überlänge auf
+     „flex-start" zurück, statt die Schlagzeile oben abzuschneiden. Ältere
+     Browser verstehen den Wert nicht und behalten die Zeile darüber. */
+  justify-content: safe center;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) var(--handy-rand) 24px;
+}
+body[data-handy="1"] .hub-wrap { padding: 0; }
+
+body[data-handy="1"] .hub-head       { margin-bottom: 18px; }
+body[data-handy="1"] .hub-eyebrow    { margin-bottom: 6px; font-size: .62rem; letter-spacing: .18em; }
+body[data-handy="1"] .hub-title      { font-size: 1.7rem; line-height: 1.14; }
+body[data-handy="1"] .hub-sub        { font-size: .86rem; line-height: 1.45; }
+
+body[data-handy="1"] .hub-tiles { gap: 12px; }
+
+body[data-handy="1"] .hub-tile {
+  padding: 16px 16px 14px;
+  border-radius: var(--r-karte);
+}
+body[data-handy="1"] .hub-tile-body   { flex-direction: row; align-items: center; gap: 14px; }
+body[data-handy="1"] .hub-tile-text   { flex: 1 1 auto; min-width: 0; }
+body[data-handy="1"] .hub-tile-kicker { font-size: .58rem; letter-spacing: .16em; }
+body[data-handy="1"] .hub-tile-title  { font-size: 1.45rem; margin: 2px 0 2px; }
+body[data-handy="1"] .hub-tile-desc   { font-size: .84rem; }
+body[data-handy="1"] .hub-tile-meta   { font-size: .72rem; }
+
+/* Die Vorschauen entfallen. Sie leben von Zahlenkolonnen und Feldrastern –
+   auf 108 px Restbreite bleibt davon „POS…" und „Fas…" übrig, also nichts.
+   Statt einer unlesbaren Miniatur trägt die Kachel ihre Modulfarbe als
+   Kante: dieselbe Zuordnung, auf einen Blick, ohne Platz zu kosten. */
+body[data-handy="1"] .hub-preview { display: none; }
+
+body[data-handy="1"] .hub-tile {
+  border-left: 3px solid var(--kachel-farbe, var(--hairline-stark));
+}
+body[data-handy="1"] .hub-tile[data-ziel="aufmass"] { --kachel-farbe: var(--accent-aufmass); }
+body[data-handy="1"] .hub-tile[data-ziel="2d"]      { --kachel-farbe: var(--accent-2d); }
+
+body[data-handy="1"] .hub-tile-go {
+  position: static;
+  display: block;
+  margin-top: 10px;
+  opacity: 1;
+  transform: none;
+  font-size: .76rem;
+}
+
+body[data-handy="1"] .hub-foot {
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 4px 0 8px;
+  font-size: .76rem;
+}
+body[data-handy="1"] .hub-foot-btn { min-height: 44px; padding: 0 16px; }
+
+
+/* ===========================================================================
+   D  Modul 1 – Aufmaß: Übersicht
+   =========================================================================== */
+
+body[data-handy="1"] #am-root .screen-content {
+  padding: 12px var(--handy-rand) 28px;
+  gap: 12px;
+  max-width: none;
+}
+
+/* Kopfzeile: eine Zeile, klebt am oberen Rand, Titel darf kürzen. */
+body[data-handy="1"] #am-root .app-header {
+  top: env(safe-area-inset-top, 0px);
+  padding: 8px var(--handy-rand);
+  min-height: var(--handy-kopf-h);
+  gap: 8px;
+}
+body[data-handy="1"] #am-root .app-header h1 {
+  font-size: 1rem;
+  min-width: 0;
+}
+body[data-handy="1"] #am-root .app-header .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* „+ Neues Projekt" wird auf dem Handy zum kurzen „+ Neu": der Platz gehört
+   dem Projektnamen, nicht der Beschriftung eines Knopfes. */
+body[data-handy="1"] #newProjectBtn { font-size: .82rem; padding: 0 14px; }
+
+/* Suche und Filter: Suche über die volle Breite, darunter zwei gleich breite
+   Auswahlfelder. Vorher rutschte die Sortierung in eine dritte Zeile. */
+body[data-handy="1"] #am-root .overview-toolbar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+body[data-handy="1"] #am-root .overview-search {
+  grid-column: 1 / -1;
+  min-height: var(--touch);
+}
+body[data-handy="1"] #am-root .overview-select {
+  min-width: 0;
+  min-height: var(--touch);
+  padding-left: 10px;
+  padding-right: 26px;
+  background-position: right 8px center;
+}
+
+/* Ordner: eine wischbare Zeile statt drei umgebrochener. */
+body[data-handy="1"] #am-root .folder-bar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+  margin: 0 calc(var(--handy-rand) * -1);
+  padding-left: var(--handy-rand);
+  padding-right: var(--handy-rand);
+}
+body[data-handy="1"] #am-root .folder-bar::-webkit-scrollbar { display: none; }
+body[data-handy="1"] #am-root .folder-bar > * {
+  flex: 0 0 auto;
+  min-height: 40px;
+}
+
+/* Projektkarten: eine Spalte, großzügig anfassbar. */
+body[data-handy="1"] #am-root .project-grid {
+  /* minmax(0, …) statt 1fr: sonst darf die Spur nicht unter die
+     Mindestbreite eines langen Projektnamens – und die Karte schiebt sich
+     über den Bildschirmrand. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+/* Die Backup-Erinnerung ist wichtig, aber kein Bildschirmfüller. */
+body[data-handy="1"] #am-root .backup-reminder { font-size: .84rem; }
+
+
+/* ===========================================================================
+   E  Modul 1 – Aufmaß: Projektakte
+   ---------------------------------------------------------------------------
+   Die Akte ist auf dem Handy über 5 000 px lang. Drei Eingriffe machen sie
+   bedienbar, ohne ein einziges Feld zu entfernen:
+
+     1  eine klebende Sprungleiste unter der Kopfzeile (Projekt · Adresse ·
+        Typ · Technik · Logistik · 2D · Seiten · Positionen · Notizen · Summe)
+     2  faltbare Karten – zugeklappt bleibt die Überschrift als Griff stehen
+     3  eine feste Aktionsleiste unten mit „Speichern" und „PDF" – es sind
+        DIESELBEN Knöpfe, sie ziehen nur um (wie im 2D-Modul die Werkzeuge)
+   =========================================================================== */
+
+/* ── 1 · Sprungleiste ────────────────────────────────────────────────────── */
+
+#handySprung {
+  display: none;
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + var(--handy-kopf-h));
+  z-index: 96;
+  padding: 8px var(--handy-rand);
+  background: rgba(14, 22, 38, .94);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-bottom: 1px solid var(--hairline);
+}
+body[data-handy="1"] #projectScreen:not(.hidden) #handySprung { display: block; }
+
+/* Weicher Rand rechts: die Leiste ist wischbar, das soll man sehen. */
+#handySprung .handy-wischleiste {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
+}
+
+#handySprung .handy-sprung-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r-pille);
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, .04);
+  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              background var(--t-kurz) var(--federnd);
+}
+#handySprung .handy-sprung-btn[aria-current="true"] {
+  color: var(--accent-kontrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+#handySprung .handy-sprung-btn:active { transform: scale(.96); }
+
+/* ── 2 · Faltbare Karten ─────────────────────────────────────────────────── */
+
+/* Der Griff ist die Überschrift selbst. Zugeklappt bleibt sie stehen –
+   nichts verschwindet, es ist nur eingeklappt. */
+body[data-handy="1"] #projectScreen .card[data-falt] {
+  scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--handy-kopf-h) + 56px);
+}
+body[data-handy="1"] #projectScreen .card[data-falt] > .card-title,
+body[data-handy="1"] #projectScreen .card[data-falt] > .section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin: 0;
+  min-height: 40px;
+}
+/* Die Überschrift nimmt den freien Platz – erst danach folgen Aktion
+   (》+ Seite《), Zähler-Marke und Pfeil. Sonst klebt die Aktion am Titel. */
+body[data-handy="1"] #projectScreen .card[data-falt] > .card-title,
+body[data-handy="1"] #projectScreen .card[data-falt] > .section-header > .card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+body[data-handy="1"] #projectScreen .card[data-falt="zu"] > *:not(.card-title):not(.section-header) {
+  display: none;
+}
+/* Zugeklappt ruhen auch die Aktionen der Kopfzeile (》+ Seite《 u. Ä.) –
+   sie gehören zum eingeklappten Inhalt. */
+body[data-handy="1"] #projectScreen .card[data-falt="zu"] > .section-header > .btn {
+  display: none;
+}
+body[data-handy="1"] #projectScreen .card[data-falt="zu"] {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.handy-falt-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+}
+.handy-falt-btn svg { width: 16px; height: 16px; transition: transform var(--t-normal) var(--federnd); }
+.card[data-falt="zu"] .handy-falt-btn svg { transform: rotate(-90deg); }
+.handy-falt-btn:active { background: rgba(255, 255, 255, .06); }
+
+/* Die Zähler-Marke zeigt zugeklappt, dass hinter der Karte etwas steckt. */
+.handy-falt-marke {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: var(--r-pille);
+  background: var(--accent-weich);
+  border: 1px solid var(--accent-rand);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: .64rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.card[data-falt="auf"] .handy-falt-marke { display: none; }
+
+/* ── 3 · Aktionsleiste unten ─────────────────────────────────────────────── */
+
+#handyAktionen {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 941;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--handy-rand) calc(10px + env(safe-area-inset-bottom, 0px));
+  background: rgba(14, 22, 38, .95);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-top: 1px solid var(--hairline);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, .38);
+}
+body[data-handy="1"][data-handy-aktionen="1"] #handyAktionen { display: flex; }
+
+/* Die umgezogenen Knöpfe behalten ihr Aussehen, teilen sich aber die Zeile. */
+#handyAktionen .btn { flex: 1 1 0; min-height: 48px; width: auto; margin: 0; }
+
+#handyAktionen .handy-mehr-btn {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: var(--r-control);
+  border: 1px solid var(--hairline-stark);
+  background: rgba(255, 255, 255, .04);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+#handyAktionen .handy-mehr-btn[aria-expanded="true"] {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent);
+}
+
+/* Nebenaktionen (JSON) klappen über der Leiste auf – dieselben Knöpfe wie in
+   der Aktionskarte am Seitenende, nur hier auch ohne Scrollen erreichbar. */
+#handyMehr {
+  position: fixed;
+  left: var(--handy-rand);
+  right: var(--handy-rand);
+  bottom: calc(var(--handy-aktion-h) + 8px);
+  z-index: 941;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--r-karte-klein);
+  background: rgba(28, 42, 72, .98);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline-stark);
+  box-shadow: var(--schatten-l);
+}
+#handyMehr.offen { display: flex; }
+#handyMehr .btn { width: 100%; min-height: 46px; font-size: .9rem; }
+
+/* Solange die Aktionsleiste steht, endet der Inhalt darüber. */
+body[data-handy="1"][data-handy-aktionen="1"] #projectScreen .screen-content {
+  padding-bottom: calc(var(--handy-aktion-h) + 20px);
+}
+
+/* Die Aktionskarte am Seitenende zeigt nur noch, was nicht umgezogen ist. */
+body[data-handy="1"] #am-root .action-buttons:empty { display: none; }
+body[data-handy="1"] #am-root .action-card { padding-top: 14px; padding-bottom: 14px; }
+
+
+/* ===========================================================================
+   F  Modul 1 – Formularbausteine
+   ---------------------------------------------------------------------------
+   Hier lagen die eigentlichen Fehler der Handy-Ansicht: drei Knöpfe der
+   Abschnittszeile standen außerhalb des Bildschirms, das Feld „Wandabstand"
+   war 18 px breit, und über fünfzig Bedienelemente blieben unter 40 px.
+   =========================================================================== */
+
+/* Formularzeilen brechen um, statt sich gegenseitig zu zerquetschen. */
+body[data-handy="1"] #am-root .form-row {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+body[data-handy="1"] #am-root .form-row > .form-group {
+  flex: 1 1 140px !important;   /* schlägt die Inline-Gewichte im Markup */
+  min-width: 0;
+}
+body[data-handy="1"] #am-root .form-input { min-height: var(--touch); }
+body[data-handy="1"] #am-root textarea.form-input { min-height: 96px; }
+body[data-handy="1"] #am-root .form-label { font-size: .78rem; }
+
+/* Auswahlreihen (Status, Gerüsttyp): drei gleich breite Felder, umbrechend. */
+body[data-handy="1"] #am-root .type-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+body[data-handy="1"] #am-root .type-btn {
+  min-height: var(--touch);
+  padding: 8px 6px;
+  font-size: .76rem;
+  line-height: 1.2;
+}
+body[data-handy="1"] #am-root .chip-selector { gap: 6px; }
+body[data-handy="1"] #am-root .chip-btn { min-height: var(--touch); padding: 0 14px; }
+body[data-handy="1"] #am-root .logistik-toggle-btn { min-height: var(--touch); }
+
+/* „Auto"-Berechnung der Anfahrt: der Knopf bekommt eine eigene Zeile, damit
+   das Zahlenfeld nicht auf 26 px zusammenfällt. */
+body[data-handy="1"] #am-root #fieldAnfahrtKm { min-width: 90px; }
+body[data-handy="1"] #am-root #calcAnfahrtBtn { min-height: var(--touch); padding: 0 14px; }
+body[data-handy="1"] #am-root #open2dBtn      { min-height: var(--touch); }
+body[data-handy="1"] #am-root .btn-sm         { min-height: 40px; padding: 0 14px; }
+body[data-handy="1"] #am-root .section-header .btn-sm { min-height: 40px; }
+
+/* ── Hausseite: Wandabstand / WDVS ───────────────────────────────────────── */
+/* Zwei Felder à 140 px Mindestbreite passen auf 390 px nur, wenn die Eingabe
+   auf 18 px schrumpft. Auf dem Handy steht deshalb jedes Feld für sich. */
+body[data-handy="1"] #am-root .wand-wdvs-row { gap: 8px; }
+body[data-handy="1"] #am-root .wand-wdvs-field {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: 6px 12px;
+  min-height: var(--touch);
+}
+body[data-handy="1"] #am-root .wand-wdvs-field input {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 72px;
+  min-height: 40px;
+}
+
+/* ── Abschnittszeile ─────────────────────────────────────────────────────── */
+/* Vorher eine nicht umbrechende Flex-Zeile: „Einzelfeld", „Giebel" und das
+   Löschkreuz standen bei 390 px bis zu 84 px außerhalb des Bildschirms. */
+body[data-handy="1"] #am-root .abschnitt-top-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "bez  weg"
+    "flags flags";
+  gap: 8px;
+  align-items: center;
+}
+body[data-handy="1"] #am-root .abschnitt-top-line > .abschnitt-bez {
+  grid-area: bez;
+  min-width: 0;
+  min-height: var(--touch);
+}
+body[data-handy="1"] #am-root .abschnitt-top-line > .meas-remove-btn {
+  grid-area: weg;
+  width: var(--touch);
+  height: var(--touch);
+}
+body[data-handy="1"] #am-root .abschnitt-top-line > .einzelfeld-btn { grid-area: flags; justify-self: start; }
+body[data-handy="1"] #am-root .abschnitt-top-line > .giebel-btn     { grid-area: flags; justify-self: end; }
+body[data-handy="1"] #am-root .einzelfeld-btn,
+body[data-handy="1"] #am-root .giebel-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: .8rem;
+}
+
+/* ── Maßzeilen H × L ─────────────────────────────────────────────────────── */
+/* Die Zeile bleibt in der gewohnten Leserichtung (H × L = Fläche), bekommt
+   aber Umbruch und größere Ziffernfelder. */
+body[data-handy="1"] #am-root .meas-row {
+  flex-wrap: wrap;
+  gap: 8px;
+  row-gap: 8px;
+}
+body[data-handy="1"] #am-root .messung-hoehe,
+body[data-handy="1"] #am-root .messung-hoehe2,
+body[data-handy="1"] #am-root .messung-laenge {
+  min-width: 84px;
+  min-height: var(--touch);
+}
+body[data-handy="1"] #am-root .meas-extra-input { width: 60px; min-height: 40px; font-size: 15px; }
+body[data-handy="1"] #am-root .plus2-btn,
+body[data-handy="1"] #am-root .meas-remove-btn,
+body[data-handy="1"] #am-root .messung-dup-btn {
+  min-width: 42px;
+  min-height: 42px;
+}
+body[data-handy="1"] #am-root .meas-add-btn { min-height: var(--touch); padding: 0 16px; }
+
+/* Die drei Notizebenen (Projekt · Seite · Abschnitt) sind vollwertige
+   Eingaben, keine Beschriftungen – sie bekommen dieselbe Trefferhöhe. */
+body[data-handy="1"] #am-root .seite-notiz,
+body[data-handy="1"] #am-root .abschnitt-notiz { min-height: var(--touch); }
+
+/* Zubehör (Konsolen, Netze, Türme): Knöpfe, die man mit Handschuh trifft. */
+body[data-handy="1"] #am-root .konsole-btn { min-height: 42px; padding: 0 14px; font-size: .8rem; }
+body[data-handy="1"] #am-root .lage-btn,
+body[data-handy="1"] #am-root .accessory-l1-btn,
+body[data-handy="1"] #am-root .ks-reset-btn { min-height: 42px; }
+body[data-handy="1"] #am-root .lage-free-input { min-height: 40px; }
+body[data-handy="1"] #am-root .ks-input { min-height: var(--touch); }
+body[data-handy="1"] #am-root .ks-row   { flex-wrap: wrap; }
+
+/* Zusammenfassung: die Tabelle darf für sich scrollen, statt die Seite zu
+   verbreitern. */
+body[data-handy="1"] #am-root #summaryContent { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+body[data-handy="1"] #am-root #summaryContent table { min-width: 100%; }
+
+
+/* ===========================================================================
+   G  Modul 2 – 2D-Aufmaß
+   ---------------------------------------------------------------------------
+   Der Handy-Modus des Zeichners bleibt unverändert – er ist gebaut und
+   geprüft. Hier kommt nur dazu, was die Hülle beisteuert: die Zeichenfläche
+   bekommt die Zeile zurück, die vorher die Umschalter-Pille belegt hat.
+   =========================================================================== */
+
+/* Zeichnungsübersicht: Kopf kompakt, Karten einspaltig. */
+body[data-handy="1"] #td-projekte { padding: 12px var(--handy-rand) 24px; }
+body[data-handy="1"] #td-projekte .td-projekte-kopf { gap: 8px; }
+
+/* 》← Start《 ist in der Übersicht ein Pfeil MIT Text; die 40-px-Box der
+   Werkzeugleiste bricht ihn auf zwei Zeilen um. Hier darf er breit sein. */
+body[data-handy="1"] #td-projekte .back-link {
+  width: auto;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 0 12px 0 6px;
+  font-size: .92rem;
+  white-space: nowrap;
+}
+body[data-handy="1"] #td-projekte h1 { font-size: 1.35rem; line-height: 1.15; }
+body[data-handy="1"] #td-projekte .td-projekte-titeltext p {
+  font-size: .82rem;
+  line-height: 1.4;
+}
+body[data-handy="1"] #td-projekte .td-projekte-titelzeile {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+body[data-handy="1"] #tdNeuBtn { width: 100%; min-height: var(--touch); }
+body[data-handy="1"] #td-projekte .td-projekte-leiste { gap: 8px; }
+body[data-handy="1"] #tdProjectSearch { flex: 1 1 100%; min-height: var(--touch); }
+body[data-handy="1"] #td-projekte .td-leiste-btn { min-height: var(--touch); }
+body[data-handy="1"] #tdFolderBar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(var(--handy-rand) * -1);
+  padding: 0 var(--handy-rand) 2px;
+}
+body[data-handy="1"] #tdFolderBar::-webkit-scrollbar { display: none; }
+body[data-handy="1"] #tdFolderBar > * { flex: 0 0 auto; min-height: 40px; }
+body[data-handy="1"] #tdProjectGrid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+
+/* Das ⋯-Menü einer Zeichnung war 34 px groß – mit Handschuh nicht zu treffen
+   und der einzige Weg zu Umbenennen, Duplizieren, Verschieben und Löschen. */
+body[data-handy="1"] .td-project-menu-btn {
+  width: var(--touch);
+  height: var(--touch);
+  min-width: var(--touch);
+  min-height: var(--touch);
+}
+
+/* Zeichnung: die Leiste sitzt direkt unter dem Sicherheitsabstand, darunter
+   beginnt sofort das Blatt. */
+body[data-handy="1"][data-modul="2d"] #toolbar {
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+}
+body[data-handy="1"][data-modul="2d"] #appLayout { min-height: 0; }
+
+/* Das Werkzeug-Blatt endet oberhalb der Gerätegeste. */
+body[data-handy="1"][data-modul="2d"] #werkzeugPanel .wz-inhalt {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+body[data-handy="1"][data-modul="2d"] .bordbrett-bar {
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  left: max(12px, env(safe-area-inset-left, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+}
+
+
+/* ===========================================================================
+   H  Dialoge, Blätter, Toast
+   ---------------------------------------------------------------------------
+   Auf dem Handy kommt jeder Dialog von unten: dort steht der Daumen, dort
+   erwartet das Betriebssystem ihn, und dort verdeckt ihn keine Hand.
+   =========================================================================== */
+
+body[data-handy="1"] .td-dialog-overlay,
+body[data-handy="1"] .app-chooser-overlay {
+  align-items: flex-end;
+  padding: 0;
+}
+
+body[data-handy="1"] .td-dialog,
+body[data-handy="1"] .app-chooser-box {
+  width: 100%;
+  max-width: none;
+  border-radius: var(--r-karte) var(--r-karte) 0 0;
+  padding: 20px var(--handy-rand) calc(20px + env(safe-area-inset-bottom, 0px));
+  max-height: 88dvh;
+  overflow-y: auto;
+}
+
+/* Ein Griff oben macht sichtbar, dass das Blatt zum Bildschirmrand gehört. */
+body[data-handy="1"] .td-dialog::before,
+body[data-handy="1"] .app-chooser-box::before {
+  content: '';
+  display: block;
+  width: 38px;
+  height: 4px;
+  margin: -6px auto 14px;
+  border-radius: 999px;
+  background: var(--hairline-stark);
+}
+
+body[data-handy="1"] .td-dialog-aktionen {
+  flex-direction: column-reverse;
+  gap: 8px;
+}
+body[data-handy="1"] .td-dialog-aktionen.drei { flex-direction: column-reverse; }
+body[data-handy="1"] .td-dialog-btn { width: 100%; min-height: var(--touch); }
+body[data-handy="1"] .td-dialog-feld input,
+body[data-handy="1"] .td-dialog-feld select { min-height: var(--touch); }
+
+body[data-handy="1"] .app-chooser-option { min-height: 68px; }
+body[data-handy="1"] .app-chooser-cancel { min-height: var(--touch); }
+
+/* Aktionsmenüs (⋯): breit genug zum Treffen, nie am Bildschirmrand klebend. */
+body[data-handy="1"] .floating-menu {
+  max-width: calc(100vw - 2 * var(--handy-rand));
+}
+body[data-handy="1"] .floating-menu-item { min-height: var(--touch); }
+
+/* Der Toast weicht der jeweils sichtbaren unteren Leiste aus. */
+body[data-handy="1"] #toastEl {
+  left: var(--handy-rand);
+  right: var(--handy-rand);
+  transform: none;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  white-space: normal;
+  text-align: center;
+}
+body[data-handy="1"] #toastEl.show { transform: none; }
+body[data-handy="1"][data-handy-nav="1"] #toastEl      { bottom: calc(var(--handy-nav-h) + 12px); }
+body[data-handy="1"][data-handy-aktionen="1"] #toastEl { bottom: calc(var(--handy-aktion-h) + 12px); }
+
+
+/* ===========================================================================
+   I  Querformat und sehr schmale Geräte
+   =========================================================================== */
+
+/* Liegendes Handy: die Höhe ist die knappe Achse. Leisten werden flacher,
+   der Hub legt seine Kacheln nebeneinander. */
+@media (max-height: 460px) {
+  body[data-handy="1"] {
+    --handy-nav-h:    calc(48px + env(safe-area-inset-bottom, 0px));
+    --handy-aktion-h: calc(58px + env(safe-area-inset-bottom, 0px));
+    --handy-kopf-h:   48px;
+  }
+  body[data-handy="1"] #handyNav a { flex-direction: row; gap: 8px; font-size: .74rem; }
+  body[data-handy="1"] #handyNav a .handy-nav-punkt { display: none; }
+  body[data-handy="1"] #handyAktionen .btn { min-height: 42px; }
+  body[data-handy="1"] .hub-title { font-size: 1.3rem; }
+  body[data-handy="1"] .hub-sub   { display: none; }
+  body[data-handy="1"] .hub-tiles { flex-direction: row; }
+  body[data-handy="1"] .hub-tile  { flex: 1 1 0; }
+  /* In der Zeichnung bleibt quer ohnehin alles beim geprüften Handy-Modus. */
+}
+
+/* 320-px-Geräte: die Vorschau auf dem Startbildschirm entfällt, Auswahlreihen
+   werden zweispaltig. */
+@media (max-width: 360px) {
+  body[data-handy="1"] { --handy-rand: 11px; }
+  body[data-handy="1"] #am-root .type-selector { grid-template-columns: 1fr 1fr; }
+  body[data-handy="1"] #am-root .type-btn { font-size: .72rem; }
+  body[data-handy="1"] #handyNav a { font-size: .62rem; }
+  body[data-handy="1"] #handyAktionen { gap: 8px; }
+}
+
+/* Tastatur offen: die festen Leisten würden sonst mitten im Bild stehen.
+   `mobile.js` setzt das Merkmal über visualViewport. */
+body[data-handy="1"][data-handy-tastatur="1"] #handyNav,
+body[data-handy="1"][data-handy-tastatur="1"] #handyAktionen,
+body[data-handy="1"][data-handy-tastatur="1"] #handyMehr { display: none !important; }
