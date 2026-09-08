@@ -249,8 +249,12 @@ assert(/Hausmeister/.test(pdf), 'PDF: der Notiztext steht im Bericht');
 assert(/Zufahrt nur vormittags frei/.test(pdf), 'PDF: Zeilenumbrüche der Notiz bleiben erhalten');
 assert(/Notiz: Balkon nur bis OK Brüstung/.test(pdf), 'PDF: die Abschnitts-Notiz steht beim Abschnitt');
 assert(/Notiz: Zufahrt nur über den Hof/.test(pdf), 'PDF: die Seiten-Notiz steht bei der Hausseite');
-assert(/Treppenturm/.test(pdf), 'PDF: der 50-m-Hinweis wird ausgegeben');
-assert(/alle Seiten 60,00 m/.test(pdf), 'PDF: der 50-m-Hinweis über alle Seiten steht unter der Gesamtfläche');
+// Der 50-m-Hinweis steht seit der Umstellung ausschließlich in der App (bei der
+// Erfassung, wo er gebraucht wird) und verlängert den Bericht nicht mehr.
+// „Treppenturm" darf im PDF weiterhin als Position auftauchen – nur eben nicht
+// mehr als Hinweistext.
+assert(!/Hinweis: Gesamtlänge/.test(pdf), 'PDF: der 50-m-Hinweis wird nicht mehr ausgegeben');
+assert(!/alle Seiten 60,00 m/.test(pdf), 'PDF: auch unter der Gesamtfläche steht kein 50-m-Hinweis mehr');
 // Höhe 3,00 m + Zuschlag 2,00 m = 5,00 m, Länge 20,00 m → „H × L"
 assert(/5,00 m × 20,00 m/.test(pdf), 'PDF: Maße stehen in der neuen Reihenfolge Höhe × Länge');
 
