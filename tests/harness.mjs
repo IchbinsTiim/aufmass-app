@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'aufmass_final_app');
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'legacy-app');
 // Chromium-Pfad: PLAYWRIGHT_CHROMIUM oder die von Playwright verwaltete Installation.
 const EXE = process.env.PLAYWRIGHT_CHROMIUM || undefined;
 const MIME = {
@@ -15,7 +15,11 @@ const MIME = {
 export async function serve() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    let p = path.join(ROOT, decodeURIComponent(url.pathname));
+    // Die App verweist auf ihre Dateien unter `/app/…` – so liefert sie der
+    // geschützte Route Handler der Next.js-Hülle aus. Der Testserver bildet
+    // dieselbe Adresse auf den Ordner ab.
+    const _pfad = decodeURIComponent(url.pathname).replace(/^\/app(\/|$)/, '/');
+    let p = path.join(ROOT, _pfad);
     if (!p.startsWith(ROOT)) { res.writeHead(403).end(); return; }
     // jsPDF vom CDN lokal stubben, damit Tests offline laufen.
     if (url.pathname === '/__jspdf.js') {

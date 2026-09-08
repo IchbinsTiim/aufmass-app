@@ -15,11 +15,11 @@
 
   <!-- Reihenfolge zählt: core = Tokens & gemeinsame Bausteine, dann die beiden
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
-  <link rel="stylesheet" href="core.css?v=20260908" />
-  <link rel="stylesheet" href="style.css?v=20260908" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260908" />
-  <link rel="stylesheet" href="shell.css?v=20260908" />
-  <link rel="stylesheet" href="theme.css?v=20260908" />
+  <link rel="stylesheet" href="/app/core.css?v=20260908" />
+  <link rel="stylesheet" href="/app/style.css?v=20260908" />
+  <link rel="stylesheet" href="/app/viewer2d.css?v=20260908" />
+  <link rel="stylesheet" href="/app/shell.css?v=20260908" />
+  <link rel="stylesheet" href="/app/theme.css?v=20260908" />
 </head>
 <body data-modul="hub">
 
@@ -137,6 +137,11 @@
         <span class="hub-foot-item"><b id="hubProjektzahl">0</b> Projekte auf diesem Gerät</span>
         <span class="hub-foot-sep">·</span>
         <button type="button" class="hub-foot-btn" id="hubBackupBtn">Alle Projekte sichern</button>
+        <span class="hub-foot-sep">·</span>
+        <!-- Konto/Abmelden liegt bewusst hier und nicht im Modul-Umschalter:
+             der Umschalter wird während der Arbeit dauernd angetippt, ein
+             Abmelden-Knopf daneben wäre ein Fehlgriff mit Folgen. -->
+        <a class="hub-foot-btn" id="hubKontoBtn" href="/konto">Konto &amp; Abmelden</a>
       </footer>
     </div>
   </section>
@@ -760,9 +765,9 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="core.js?v=20260908"></script>
-  <script src="script.js?v=20260908"></script>
-  <script src="viewer2d.js?v=20260908"></script>
-  <script src="shell.js?v=20260908"></script>
+  <script src="/app/core.js?v=20260908"></script>
+  <script src="/app/script.js?v=20260908"></script>
+  <script src="/app/viewer2d.js?v=20260908"></script>
+  <script src="/app/shell.js?v=20260908"></script>
 </body>
 </html>

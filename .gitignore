@@ -1,4 +1,21 @@
-# Testabhängigkeiten (Playwright, jsPDF, pdf.js) – nur lokal, siehe tests/README.md
+# Abhängigkeiten
 node_modules/
-package.json
-package-lock.json
+
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Umgebungsvariablen – NIEMALS committen.
+# Schlüssel gehören in die Vercel-Projekteinstellungen bzw. in eine lokale
+# .env.local, die hier bewusst ausgeschlossen ist. Siehe .env.example.
+.env
+.env.*
+!.env.example
+
+# Betriebssystem
+.DS_Store

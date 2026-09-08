@@ -1,6 +1,13 @@
 # Tests zum 2D-Zeichner und zum Aufmaß-Programm
 
-Browser-Tests gegen die zusammengeführte Anwendung `aufmass_final_app/index.html`.
+Browser-Tests gegen die zusammengeführte Anwendung `legacy-app/index.html`.
+
+> Seit der Umstellung auf Next.js + Clerk liegt die App in `legacy-app/` und
+> wird im Betrieb nur an angemeldete Benutzer ausgeliefert (`/app`). Die Tests
+> hier starten weiterhin einen eigenen statischen Server direkt auf diesem
+> Ordner – sie prüfen die Fachlogik, nicht die Anmeldung. Die Anmeldung selbst
+> prüft `r12-huelle-schutz.mjs`.
+
 Beide Programme leben seit der Zusammenführung in dieser einen Seite und werden
 über die Route angesteuert:
 
@@ -194,7 +201,7 @@ Aufmaßtabelle). Ein Vergleich könnte dort nur den gewollten Unterschied
 melden – geprüft werden sie in `r5-bordbretter.mjs` und `t3-pdf.mjs`.
 
 ```bash
-git worktree add /tmp/vorher <commit-vor-der-zusammenfuehrung>
+git worktree add /tmp/vorher <commit-vor-der-zusammenfuehrung>   # dort heißt der Ordner noch aufmass_final_app/
 node tests/ab-vergleich-2d.mjs      /tmp/vorher   # Aufmaßregeln ATV DIN 18451,
                                                   # Eckenkorrektur, Achsen, Positionen
 node tests/ab-vergleich-aufmass.mjs /tmp/vorher   # Flächen, Längen, 50-m-Hinweise,
@@ -214,5 +221,42 @@ zuvor – genau das prüft `r11-aufmass-hoehenkorrektur.mjs` mit.
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
 Innenecke ergeben 2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse
 2,57 + 0,73 = 3,30 m, eine unbeteiligte Achse unverändert 3 × 2,57 = 7,71 m.
+
+Runde 12 (Hülle: Zugangssperre der Next.js-Anwendung):
+
+```bash
+node tests/r12-huelle-schutz.mjs   # nichts von der App ohne Anmeldung, alte
+                                   # Adressen sind kein Schlupfloch, kein
+                                   # Pfad-Ausbruch aus legacy-app/, keine
+                                   # Geheimnisse im Repository oder im
+                                   # Browser-Bündel, keine offene Registrierung
+```
+
+`r12` baut die Anwendung (falls nötig), startet sie und ruft sie ab wie ein
+Unbeteiligter: ohne Sitzung, ohne Cookie. Für jede Adresse gilt: kein 200 und
+kein Inhalt, an dem sich die App erkennen ließe. Geprüft wird ausdrücklich auch
+`/aufmass_final_app/…` – die Adresse aus der Zeit vor der Anmeldung.
+
+Runde 13 (Einladungscodes):
+
+```bash
+node tests/r13-einladungscodes.mjs   # Erzeugung, Hash statt Klartext, einmalige
+                                     # Einlösung, Wettlauf zweier Anfragen,
+                                     # Ablauf, Widerruf, Sperre nach zu vielen
+                                     # Fehlversuchen, kompletter Registrierablauf
+```
+
+`r13` läuft gegen ein echtes Postgres im Speicher (PGlite) mit dem Schema aus
+`db/schema.sql` und den SQL-Anweisungen aus `lib/einladungen/kern.ts` – also
+gegen dieselben Anweisungen, die später auf Neon laufen, nicht gegen einen
+Nachbau. Der Anmeldedienst wird durch einen Ersatz vertreten, der auch
+scheitern darf: so lässt sich prüfen, dass ein Code bei einem Tippfehler nicht
+verbrennt, bei unklarem Ausgang aber gesperrt bleibt.
+
+## Alles auf einmal
+
+```bash
+node tests/alle.mjs        # oder: npm test
+```
 
 Jede Datei bricht beim ersten fehlgeschlagenen Test mit `ASSERT FAILED` ab.
