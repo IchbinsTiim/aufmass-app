@@ -59,6 +59,35 @@ const PAUSCHAL_ARTEN = ['Parkplatz', 'Genehmigung'];
 // die App weist beim Überschreiten automatisch darauf hin.
 const TREPPENTURM_WARN_LAENGE = 50;
 
+// Was beim Treppenturm zu beachten ist. Der Hinweis steht jetzt direkt in der
+// App an der Treppenturm-Position – dort, wo er beim Aufmaß gebraucht wird.
+// Im PDF entfällt er dafür: dort verlängerte er nur den Bericht.
+const TREPPENTURM_HINWEIS = {
+  titel: 'Treppenturm – beim Aufmaß beachten',
+  punkte: [
+    'Standfläche prüfen: eben, tragfähig und frei (Grundfläche ca. 2,50 m × 1,50 m).',
+    'Höhe bis zum Ausstieg messen – der Vorschlag „= H+Ü" rechnet den Überstand bereits dazu.',
+    'Verankerung und Abstützung des Turms zusätzlich zum Fassadengerüst einplanen.',
+    'Zu- und Abgang über die gesamte Standzeit frei halten (Material, Zufahrt, Halteverbot).',
+    'Ab ' + TREPPENTURM_WARN_LAENGE + ' m Gerüstlänge ist ein zweiter Aufstieg erforderlich.'
+  ]
+};
+
+// ── Laser-Höhenkorrektur (nur Höhenmaße) ───────────────────────────────────
+// Die Gebäudehöhe wird mit dem Laser gemessen, das Gerät dabei etwa auf
+// Kinnhöhe gehalten (rund 1,60 m über dem Boden). Der Laser zeigt daher nur die
+// Strecke Gerät → Dachkante; bis zur tatsächlichen Höhe ab Boden fehlt die
+// Standhöhe. Die Korrektur schlägt sie auf das eingegebene Maß auf:
+//   gemessen 10,40 m  +  Korrektur 1,60 m  =  Aufmaßhöhe 12,00 m
+// Beide Stufen sind frei kombinierbar (1,60 + 2,00 = 3,60 m).
+//
+// WICHTIG: Die Korrektur gilt ausschließlich für HÖHEN (H / H1 / H2). Bei
+// Längenmaßen (Fassaden- und Gerüstlängen, Auftritte, Zubehör-Längen …) wird
+// das Steuerelement gar nicht erst erzeugt – dort kann sie also nie greifen.
+const HOEHE_KORR_KOERPER = 1.6;   // Standhöhe Boden → Laser (Kinnhöhe)
+const HOEHE_KORR_ZUSATZ  = 2;     // zweite, frei zuschaltbare Korrekturstufe
+const HOEHE_KORR_BEIDE   = 3.6;   // 1,60 m + 2,00 m in einem Schritt
+
 // Konsolentypen (Breite in cm) + Sonder-Variante "Dachfang" (intern Konsole 0,50)
 const KONSOLE_TYPES = ['0', '19', '30', '50', '70', '109'];
 const KONSOLE_DACHFANG_TYP = '50df';
@@ -256,6 +285,59 @@ function readZuschlag(wrapEl) {
   return (!isNaN(v) && v > 0) ? v : ueberstandWert;
 }
 
+// Aktiven Laser-Korrekturwert (m) eines Höhen-Korrektursteuerelements (DOM)
+// auslesen. 0 = keine Korrektur aktiv. Gibt es nur an Höhenfeldern.
+function readKorrektur(wrapEl) {
+  if (!wrapEl) return 0;
+  const v = parseFloat(wrapEl.dataset.korrektur || '');
+  return (!isNaN(v) && v > 0) ? round2(v) : 0;
+}
+
+// Gespeicherter Korrekturwert → gewählte Stufen. Gespeichert wird nur die
+// Summe; daraus leuchten nach dem Öffnen eines Projekts wieder die richtigen
+// Tasten. Geschrieben werden ausschließlich 0 / 1,60 / 2,00 / 3,60.
+function korrekturStufen(wert) {
+  const v = (wert != null && !isNaN(wert)) ? round2(wert) : 0;
+  if (v <= 0)                return { koerper: false, zusatz: false };
+  if (v === HOEHE_KORR_BEIDE)  return { koerper: true,  zusatz: true  };
+  if (v === HOEHE_KORR_ZUSATZ) return { koerper: false, zusatz: true  };
+  return { koerper: true, zusatz: false };
+}
+
+// Wirksame Höhe eines Maß-Feldes im Formular:
+//   gemessener Wert + Laser-Korrektur + Zuschlag
+// Leeres Feld → NaN (die Aufrufer überspringen die Zeile dann wie bisher).
+// `feld` ist 'hoehe' oder 'hoehe2' – für Längen gibt es diese Funktion bewusst
+// nicht, dort bleibt es beim gemessenen Wert + Zuschlag.
+function readHoeheEff(mRow, feld) {
+  const wert = parseNum(mRow.querySelector('.messung-' + feld)?.value);
+  if (isNaN(wert)) return NaN;
+  return round2((wert || 0)
+    + readKorrektur(mRow.querySelector('.messung-' + feld + '-korrektur'))
+    + readZuschlag(mRow.querySelector('.messung-' + feld + '-zuschlag')));
+}
+
+// Wirksame Höhe eines gespeicherten Maßes (Zusammenfassung/PDF/Berechnung).
+// Dieselbe Rechnung wie readHoeheEff(), nur auf den Projektdaten statt auf dem
+// Formular. `feld` ist 'hoehe' oder 'hoehe2'.
+function messungHoehe(m, feld) {
+  const korr = m[feld + 'Korrektur'];
+  const zusch = m[feld + 'Zuschlag'];
+  return round2((m[feld] || 0)
+    + (korr  > 0 ? korr  : 0)
+    + (zusch > 0 ? zusch : 0));
+}
+
+// Kurzer Zusatz hinter einem Maß, der die angewandte Laser-Korrektur ausweist.
+// So bleibt in Zusammenfassung und PDF erkennbar, dass die Höhe nicht roh vom
+// Laser stammt, sondern um die Standhöhe ergänzt wurde. '' ohne Korrektur.
+function korrekturHinweisText(korrH, korrH2, isGiebel) {
+  const teile = [];
+  if (korrH > 0) teile.push((isGiebel ? 'H1' : 'H') + ' +' + fmtNum(korrH) + ' m');
+  if (isGiebel && korrH2 > 0) teile.push('H2 +' + fmtNum(korrH2) + ' m');
+  return teile.length > 0 ? '  (inkl. Laser-Korrektur ' + teile.join(', ') + ')' : '';
+}
+
 // Konsolentyp (cm-Code, ggf. mit "df"-Suffix für Dachfang) → Meterangabe "0,30"
 function konsoleTypMeter(typ) {
   const base = String(typ).replace(/[^0-9]/g, '');
@@ -288,11 +370,11 @@ function berechneAbschnitt(abschnitt) {
     if (ef) l = Math.max(l, 2.5);
     if (l <= 0) continue;
     if (isGiebel) {
-      const h1 = (m.hoehe  || 0) + (m.hoeheZuschlag  > 0 ? m.hoeheZuschlag  : 0);
-      const h2 = (m.hoehe2 || 0) + (m.hoehe2Zuschlag > 0 ? m.hoehe2Zuschlag : 0);
+      const h1 = messungHoehe(m, 'hoehe');
+      const h2 = messungHoehe(m, 'hoehe2');
       if (h2 >= h1 && h1 >= 0) flaeche += l * (h1 + h2) / 2;
     } else {
-      const h = (m.hoehe || 0) + (m.hoeheZuschlag > 0 ? m.hoeheZuschlag : 0);
+      const h = messungHoehe(m, 'hoehe');
       if (h > 0) flaeche += l * h;
     }
   }
@@ -312,22 +394,14 @@ function computeCardFlaeche(card) {
       if (ef) lEff = Math.max(lEff, 2.5);
       if (isNaN(l) || lEff <= 0) return;
       if (isGiebel) {
-        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-        const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
-        if (!isNaN(h) && !isNaN(h2)) {
-          const h1Eff = (h  || 0) + hZ;
-          const h2Eff = (h2 || 0) + h2Z;
-          if (h2Eff >= h1Eff && h1Eff >= 0) total += lEff * (h1Eff + h2Eff) / 2;
+        const h1Eff = readHoeheEff(mRow, 'hoehe');
+        const h2Eff = readHoeheEff(mRow, 'hoehe2');
+        if (!isNaN(h1Eff) && !isNaN(h2Eff) && h2Eff >= h1Eff && h1Eff >= 0) {
+          total += lEff * (h1Eff + h2Eff) / 2;
         }
       } else {
-        const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-        const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-        if (!isNaN(h)) {
-          const hEff = (h || 0) + hZ;
-          if (hEff > 0) total += lEff * hEff;
-        }
+        const hEff = readHoeheEff(mRow, 'hoehe');
+        if (!isNaN(hEff) && hEff > 0) total += lEff * hEff;
       }
     });
   });
@@ -353,7 +427,10 @@ function computeCardLaenge(card) {
   return round2(total);
 }
 
-// Gesamtlänge eines gespeicherten Abschnitts (für Zusammenfassung/PDF)
+// Gesamtlänge eines gespeicherten Abschnitts (Gegenstück zu computeCardLaenge()
+// auf den Projektdaten statt auf dem Formular). Im PDF wird sie nicht mehr
+// gebraucht, seit der 50-m-Hinweis dort entfallen ist – der A/B-Vergleich
+// (tests/ab-vergleich-aufmass.mjs) rechnet die Längen damit weiterhin nach.
 function abschnittLaenge(abschnitt) {
   const ef = abschnitt.einzelfeld || false;
   let total = 0;
@@ -397,13 +474,11 @@ function computeCardMaxHoehe(card) {
   card.querySelectorAll('.abschnitt-row').forEach(abRow => {
     const isGiebel = abRow.querySelector('.giebel-btn')?.classList.contains('active') || false;
     abRow.querySelectorAll('.messung-row').forEach(mRow => {
-      const h  = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-      const hZ = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-      if (!isNaN(h)) { const hEff = (h || 0) + hZ; if (hEff > max) max = hEff; }
+      const hEff = readHoeheEff(mRow, 'hoehe');
+      if (!isNaN(hEff) && hEff > max) max = hEff;
       if (isGiebel) {
-        const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-        const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
-        if (!isNaN(h2)) { const h2Eff = (h2 || 0) + h2Z; if (h2Eff > max) max = h2Eff; }
+        const h2Eff = readHoeheEff(mRow, 'hoehe2');
+        if (!isNaN(h2Eff) && h2Eff > max) max = h2Eff;
       }
     });
   });
@@ -423,6 +498,10 @@ function migrateMessung(m) {
   if (out.hoehe2Zuschlag === undefined) {
     out.hoehe2Zuschlag = out.hoehe2Plus2 ? ueberstandWert : null;
   }
+  // Laser-Korrektur (Schema 2.3): ältere Maße haben keine – dort bleibt der
+  // gemessene Wert unverändert die Aufmaßhöhe.
+  if (out.hoeheKorrektur  === undefined) out.hoeheKorrektur  = null;
+  if (out.hoehe2Korrektur === undefined) out.hoehe2Korrektur = null;
   delete out.laengePlus2;
   delete out.hoehePlus2;
   delete out.hoehe2Plus2;
@@ -969,8 +1048,24 @@ function collectLogistik() {
     treppen:                isNaN(treppenVal)     ? null : treppenVal,
     oeffentlicherGrund:     document.getElementById('toggleOeffentlich')?.dataset.active === '1',
     verkehrssicherung:      document.getElementById('toggleVerkehr')?.dataset.active    === '1',
-    genehmigungErforderlich:document.getElementById('toggleGenehmigung')?.dataset.active === '1'
+    genehmigungErforderlich:document.getElementById('toggleGenehmigung')?.dataset.active === '1',
+    // Parkplatz (Halteverbotszone vor dem Objekt) – verhält sich wie die
+    // übrigen Logistik-Positionen: auswählen, speichern, Zusammenfassung, PDF.
+    parkplatz:              document.getElementById('toggleParkplatz')?.dataset.active   === '1'
   };
+}
+
+// Die in der Logistik ausgewählten Positionen als Klartext-Liste. Eine Quelle
+// für Zusammenfassung und PDF – neue Positionen (z. B. Parkplatz) müssen so nur
+// an dieser einen Stelle ergänzt werden.
+function logistikPositionen(l) {
+  if (!l) return [];
+  return [
+    l.oeffentlicherGrund      ? 'Öffentlicher Grund'       : null,
+    l.verkehrssicherung       ? 'Verkehrssicherung'        : null,
+    l.genehmigungErforderlich ? 'Genehmigung erforderlich' : null,
+    l.parkplatz               ? 'Parkplatz'                : null
+  ].filter(Boolean);
 }
 
 function loadLogistik(l) {
@@ -984,6 +1079,7 @@ function loadLogistik(l) {
   setLogistikToggle('toggleOeffentlich', l.oeffentlicherGrund);
   setLogistikToggle('toggleVerkehr',     l.verkehrssicherung);
   setLogistikToggle('toggleGenehmigung', l.genehmigungErforderlich);
+  setLogistikToggle('toggleParkplatz',   l.parkplatz);
 }
 
 
@@ -1020,14 +1116,20 @@ function collectSeiten() {
         const lZ   = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
         const hZ   = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
         const h2Z  = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
+        // Laser-Korrektur getrennt vom gemessenen Wert speichern: `hoehe` bleibt
+        // genau der Laser-Wert, `hoeheKorrektur` hält den Aufschlag.
+        const hK   = readKorrektur(mRow.querySelector('.messung-hoehe-korrektur'));
+        const h2K  = readKorrektur(mRow.querySelector('.messung-hoehe2-korrektur'));
         messungen.push({
-          id:             genId('m'),
-          laenge:         isNaN(lV)  ? null : lV,
-          laengeZuschlag: lZ > 0 ? lZ : null,
-          hoehe:          isNaN(hV)  ? null : hV,
-          hoeheZuschlag:  hZ > 0 ? hZ : null,
-          hoehe2:         isNaN(h2V) ? null : h2V,
-          hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+          id:              genId('m'),
+          laenge:          isNaN(lV)  ? null : lV,
+          laengeZuschlag:  lZ > 0 ? lZ : null,
+          hoehe:           isNaN(hV)  ? null : hV,
+          hoeheKorrektur:  hK > 0 ? hK : null,
+          hoeheZuschlag:   hZ > 0 ? hZ : null,
+          hoehe2:          isNaN(h2V) ? null : h2V,
+          hoehe2Korrektur: h2K > 0 ? h2K : null,
+          hoehe2Zuschlag:  h2Z > 0 ? h2Z : null
         });
       });
       abschnitte.push({ id: genId('ab'), bezeichnung: bez, notiz, einzelfeld: ef, giebel, messungen });
@@ -1529,6 +1631,9 @@ function createAbschnittRow(data, container, onChange) {
     messungenList.querySelectorAll('.meas-field-h .meas-field-tag').forEach(tag => {
       tag.textContent = isGiebel ? 'H1' : 'H';
     });
+    messungenList.querySelectorAll('.messung-hoehe-korrektur .hkorr-feld').forEach(tag => {
+      tag.textContent = isGiebel ? 'H1' : 'H';
+    });
     refreshAbschnittCalc();
     onChange();
   });
@@ -1577,22 +1682,14 @@ function createAbschnittRow(data, container, onChange) {
       if (!isNaN(l) && lEff > 0) {
         totalLaenge += lEff;
         if (isGiebel) {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-          const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
-          if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + hZ;
-            const h2Eff = (h2 || 0) + h2Z;
-            if (h2Eff >= h1Eff && h1Eff >= 0) f = round2(lEff * (h1Eff + h2Eff) / 2);
+          const h1Eff = readHoeheEff(mRow, 'hoehe');
+          const h2Eff = readHoeheEff(mRow, 'hoehe2');
+          if (!isNaN(h1Eff) && !isNaN(h2Eff) && h2Eff >= h1Eff && h1Eff >= 0) {
+            f = round2(lEff * (h1Eff + h2Eff) / 2);
           }
         } else {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-          if (!isNaN(h)) {
-            const hEff = (h || 0) + hZ;
-            if (hEff > 0) f = round2(lEff * hEff);
-          }
+          const hEff = readHoeheEff(mRow, 'hoehe');
+          if (!isNaN(hEff) && hEff > 0) f = round2(lEff * hEff);
         }
       }
       total += f;
@@ -1622,13 +1719,17 @@ function createAbschnittRow(data, container, onChange) {
     if (!first) return {};
     const h   = parseNum(first.querySelector('.messung-hoehe')?.value);
     const hZ  = readZuschlag(first.querySelector('.messung-hoehe-zuschlag'));
+    const hK  = readKorrektur(first.querySelector('.messung-hoehe-korrektur'));
     const h2  = parseNum(first.querySelector('.messung-hoehe2')?.value);
     const h2Z = readZuschlag(first.querySelector('.messung-hoehe2-zuschlag'));
+    const h2K = readKorrektur(first.querySelector('.messung-hoehe2-korrektur'));
     return {
-      hoehe:          isNaN(h)  ? null : h,
-      hoeheZuschlag:  hZ  > 0 ? hZ  : null,
-      hoehe2:         isNaN(h2) ? null : h2,
-      hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+      hoehe:           isNaN(h)  ? null : h,
+      hoeheKorrektur:  hK  > 0 ? hK  : null,
+      hoeheZuschlag:   hZ  > 0 ? hZ  : null,
+      hoehe2:          isNaN(h2) ? null : h2,
+      hoehe2Korrektur: h2K > 0 ? h2K : null,
+      hoehe2Zuschlag:  h2Z > 0 ? h2Z : null
     };
   }
 
@@ -1638,15 +1739,19 @@ function createAbschnittRow(data, container, onChange) {
     const lZ  = readZuschlag(mRow.querySelector('.messung-laenge-zuschlag'));
     const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
     const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
+    const hK  = readKorrektur(mRow.querySelector('.messung-hoehe-korrektur'));
     const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
     const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
+    const h2K = readKorrektur(mRow.querySelector('.messung-hoehe2-korrektur'));
     return {
-      laenge:         isNaN(l)  ? null : l,
-      laengeZuschlag: lZ  > 0 ? lZ  : null,
-      hoehe:          isNaN(h)  ? null : h,
-      hoeheZuschlag:  hZ  > 0 ? hZ  : null,
-      hoehe2:         isNaN(h2) ? null : h2,
-      hoehe2Zuschlag: h2Z > 0 ? h2Z : null
+      laenge:          isNaN(l)  ? null : l,
+      laengeZuschlag:  lZ  > 0 ? lZ  : null,
+      hoehe:           isNaN(h)  ? null : h,
+      hoeheKorrektur:  hK  > 0 ? hK  : null,
+      hoeheZuschlag:   hZ  > 0 ? hZ  : null,
+      hoehe2:          isNaN(h2) ? null : h2,
+      hoehe2Korrektur: h2K > 0 ? h2K : null,
+      hoehe2Zuschlag:  h2Z > 0 ? h2Z : null
     };
   }
 
@@ -1688,6 +1793,14 @@ function createAbschnittRow(data, container, onChange) {
       onChange();
     });
 
+    // Laser-Korrektur – ausschließlich an den Höhenfeldern.
+    const hoeheKorrCtrl = createHoehenKorrekturControl(
+      mData?.hoeheKorrektur, 'messung-hoehe-korrektur',
+      isGiebelNow ? 'H1' : 'H',
+      () => parseNum(hoeheInp.value),
+      () => { refreshAbschnittCalc(); onChange(); }
+    );
+
     // Giebel-spezifisch: H2 (Spitze)
     const giebelSep = document.createElement('span');
     giebelSep.className = 'giebel-sep giebel-part';
@@ -1706,7 +1819,18 @@ function createAbschnittRow(data, container, onChange) {
       refreshAbschnittCalc();
       onChange();
     });
-    hoehe2Inp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
+
+    const hoehe2KorrCtrl = createHoehenKorrekturControl(
+      mData?.hoehe2Korrektur, 'messung-hoehe2-korrektur giebel-part', 'H2',
+      () => parseNum(hoehe2Inp.value),
+      () => { refreshAbschnittCalc(); onChange(); }
+    );
+
+    hoehe2Inp.addEventListener('input', () => {
+      hoehe2KorrCtrl._refresh();
+      refreshAbschnittCalc();
+      onChange();
+    });
 
     const calcSpan = document.createElement('span');
     calcSpan.className = 'messung-calc';
@@ -1741,7 +1865,11 @@ function createAbschnittRow(data, container, onChange) {
     });
 
     laengeInp.addEventListener('input', () => { refreshAbschnittCalc(); onChange(); });
-    hoeheInp.addEventListener('input',  () => { refreshAbschnittCalc(); onChange(); });
+    hoeheInp.addEventListener('input',  () => {
+      hoeheKorrCtrl._refresh();
+      refreshAbschnittCalc();
+      onChange();
+    });
 
     const laengeField = wrapMeasField('L', laengeInp);
     const hoeheField  = wrapMeasField(isGiebelNow ? 'H1' : 'H', hoeheInp);
@@ -1760,6 +1888,10 @@ function createAbschnittRow(data, container, onChange) {
     mRow.appendChild(calcSpan);
     mRow.appendChild(dupMBtn);
     mRow.appendChild(removeMBtn);
+    // Die Korrektur-Tasten stehen direkt unter den Maßfeldern – gut erreichbar
+    // und eindeutig den Höhen zugeordnet. Bei der Länge gibt es sie nicht.
+    mRow.appendChild(hoeheKorrCtrl);
+    mRow.appendChild(hoehe2KorrCtrl);
     return mRow;
   }
 
@@ -2028,6 +2160,111 @@ function createZuschlagControl(initValue, extraClass, onChange) {
   return wrap;
 }
 
+// Laser-Korrektur für ein einzelnes HÖHEN-Feld (H / H1 / H2).
+// Das Eingabefeld selbst bleibt unangetastet: dort steht weiterhin genau der
+// Wert, den der Laser angezeigt hat. Die Korrektur wird getrennt gehalten
+// (dataset.korrektur, gespeichert als hoeheKorrektur/hoehe2Korrektur) und erst
+// beim Rechnen aufgeschlagen – so bleibt jederzeit nachvollziehbar, was
+// gemessen und was zugerechnet wurde.
+//
+// `feldLabel`  Kennzeichnung des zugehörigen Feldes ('H' / 'H2')
+// `getHoehe`   liefert den aktuell eingegebenen Messwert für die Live-Anzeige
+function createHoehenKorrekturControl(initValue, extraClass, feldLabel, getHoehe, onChange) {
+  const wrap = document.createElement('div');
+  wrap.className = 'hkorr-ctrl' + (extraClass ? ' ' + extraClass : '');
+
+  const stufen = korrekturStufen(initValue);
+  let koerper = stufen.koerper;
+  let zusatz  = stufen.zusatz;
+
+  const label = document.createElement('span');
+  label.className = 'hkorr-label';
+  label.title = 'Laser-Korrektur: Standhöhe auf das gemessene Höhenmaß aufschlagen (nur bei Höhen)';
+  label.textContent = 'Laser ';
+  const feldEl = document.createElement('b');
+  feldEl.className = 'hkorr-feld';
+  feldEl.textContent = feldLabel;
+  label.appendChild(feldEl);
+
+  function machBtn(wert, titel) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'hkorr-btn';
+    b.textContent = '+' + fmtNum(wert) + ' m';
+    b.title = titel;
+    return b;
+  }
+
+  const btnKoerper = machBtn(HOEHE_KORR_KOERPER, 'Standhöhe bis zum Laser (Kinnhöhe) aufschlagen');
+  const btnZusatz  = machBtn(HOEHE_KORR_ZUSATZ,  'Zusätzliche Korrektur aufschlagen');
+  const btnBeide   = machBtn(HOEHE_KORR_BEIDE,   'Beide Korrekturen zusammen (' + fmtNum(HOEHE_KORR_KOERPER) + ' m + ' + fmtNum(HOEHE_KORR_ZUSATZ) + ' m)');
+
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'hkorr-reset';
+  resetBtn.textContent = 'Zurücksetzen';
+  resetBtn.title = 'Korrektur entfernen – das gemessene Höhenmaß bleibt stehen';
+
+  const calcEl = document.createElement('span');
+  calcEl.className = 'hkorr-calc';
+
+  // Aktueller Korrekturwert = Summe der gewählten Stufen.
+  function korrekturWert() {
+    return round2((koerper ? HOEHE_KORR_KOERPER : 0) + (zusatz ? HOEHE_KORR_ZUSATZ : 0));
+  }
+
+  function refreshVisual() {
+    const korr = korrekturWert();
+    wrap.dataset.korrektur = String(korr);
+    wrap.classList.toggle('aktiv', korr > 0);
+    btnKoerper.classList.toggle('active', koerper);
+    btnZusatz.classList.toggle('active', zusatz);
+    btnBeide.classList.toggle('active', koerper && zusatz);
+    resetBtn.style.display = korr > 0 ? '' : 'none';
+
+    // Gemessener Wert, Korrektur und Ergebnis bleiben getrennt sichtbar.
+    if (korr > 0) {
+      const gemessen = getHoehe ? getHoehe() : NaN;
+      calcEl.textContent = (!isNaN(gemessen))
+        ? fmtNum(gemessen) + ' m + ' + fmtNum(korr) + ' m = ' + fmtNum(round2(gemessen + korr)) + ' m'
+        : 'Korrektur +' + fmtNum(korr) + ' m';
+      calcEl.style.display = '';
+    } else {
+      calcEl.textContent = '';
+      calcEl.style.display = 'none';
+    }
+  }
+
+  function setzen(neuKoerper, neuZusatz) {
+    koerper = neuKoerper;
+    zusatz  = neuZusatz;
+    refreshVisual();
+    if (onChange) onChange();
+  }
+
+  btnKoerper.addEventListener('click', () => setzen(!koerper, zusatz));
+  btnZusatz.addEventListener('click',  () => setzen(koerper, !zusatz));
+  // „+3,60 m" schaltet beide Stufen gemeinsam ein bzw. wieder aus.
+  btnBeide.addEventListener('click',   () => {
+    const beide = koerper && zusatz;
+    setzen(!beide, !beide);
+  });
+  resetBtn.addEventListener('click',   () => setzen(false, false));
+
+  wrap.appendChild(label);
+  wrap.appendChild(btnKoerper);
+  wrap.appendChild(btnZusatz);
+  wrap.appendChild(btnBeide);
+  wrap.appendChild(resetBtn);
+  wrap.appendChild(calcEl);
+
+  // Die Live-Anzeige muss dem Höhenfeld folgen, ohne dass jedes Feld das selbst
+  // wissen muss – dafür merkt sich das Element seine Auffrischfunktion.
+  wrap._refresh = refreshVisual;
+  refreshVisual();
+  return wrap;
+}
+
 function makeAccLabel(text) {
   const el = document.createElement('span');
   el.className = 'acc-entry-label';
@@ -2124,7 +2361,7 @@ function createAccessoriesSection(seiteData, card, onChange) {
     return wrap;
   }
 
-  function createSingleAcc(accKey, labelText, initData, unitLabel, autoLabel, getAutoValue, defaultAuto, valueField) {
+  function createSingleAcc(accKey, labelText, initData, unitLabel, autoLabel, getAutoValue, defaultAuto, valueField, hinweis) {
     valueField = valueField || 'laenge';
     const row = document.createElement('div');
     row.className = 'acc-single-row';
@@ -2144,15 +2381,40 @@ function createAccessoriesSection(seiteData, card, onChange) {
     const lenWrap = createInlineLength(accKey, initData ? initData[valueField] : null, initAutoL1, unitLabel, autoLabel, getAutoValue);
     lenWrap.style.display = initData ? '' : 'none';
 
+    // Optionaler Hinweis direkt an der Position (Treppenturm): erscheint,
+    // sobald die Position ausgewählt ist, und verschwindet mit ihr wieder – so
+    // steht er beim Erfassen vor Augen und nicht erst im fertigen PDF.
+    let hinweisEl = null;
+    if (hinweis) {
+      hinweisEl = document.createElement('div');
+      hinweisEl.className = 'acc-hinweis';
+      hinweisEl.dataset.acc = accKey;
+      const titelEl = document.createElement('div');
+      titelEl.className = 'acc-hinweis-titel';
+      titelEl.textContent = '⚠ ' + hinweis.titel;
+      hinweisEl.appendChild(titelEl);
+      const listeEl = document.createElement('ul');
+      listeEl.className = 'acc-hinweis-liste';
+      hinweis.punkte.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        listeEl.appendChild(li);
+      });
+      hinweisEl.appendChild(listeEl);
+      hinweisEl.style.display = initData ? '' : 'none';
+    }
+
     toggleBtn.addEventListener('click', () => {
       const wasActive = toggleBtn.classList.contains('active');
       toggleBtn.classList.toggle('active', !wasActive);
       lenWrap.style.display = wasActive ? 'none' : '';
+      if (hinweisEl) hinweisEl.style.display = wasActive ? 'none' : '';
       onChange();
     });
 
     row.appendChild(toggleBtn);
     row.appendChild(lenWrap);
+    if (hinweisEl) row.appendChild(hinweisEl);
     return row;
   }
 
@@ -2408,7 +2670,8 @@ function createAccessoriesSection(seiteData, card, onChange) {
     '= H+' + fmtNum(ueberstandWert) + 'm',
     () => { const h = computeCardMaxHoehe(card); return h > 0 ? round2(h + ueberstandWert) : null; },
     true,
-    'hoehe'
+    'hoehe',
+    TREPPENTURM_HINWEIS
   ));
 
   // Netze: Vorschlags-m² = Gerüstfläche der Seite (wie beim KS-Feld).
@@ -2483,30 +2746,27 @@ function updateSummary() {
         if (isNaN(l) || lEff <= 0) return;
         const bezPfx = bez ? bez + ': ' : '';
         const efStr  = ef && (l || 0) < 2.5 ? ' (EF)' : '';
+        // Laser-Korrektur an dieser Zeile – wird hinter dem Maß ausgewiesen,
+        // damit gemessener Wert und Aufschlag getrennt erkennbar bleiben.
+        const kStr = korrekturHinweisText(
+          readKorrektur(mRow.querySelector('.messung-hoehe-korrektur')),
+          readKorrektur(mRow.querySelector('.messung-hoehe2-korrektur')),
+          isGiebel
+        );
         if (isGiebel) {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-          const h2  = parseNum(mRow.querySelector('.messung-hoehe2')?.value);
-          const h2Z = readZuschlag(mRow.querySelector('.messung-hoehe2-zuschlag'));
-          if (!isNaN(h) && !isNaN(h2)) {
-            const h1Eff = (h  || 0) + hZ;
-            const h2Eff = (h2 || 0) + h2Z;
-            if (h2Eff >= h1Eff && h1Eff >= 0) {
-              const pair = round2(lEff * (h1Eff + h2Eff) / 2);
-              abFlaeche += pair;
-              detailParts.push(bezPfx + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)');
-            }
+          const h1Eff = readHoeheEff(mRow, 'hoehe');
+          const h2Eff = readHoeheEff(mRow, 'hoehe2');
+          if (!isNaN(h1Eff) && !isNaN(h2Eff) && h2Eff >= h1Eff && h1Eff >= 0) {
+            const pair = round2(lEff * (h1Eff + h2Eff) / 2);
+            abFlaeche += pair;
+            detailParts.push(bezPfx + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m² (Giebel)' + kStr);
           }
         } else {
-          const h   = parseNum(mRow.querySelector('.messung-hoehe')?.value);
-          const hZ  = readZuschlag(mRow.querySelector('.messung-hoehe-zuschlag'));
-          if (!isNaN(h)) {
-            const hEff = (h || 0) + hZ;
-            if (hEff > 0) {
-              const pair = round2(lEff * hEff);
-              abFlaeche += pair;
-              detailParts.push(bezPfx + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²');
-            }
+          const hEff = readHoeheEff(mRow, 'hoehe');
+          if (!isNaN(hEff) && hEff > 0) {
+            const pair = round2(lEff * hEff);
+            abFlaeche += pair;
+            detailParts.push(bezPfx + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr + ' = ' + fmtNum(pair) + ' m²' + kStr);
           }
         }
       });
@@ -2615,8 +2875,20 @@ function updateSummary() {
     html += `<tr><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">Ankeranzahl</td><td style="font-size:0.82rem;color:var(--color-text-secondary);padding-top:4px;">${ankerAnzahl} Stk.</td></tr>`;
   }
 
-  // Transport / Laufaufwand (für die spätere Kalkulation im Büro)
   const lg = collectLogistik();
+
+  // Ausgewählte Logistik-Positionen (z. B. Parkplatz / Halteverbotszone) –
+  // stehen so schon auf der Baustelle in der Zusammenfassung und nicht erst
+  // im fertigen PDF.
+  const logistikRows = logistikPositionen(lg);
+  if (logistikRows.length > 0) {
+    html += `<tr><td colspan="2" style="padding-top:10px;font-size:0.72rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--color-border);">Baustelle / Logistik</td></tr>`;
+    logistikRows.forEach(name => {
+      html += `<tr><td><span class="summary-side-name" style="font-size:0.88rem">${name}</span></td><td>✓</td></tr>`;
+    });
+  }
+
+  // Transport / Laufaufwand (für die spätere Kalkulation im Büro)
   const effortRows = [
     lg.transportM  != null ? ['Laufweg LKW → Objekt', fmtNum(lg.transportM) + ' m'] : null,
     lg.hoehenmeter != null ? ['Höhenmeter',           fmtNum(lg.hoehenmeter) + ' m'] : null,
@@ -2786,7 +3058,6 @@ function generatePDF() {
   secHead('Gerüstfläche');
 
   let totalArea = 0;
-  let gesamtLaenge = 0;
   const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
 
   seiten.forEach((seite, idx) => {
@@ -2810,36 +3081,36 @@ function generatePDF() {
     }
 
     let seitenFlaeche = 0;
-    let seitenLaenge  = 0;
     (seite.abschnitte || []).forEach(a => {
       const ef = a.einzelfeld || false;
       const isGiebel = a.giebel || false;
-      seitenLaenge += abschnittLaenge(a);
       (a.messungen || []).forEach(m => {
         let lEff = (m.laenge || 0) + (m.laengeZuschlag > 0 ? m.laengeZuschlag : 0);
         if (ef) lEff = Math.max(lEff, 2.5);
         if (lEff <= 0) return;
         const bezStr = a.bezeichnung ? a.bezeichnung + ': ' : '';
         const efStr  = ef ? ' (EF)' : '';
+        // Die Höhen enthalten die Laser-Korrektur; der Zusatz weist sie aus.
+        const kStr = korrekturHinweisText(m.hoeheKorrektur, m.hoehe2Korrektur, isGiebel);
         if (isGiebel) {
-          const h1Eff = (m.hoehe  || 0) + (m.hoeheZuschlag  > 0 ? m.hoeheZuschlag  : 0);
-          const h2Eff = (m.hoehe2 || 0) + (m.hoehe2Zuschlag > 0 ? m.hoehe2Zuschlag : 0);
+          const h1Eff = messungHoehe(m, 'hoehe');
+          const h2Eff = messungHoehe(m, 'hoehe2');
           if (h2Eff < h1Eff || h1Eff < 0) return;
           const pair = round2(lEff * (h1Eff + h2Eff) / 2);
           seitenFlaeche += pair;
           chk(6);
           doc.setFontSize(9);
-          doc.text(bezStr + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr, IND + 3, y);
+          doc.text(bezStr + '(H1 ' + fmtNum(h1Eff) + ' + H2 ' + fmtNum(h2Eff) + ') / 2 × ' + fmtNum(lEff) + ' m' + efStr + kStr, IND + 3, y);
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         } else {
-          const hEff = (m.hoehe || 0) + (m.hoeheZuschlag > 0 ? m.hoeheZuschlag : 0);
+          const hEff = messungHoehe(m, 'hoehe');
           if (hEff <= 0) return;
           const pair = round2(lEff * hEff);
           seitenFlaeche += pair;
           chk(6);
           doc.setFontSize(9);
-          doc.text(bezStr + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr, IND + 3, y);
+          doc.text(bezStr + fmtNum(hEff) + ' m × ' + fmtNum(lEff) + ' m' + efStr + kStr, IND + 3, y);
           doc.text(fmtNum(pair) + ' m²', RM, y, { align: 'right' });
           y += 5;
         }
@@ -2882,18 +3153,9 @@ function generatePDF() {
       doc.setFont(undefined, 'normal');
     }
 
-    gesamtLaenge += seitenLaenge;
-
-    // Hinweis: ab 50 m Gerüstlänge ist ein Treppenturm erforderlich
-    const seitenHinweis = treppenturmHinweis(round2(seitenLaenge), 'Seite');
-    if (seitenHinweis) {
-      chk(6);
-      doc.setFontSize(9);
-      doc.setFont(undefined, 'bold');
-      doc.text('Hinweis: ' + seitenHinweis, IND + 3, y);
-      doc.setFont(undefined, 'normal');
-      y += 5;
-    }
+    // Der 50-m-Hinweis (Treppenturm) steht bewusst nur noch in der App – bei
+    // der Erfassung, wo er gebraucht wird. Im Bericht verlängerte er nur die
+    // Ausgabe, ohne für das Büro eine neue Information zu liefern.
 
     // Zubehör-Totals sammeln. Konsolen werden ausschließlich nach Typ
     // zusammengefasst (unabhängig von Lage/Ebene und Seite), damit jeder
@@ -2931,17 +3193,6 @@ function generatePDF() {
   y += 5;
   pdfRowBold('Gesamtfläche', fmtNum(totalArea) + ' m²');
 
-  // 50-m-Hinweis über alle Hausseiten hinweg
-  const projektHinweisPdf = treppenturmHinweis(round2(gesamtLaenge), 'alle Seiten');
-  if (projektHinweisPdf) {
-    chk(6);
-    doc.setFontSize(9);
-    doc.setFont(undefined, 'bold');
-    doc.text('Hinweis: ' + projektHinweisPdf, IND, y);
-    doc.setFont(undefined, 'normal');
-    y += 5;
-  }
-
   // ── Positionen ─────────────────────────────────────────────────
   // Konsolen: rein numerisch nach Typ sortiert, Dachfang-Variante (z. B. "50df")
   // direkt hinter der zugehörigen normalen Konsole (z. B. "50").
@@ -2978,9 +3229,7 @@ function generatePDF() {
     logistik.anfahrtKm != null              ? ['Anfahrt',                  fmtNum(logistik.anfahrtKm) + ' km'] : null,
     logistik.untergrund                     ? ['Untergrund',               logistik.untergrund] : null,
     logistik.stellflaecheNotiz              ? ['Stellfläche',              logistik.stellflaecheNotiz] : null,
-    logistik.oeffentlicherGrund             ? ['Öffentlicher Grund',       ''] : null,
-    logistik.verkehrssicherung              ? ['Verkehrssicherung',        ''] : null,
-    logistik.genehmigungErforderlich        ? ['Genehmigung erforderlich', ''] : null
+    ...logistikPositionen(logistik).map(name => [name, ''])
   ].filter(Boolean);
 
   if (logParts.length > 0) {
@@ -3231,13 +3480,16 @@ function initApp() {
   });
 
   // Logistik-Toggles
-  ['toggleOeffentlich', 'toggleVerkehr', 'toggleGenehmigung'].forEach(id => {
+  ['toggleOeffentlich', 'toggleVerkehr', 'toggleGenehmigung', 'toggleParkplatz'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.addEventListener('click', () => {
       const nowActive = btn.dataset.active !== '1';
       btn.dataset.active = nowActive ? '1' : '0';
       btn.classList.toggle('active', nowActive);
+      // Die Zusammenfassung führt die gewählten Logistik-Positionen mit auf und
+      // muss beim Umschalten daher mitziehen.
+      updateSummary();
     });
   });
 

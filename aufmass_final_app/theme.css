@@ -263,6 +263,51 @@ body { background: var(--bg-deep); }
 }
 #am-root .summary-warn { color: var(--warnung); }
 
+/* Hinweis direkt an einer Position (Treppenturm) – dieselbe Sprache wie die
+   übrigen Warnungen im Aufmaß. */
+#am-root .acc-hinweis {
+  background: rgba(255, 180, 84, .12);
+  border: 1px solid rgba(255, 180, 84, .38);
+  border-radius: var(--r-karte-klein);
+}
+#am-root .acc-hinweis-titel,
+#am-root .acc-hinweis-liste { color: var(--warnung); }
+
+/* ── Laser-Korrektur (nur Höhenmaße) ─────────────────────────────────────── */
+
+#am-root .hkorr-ctrl {
+  border: 1px dashed var(--hairline);
+  background: var(--surface-tief);
+  border-radius: var(--r-karte-klein);
+}
+#am-root .hkorr-ctrl.aktiv {
+  border-style: solid;
+  border-color: var(--accent-rand);
+  background: var(--accent-weich);
+}
+#am-root .hkorr-label { color: var(--muted); }
+#am-root .hkorr-feld  { color: var(--accent); }
+#am-root .hkorr-btn {
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: var(--r-control);
+  transition: background var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              color var(--t-kurz) var(--federnd);
+}
+#am-root .hkorr-btn.active {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent);
+}
+#am-root .hkorr-reset { color: var(--muted); }
+#am-root .hkorr-calc {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 #am-root .backup-reminder {
   background: rgba(255, 201, 60, .10);
   border: 1px solid rgba(255, 201, 60, .30);

@@ -98,17 +98,19 @@ zusammengeführten App geprüft.
 | Verankerungsgrund, Ankeranzahl | ✅ |
 | Logistik: Anfahrt km mit Auto-Berechnung, Untergrund, Stellflächen-Notiz | ✅ |
 | Transport: LKW→Objekt, Höhenmeter, Treppen | ✅ |
-| Schalter: Öffentlicher Grund, Verkehrssicherung, Genehmigung | ✅ |
+| Schalter: Öffentlicher Grund, Verkehrssicherung, Genehmigung, Parkplatz | ✅ |
 | 2D-Zeichnung: Kennzahlen + „2D-Ansicht öffnen" | ✅ |
 | Hausseiten: „+ Seite" oben und unten | ✅ |
 | Standard-Zuschlag der „+"-Taste (projektweit) + individueller Zuschlag je Maßfeld | ✅ |
 | Seite: Name (Auswahl oder manuell), Notiz, Wandabstand, WDVS | ✅ |
 | Abschnitte je Seite: Bezeichnung, Einzelfeld (Mindestmaß 2,50 m), Giebel (zwei Höhen), Notiz | ✅ |
 | Messungen H × L, mehrere je Abschnitt, „+ Maß", duplizieren, löschen | ✅ |
+| Laser-Höhenkorrektur je Höhenfeld: +1,60 m · +2,00 m · +3,60 m, zurücksetzbar (nur Höhen) | ✅ |
 | Zubehör: Konsolen (0/19/30/50/70/109 cm + Dachfang), Lagen L1–L3, Länge automatisch oder frei | ✅ |
 | Zubehör: Treppenturm, Dachfang, Gitterträger, Fußgängertunnel, Netze, KS-Wert | ✅ |
 | Kennzahlen je Seite: Fläche, Länge, größte Höhe | ✅ |
-| 50-m-Hinweis (Treppenturm) je Abschnitt, je Seite und über alle Seiten | ✅ |
+| 50-m-Hinweis (Treppenturm) je Abschnitt, je Seite und über alle Seiten | ✅ nur in der App, nicht mehr im PDF |
+| Treppenturm-Hinweis an der Position selbst (was beim Aufmaß zu beachten ist) | ✅ |
 | Positionen: 16 Arten, Menge, Einheit (m · m² · Stk.), Notiz, Pauschal-Arten | ✅ |
 | Notizen auf drei Ebenen: Projekt, Hausseite, Abschnitt | ✅ |
 | Zusammenfassung: Tabelle je Seite + Gesamtfläche | ✅ |

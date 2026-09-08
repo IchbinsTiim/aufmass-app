@@ -162,6 +162,24 @@ Projektfotos (IndexedDB) fallen mit der Zeichnung weg – aber erst nach Ablauf
 der Rückgängig-Frist, damit „Rückgängig" die Zeichnung samt Bildern zurückholt.
 Fotos, deren Projekt es nicht mehr gibt, räumt der Start des Moduls auf.
 
+Runde 11 (Aufmaß-Programm: Höhenkorrektur, Treppenturm-Hinweis, Parkplatz):
+
+```bash
+node tests/r11-aufmass-hoehenkorrektur.mjs   # Laser-Höhenkorrektur (+1,60 / +2,00 /
+                                             # +3,60 m, zurücksetzen, nur bei Höhen),
+                                             # Treppenturm-Hinweis in der App statt im
+                                             # PDF, Logistik-Position „Parkplatz"
+```
+
+`r11` rechnet den Arbeitsablauf mit dem Laser nach: gehalten wird er auf
+Kinnhöhe (rund 1,60 m über dem Boden), gemessen wird von dort bis zur Dachkante.
+Aus 10,40 m Anzeige werden mit `+1,60 m` also 12,00 m, mit `+2,00 m` 12,40 m und
+mit beiden Stufen (`+3,60 m`) 14,00 m. Geprüft wird dabei ausdrücklich, dass der
+gemessene Wert erhalten bleibt (gespeichert werden `hoehe` und `hoeheKorrektur`
+getrennt), dass sich die Korrektur ohne Verlust des Messwerts zurücksetzen lässt,
+dass der bestehende „+2 m"-Zuschlag unverändert weiterläuft und sich mit der
+Korrektur addiert – und dass Längenmaße die Tasten gar nicht erst bekommen.
+
 ## Nachweis „rechnerisch identisch"
 
 Zwei Vergleichsläufe rechnen dasselbe Aufmaß einmal in der Fassung **vor** dem
@@ -186,6 +204,12 @@ node tests/ab-vergleich-aufmass.mjs /tmp/vorher   # Flächen, Längen, 50-m-Hinw
 Beide melden „rechnerisch identisch – keine einzige Abweichung", solange an der
 Fachlogik nichts geändert wurde. Genau das ist die Abnahmebedingung für jede
 Umbaumaßnahme an der Hülle.
+
+Zwei Unterschiede sind seit Runde 11 gewollt und dort keine Abweichung im Sinne
+der Abnahme: der 50-m-Hinweis (Treppenturm) steht nur noch in der App und nicht
+mehr im PDF, und eine Maßzeile mit Laser-Höhenkorrektur weist diese hinter dem
+Maß aus. Ohne gesetzte Korrektur rechnet und schreibt die App unverändert wie
+zuvor – genau das prüft `r11-aufmass-hoehenkorrektur.mjs` mit.
 
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
 Innenecke ergeben 2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse
