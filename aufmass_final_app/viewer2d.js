@@ -392,7 +392,7 @@ function abschnittById(id) {
 /** Anzeigename eines Abschnitts (auch für nicht/unbekannt zugeordnete Felder). */
 function abschnittName(id) {
   const a = abschnittById(id);
-  return a ? a.name : 'Ohne Abschnitt';
+  return a ? a.name : 'Ohne Achse';
 }
 
 /** Farbe eines Abschnitts; ohne Zuordnung neutrales Grau. */
@@ -404,6 +404,52 @@ function abschnittColor(id) {
 function addAbschnitt(name) {
   const a = mkAbschnitt(name);
   abschnitteList().push(a);
+  return a;
+}
+
+/* ── „+ Achse" ───────────────────────────────────────────────────────────────
+   Eine Achse anzulegen ist die zweithäufigste Handlung nach „Feld setzen".
+   Deshalb ist sie EIN Tipp auf den festen Knopf in der Werkzeugleiste und
+   fragt nichts ab: der Name wird fortlaufend vergeben („Achse A", „Achse B" …)
+   und lässt sich direkt aus der Rückmeldung heraus ändern. Liegt eine Auswahl
+   vor, wandert sie gleich in die neue Achse – das ist der mit Abstand
+   häufigste nächste Schritt.                                                */
+
+/** Nächster freier Achsname in der Reihe „Achse A", „Achse B" … */
+function naechsterAchsName() {
+  const belegt = new Set(abschnitteList().map(a => String(a.name || '').trim().toLowerCase()));
+  for (let i = 0; i < 260; i++) {
+    const name = 'Achse ' + String.fromCharCode(65 + (i % 26))
+               + (i >= 26 ? String(Math.floor(i / 26) + 1) : '');
+    if (!belegt.has(name.toLowerCase())) return name;
+  }
+  return 'Achse ' + (abschnitteList().length + 1);
+}
+
+/** Benennt eine Achse um (Rückfrage per prompt – der einzige Ort dafür). */
+function achseUmbenennen(id) {
+  const a = abschnittById(id);
+  if (!a) return;
+  const next = prompt('Name der Achse:', a.name);
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (!trimmed) return;
+  renameAbschnitt(id, trimmed);
+  renderAll();
+  scheduleAutosave2d();
+}
+
+/** Legt in EINEM Schritt eine Achse an und ordnet ihr die aktuelle Auswahl zu. */
+function neueAchseAnlegen() {
+  const a   = addAbschnitt(naechsterAchsName());
+  const sel = currentSelectionBays().filter(isBayVisible);
+  if (sel.length) assignAbschnitt(sel, a.id);
+  renderAll();
+  scheduleAutosave2d();
+  showToast(sel.length
+      ? `Achse „${a.name}" angelegt · ${sel.length} Feld${sel.length === 1 ? '' : 'er'} zugeordnet`
+      : `Achse „${a.name}" angelegt`,
+    { label: 'Umbenennen', onClick: () => achseUmbenennen(a.id) });
   return a;
 }
 
@@ -560,7 +606,7 @@ let state = {
   hideUnassigned: false,   // Felder ohne Abschnitt ausgeblendet?
   aufmass:   null,  // Aufmaßregeln nach ATV DIN 18451 (siehe aufmassRules())
   ecken:     {},    // Eck-Entscheidungen des Nutzers (siehe eckWahl())
-  bordbrettKanten: [],   // markierte Gerüstkanten (siehe bordbrettKantenListe())
+  bordbrettLinien: [],   // Bordbrettlinien mit Lagen (siehe bordbrettLinien())
   sections:  []
   // section: { id, name, dir, bays:[{id,len,…,abschnittId}], x0, y0 }
 };
@@ -583,7 +629,7 @@ function normalizeState() {
     }));
   state.hideUnassigned = !!state.hideUnassigned;
   if (!state.ecken || typeof state.ecken !== 'object') state.ecken = {};
-  normalizeBordbrettKanten();
+  normalizeBordbrett();
   // ID-Zähler hinter die höchste vergebene „abN"-Nummer setzen, damit neue
   // Abschnitte niemals eine bereits benutzte ID bekommen.
   state.abschnitte.forEach(a => {
@@ -726,8 +772,9 @@ function loadFromLinkedProject() {
     state.hideUnassigned = !!z.hideUnassigned;
     state.aufmass    = z.aufmass || null;
     state.ecken      = z.ecken || {};
-    state.bordbrettKanten = Array.isArray(z.bordbrettKanten) ? z.bordbrettKanten : [];
-    // Nur für die einmalige Umstellung – normalizeState() räumt das Feld ab.
+    state.bordbrettLinien = Array.isArray(z.bordbrettLinien) ? z.bordbrettLinien : [];
+    // Nur für die einmalige Umstellung – normalizeState() räumt die Felder ab.
+    state.bordbrettKanten = Array.isArray(z.bordbrettKanten) ? z.bordbrettKanten : null;
     state.bordbretter = Array.isArray(z.bordbretter) ? z.bordbretter : null;
     _sId = z._sId || state.sections.length;
     _bId = z._bId || state.sections.flatMap(s => s.bays).length;
@@ -743,7 +790,7 @@ function aktuelleZeichnungsDaten() {
     depth: state.depth, sections: state.sections,
     abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
     aufmass: aufmassRules(), ecken: state.ecken || {},
-    bordbrettKanten: bordbrettKantenListe(),
+    bordbrettLinien: bordbrettLinien(),
     _sId, _bId
   };
 }
@@ -911,7 +958,7 @@ function serializeUndoState() {
     project: state.project, depth: state.depth,
     abschnitte: abschnitteList(), hideUnassigned: !!state.hideUnassigned,
     aufmass: aufmassRules(), ecken: state.ecken || {},
-    bordbrettKanten: bordbrettKantenListe(),
+    bordbrettLinien: bordbrettLinien(),
     sections: state.sections
   });
 }
@@ -954,7 +1001,8 @@ function applyUndoState(json) {
   state.hideUnassigned = !!data.hideUnassigned;
   state.aufmass    = data.aufmass || null;
   state.ecken      = data.ecken || {};
-  state.bordbrettKanten = Array.isArray(data.bordbrettKanten) ? data.bordbrettKanten : [];
+  state.bordbrettLinien = Array.isArray(data.bordbrettLinien) ? data.bordbrettLinien : [];
+  state.bordbrettKanten = Array.isArray(data.bordbrettKanten) ? data.bordbrettKanten : null;
   state.sections   = data.sections;
   normalizeState();
   selectedSi = null; selectedBi = null;
@@ -995,7 +1043,7 @@ const PASTE_OPTS_KEY = GK.einfuegenOptionen;
 const PASTE_FIELDS = [
   ['positionen', 'Zusatzbauteile', 'Alle Positionen inkl. Typ, Menge, Einheit und Lagen'],
   ['hoehen',     'Höhen',          'Höhe links und rechts'],
-  ['abschnitt',  'Abschnitt',      'Abschnitts-Zuordnung des kopierten Feldes'],
+  ['abschnitt',  'Achse',          'Achsen-Zuordnung des kopierten Feldes'],
   ['notiz',      'Notiz',          'Notiztext des kopierten Feldes'],
   ['laenge',     'Feldlänge',      'Überschreibt die Länge – verändert die Zeichnung']
 ];
@@ -2637,24 +2685,29 @@ function renderSvg() {
   gLive.appendChild(g);   // fertiges Fragment in einem Rutsch einhängen
 }
 
-/* ── Bordbrett: Kanten markieren ─────────────────────────────────────────────
-   Bedienung in einem Satz: Modus einschalten, Außenkante antippen – oder mit
-   dem Finger über mehrere Kanten streichen. Nochmal antippen nimmt sie wieder
-   weg. Es gibt keinen Dialog, keine Zuordnung und nichts zu bestätigen; was
-   markiert ist, sieht man, und die Menge steht in der Leiste.
+/* ── Bordbrett: Linien ziehen ────────────────────────────────────────────────
+   Bedienung in einem Satz: Modus einschalten, auf der Feldkante ziehen –
+   Anfang und Ende dürfen mitten im Feld liegen. Ein einzelner Tipp auf eine
+   Kante legt weiterhin die ganze Kante an; ein Tipp auf eine vorhandene Linie
+   öffnet ihren Editor (Länge, Lagen, Achse). Die Endpunkte lassen sich
+   danach an ihren Anfassern verschieben.
 
-   Der frühere Weg (eine Linie aus einzeln gesetzten Punkten zeichnen und sie
-   anschließend einer Achse zuordnen) ist entfallen. Er verlangte fünf
-   Arbeitsschritte für eine Angabe, die geometrisch längst feststeht, und die
-   Menge ergab sich am Ende nicht aus der Kante, sondern aus dem Verlauf der
-   gezeichneten Linie – zwei Dinge, die auseinanderlaufen konnten.          */
+   Gefangen wird an Feldkanten, Feldmitten, Eckpunkten UND an den
+   Gebäudeecken (eckSnapPunkte) – aber nur innerhalb einer kleinen Toleranz.
+   Wer daneben zieht, bekommt genau die Stelle, die er gezogen hat.        */
 
-let bordbrettModus = false;   // Markiermodus aktiv?
+let bordbrettModus = false;   // Zeichenmodus aktiv?
+let bbZugLaenge    = null;    // Länge der gerade gezogenen Linie (Anzeige)
 
 /** Fangradius für den Kantengriff in Welt-px – bildschirmbezogen, damit er
  *  bei jedem Zoom gleich gut zu treffen ist. */
 function bordbrettFangRadius() {
   return worldPerScreenPx() * 22;
+}
+
+/** Fangweite des magnetischen Einrastens in Welt-px (klein und übersteuerbar). */
+function bordbrettSnapRadius() {
+  return worldPerScreenPx() * 13;
 }
 
 function starteBordbrettModus() {
@@ -2671,57 +2724,535 @@ function starteBordbrettModus() {
 
 function beendeBordbrettModus() {
   bordbrettModus = false;
+  bbZugLaenge = null;
   renderAll();
   updateBordbrettBar();
 }
 
 /**
- * Kante unter einem Weltpunkt – die nächstgelegene innerhalb des Fangradius.
- * @returns {{bayId:*, k:number, dist:number}|null}
+ * Punkt auf der nächstgelegenen Feldkante.
+ * @returns {{b:*, k:number, t:number, x:number, y:number, dist:number}|null}
  */
-function bordbrettKanteUnter(pt, els, radius) {
+function bordbrettPunktUnter(pt, byId, radius, mitSnap, eckPunkte) {
   const r = radius != null ? radius : bordbrettFangRadius();
   let best = null;
-  (els || computeLayout()).forEach(el => {
-    if (el.type !== 'bay') return;
-    const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
-    if (!bay) return;
+  byId.forEach((el, id) => {
     for (let k = 0; k < 4; k++) {
       const [p, q] = bayKante(el, k);
-      const d = lotAufStrecke(pt, p, q).dist;
-      if (d <= r && (!best || d < best.dist)) best = { bayId: bay.id, k, dist: d };
+      const l = lotAufStrecke(pt, p, q);
+      if (l.dist > r) continue;
+      // Genau auf einem Eckpunkt liegen mehrere Kanten gleich weit entfernt.
+      // Dann gewinnt die LÄNGERE – das ist die Bahn, an der entlanggezogen
+      // wird, nicht die kurze Stirnkante am Feldende.
+      const laenge = Math.hypot(q.x - p.x, q.y - p.y);
+      const besser = !best
+        || l.dist < best.dist - 0.5
+        || (Math.abs(l.dist - best.dist) <= 0.5 && laenge > best.kantenLaenge);
+      if (besser) best = { b: id, k, t: l.t, x: l.x, y: l.y, dist: l.dist, p, q, kantenLaenge: laenge };
     }
   });
+  if (!best) return null;
+  if (mitSnap !== false) schnappeBordbrettPunkt(best, eckPunkte);
   return best;
 }
 
-/** Pointer-Down im Bordbrett-Modus: Kante treffen → Streichen beginnen.
- *  Ohne Treffer bleibt die Geste beim Verschieben/Zoomen der Ansicht. */
-function bordbrettPointerDown(e) {
-  if (!bordbrettModus) return;
-  const pt  = screenToSvg(e.clientX, e.clientY);
-  const tre = bordbrettKanteUnter(pt);
-  if (!tre) return;
-  e.stopPropagation();
-  e.preventDefault();
-  // Erste Kante entscheidet die Richtung: war sie markiert, nimmt der ganze
-  // Strich weg – sonst setzt er. Sonst würde ein Strich über eine gemischte
-  // Reihe jede Kante umschalten und niemand wüsste hinterher, was gilt.
-  const op = hatBordbrettKante(tre.bayId, tre.k) ? 'ab' : 'an';
-  drag = { type: 'bordbrett', op, geaendert: 0 };
-  try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (_) {}
-  bordbrettStreichen(pt);
+/**
+ * Magnetisches Einrasten des Endpunkts – als HILFE, nicht als Zwang.
+ * Fangpunkte sind die Feldkanten-Enden, die Feldmitte und die Gebäudeecken.
+ * Alles außerhalb der (kleinen) Toleranz bleibt exakt dort, wo gezogen wurde.
+ */
+function schnappeBordbrettPunkt(treffer, eckPunkte) {
+  if (!snapEnabled) return treffer;
+  const r = bordbrettSnapRadius();
+  const { p, q } = treffer;
+  const laenge = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+  const kandidaten = [0, 0.5, 1];
+
+  // Gebäudeecken: nur, wenn sie auch wirklich auf DIESER Kante liegen.
+  (eckPunkte || eckSnapPunkte()).forEach(e => {
+    const l = lotAufStrecke(e, p, q);
+    if (l.dist <= r) kandidaten.push(l.t);
+  });
+
+  let bestT = null, bestD = r;
+  kandidaten.forEach(t => {
+    const d = Math.abs(t - treffer.t) * laenge;
+    if (d <= bestD) { bestD = d; bestT = t; }
+  });
+  if (bestT != null) {
+    treffer.t = bestT;
+    treffer.x = p.x + (q.x - p.x) * bestT;
+    treffer.y = p.y + (q.y - p.y) * bestT;
+  }
+  return treffer;
 }
 
-/** Wendet die laufende Streich-Richtung auf die Kante unter `pt` an. */
-function bordbrettStreichen(pt) {
-  const tre = bordbrettKanteUnter(pt);
-  if (!tre) return;
-  if (setzeBordbrettKante(tre.bayId, tre.k, drag.op === 'an')) {
-    drag.geaendert++;
-    requestRender();
-    updateBordbrettBar();
+/* ── Kantennetz: Weg von einem Kantenpunkt zum anderen ───────────────────── */
+
+/** Alle Feldkanten als Graph (Knoten = Eckpunkte, Kanten = Feldkanten). */
+function kantenGraph(byId) {
+  const kanten = [];
+  byId.forEach((el, id) => {
+    for (let k = 0; k < 4; k++) {
+      const [p, q] = bayKante(el, k);
+      kanten.push({ b: id, k, p, q, laenge: kantenLaenge(p, q),
+                    n1: punktSchluessel(p), n2: punktSchluessel(q) });
+    }
+  });
+  const knoten = new Map();
+  kanten.forEach((e, i) => {
+    [e.n1, e.n2].forEach(n => {
+      if (!knoten.has(n)) knoten.set(n, []);
+      knoten.get(n).push(i);
+    });
+  });
+  return { kanten, knoten };
+}
+
+/**
+ * Kürzester Weg entlang der Feldkanten von `anker` nach `ziel`.
+ * Beide sind Punkte auf einer Kante ({b, k, t}).
+ * @returns {Array<{b,k,t0,t1}>} die Kantenstücke der Linie, in Laufrichtung
+ */
+function kantenPfad(graph, anker, ziel) {
+  const gleich = String(anker.b) === String(ziel.b) && +anker.k === +ziel.k;
+  if (gleich) return [{ b: anker.b, k: +anker.k, t0: anker.t, t1: ziel.t }];
+
+  const idxVon = (b, k) => graph.kanten.findIndex(e =>
+    String(e.b) === String(b) && e.k === +k);
+  const ia = idxVon(anker.b, anker.k), iz = idxVon(ziel.b, ziel.k);
+  if (ia < 0 || iz < 0) return [{ b: anker.b, k: +anker.k, t0: anker.t, t1: anker.t }];
+
+  const ea = graph.kanten[ia], ez = graph.kanten[iz];
+  // Startkosten: Strecke vom Ankerpunkt bis zu den beiden Kantenenden.
+  const start = new Map([
+    [ea.n1, ea.laenge * anker.t],
+    [ea.n2, ea.laenge * (1 - anker.t)]
+  ]);
+  const zielKosten = new Map([
+    [ez.n1, ez.laenge * ziel.t],
+    [ez.n2, ez.laenge * (1 - ziel.t)]
+  ]);
+
+  // Dijkstra über die Knoten – die Netze sind klein, ein einfacher Heap genügt.
+  const dist = new Map(start);
+  const vorher = new Map();              // Knoten → { von, kante }
+  const offen = [...start.keys()];
+  const besucht = new Set();
+  while (offen.length) {
+    offen.sort((a, b) => (dist.get(a) || 0) - (dist.get(b) || 0));
+    const n = offen.shift();
+    if (besucht.has(n)) continue;
+    besucht.add(n);
+    (graph.knoten.get(n) || []).forEach(i => {
+      // Anker- und Zielkante werden nicht DURCHLAUFEN: von ihnen zählt nur das
+      // Teilstück bis zum jeweiligen Punkt. Ohne diese Sperre könnte der Weg
+      // über das ferne Ende der Zielkante führen – das Endstück fiele dann auf
+      // Länge null zusammen und die Kante verschwände aus der Linie.
+      if (i === ia || i === iz) return;
+      const e = graph.kanten[i];
+      const m = e.n1 === n ? e.n2 : e.n1;
+      const d = (dist.get(n) || 0) + e.laenge;
+      if (dist.has(m) && dist.get(m) <= d + 1e-6) return;
+      dist.set(m, d);
+      vorher.set(m, { von: n, kante: i });
+      offen.push(m);
+    });
   }
+
+  // Bestes Ende der Zielkante wählen.
+  let bestKnoten = null, bestWert = Infinity;
+  zielKosten.forEach((rest, n) => {
+    if (!dist.has(n)) return;
+    const w = dist.get(n) + rest;
+    if (w < bestWert) { bestWert = w; bestKnoten = n; }
+  });
+  if (bestKnoten == null) return [{ b: anker.b, k: +anker.k, t0: anker.t, t1: anker.t }];
+
+  // Weg zurückverfolgen (Knotenkette vom Start bis zum Eintritt in die Zielkante).
+  const kette = [];
+  let n = bestKnoten;
+  while (vorher.has(n)) {
+    const v = vorher.get(n);
+    kette.unshift({ kante: v.kante, von: v.von, nach: n });
+    n = v.von;
+  }
+  const startKnoten = n;
+
+  const stuecke = [];
+  stuecke.push({ b: ea.b, k: ea.k, t0: anker.t, t1: startKnoten === ea.n1 ? 0 : 1 });
+  kette.forEach(s => {
+    const e = graph.kanten[s.kante];
+    stuecke.push({ b: e.b, k: e.k, t0: s.von === e.n1 ? 0 : 1, t1: s.von === e.n1 ? 1 : 0 });
+  });
+  stuecke.push({ b: ez.b, k: ez.k, t0: bestKnoten === ez.n1 ? 0 : 1, t1: ziel.t });
+
+  // Nullstücke fallen weg (z. B. wenn der Anker genau auf einem Eckpunkt lag).
+  return stuecke.filter(st => Math.abs(st.t1 - st.t0) > 0.0005);
+}
+
+/* ── Zeigerbedienung im Bordbrett-Modus ─────────────────────────────────── */
+
+/** Linie unter einem Weltpunkt (für Antippen zum Bearbeiten). */
+function bordbrettLinieUnter(pt, byId, radius) {
+  const r = radius != null ? radius : worldPerScreenPx() * 16;
+  let best = null;
+  sichtbareLinien().forEach(l => {
+    linienGeo(l, byId).forEach(g => {
+      const d = lotAufStrecke(pt, g.a, g.b).dist;
+      if (d <= r && (!best || d < best.d)) best = { linie: l, d };
+    });
+  });
+  return best ? best.linie : null;
+}
+
+/**
+ * Pointer-Down im Bordbrett-Modus.
+ *   • auf einem Anfasser  → Endpunkt verschieben (eigener Handler am Griff)
+ *   • auf einer Linie     → Editor öffnen
+ *   • auf einer Feldkante → neue Linie ziehen
+ * Ohne Treffer bleibt die Geste beim Verschieben/Zoomen der Ansicht.
+ */
+function bordbrettPointerDown(e) {
+  if (!bordbrettModus) return;
+  // Die Anfasser an den Linienenden haben ihren eigenen Handler. Dieser hier
+  // läuft in der Capture-Phase und würde ihn sonst abfangen – dann ließe sich
+  // ein Endpunkt nicht mehr verschieben.
+  if (e.target && e.target.dataset && e.target.dataset.linie != null) return;
+  const byId = bayElsById();
+  const pt   = screenToSvg(e.clientX, e.clientY);
+
+  const linie = bordbrettLinieUnter(pt, byId);
+  if (linie) {
+    e.stopPropagation(); e.preventDefault();
+    drag = { type: 'bordbrettTipp', linie, startX: e.clientX, startY: e.clientY };
+    return;
+  }
+
+  const eckPunkte = eckSnapPunkte();
+  const anker = bordbrettPunktUnter(pt, byId, null, true, eckPunkte);
+  if (!anker) return;
+  e.stopPropagation();
+  e.preventDefault();
+  try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (_) {}
+
+  const neu = mkBordbrettLinie([{ b: anker.b, k: anker.k, t0: anker.t, t1: anker.t }]);
+  bordbrettLinien().push(neu);
+  drag = { type: 'bordbrettNeu', linie: neu, anker, graph: kantenGraph(byId), byId,
+           eckPunkte, gezogen: false };
+  bbZugLaenge = 0;
+  requestRender();
+  updateBordbrettBar();
+}
+
+/** Zieht die laufende Linie bis zum Punkt unter dem Finger. */
+function bordbrettZiehen(pt) {
+  if (!drag || (drag.type !== 'bordbrettNeu' && drag.type !== 'bordbrettGriff')) return;
+  const ziel = bordbrettPunktUnter(pt, drag.byId, null, true, drag.eckPunkte);
+  if (!ziel) return;
+  const anker = drag.anker;
+  const stuecke = kantenPfad(drag.graph, anker, ziel);
+  if (!stuecke.length) return;
+  drag.linie.stuecke = stuecke;
+  drag.gezogen = true;
+  bbZugLaenge = linienLaenge(drag.linie, drag.byId);
+  requestRender();
+  updateBordbrettBar();
+}
+
+/** Schließt das Ziehen ab. Ein reiner Tipp legt die GANZE Kante an. */
+function beendeBordbrettZug() {
+  if (!drag) return;
+  const l = drag.linie;
+  if (drag.type === 'bordbrettNeu') {
+    if (!drag.gezogen || linienLaenge(l, drag.byId) < 0.02) {
+      // Antippen statt Ziehen: die getroffene Kante ganz belegen – die
+      // gewohnte, schnelle Bedienung bleibt damit erhalten.
+      state.bordbrettLinien = bordbrettLinien().filter(x => x !== l);
+      const vorhanden = hatBordbrettKante(drag.anker.b, drag.anker.k);
+      setzeBordbrettKante(drag.anker.b, drag.anker.k, !vorhanden);
+    }
+  } else if (drag.type === 'bordbrettGriff' && linienLaenge(l, drag.byId) < 0.02) {
+    // Auf Null gezogen = gelöscht.
+    state.bordbrettLinien = bordbrettLinien().filter(x => x !== l);
+  }
+  normalizeBordbrett();
+  bbZugLaenge = null;
+  drag = null;
+  renderAll();
+  scheduleAutosave2d();
+  updateBordbrettBar();
+}
+
+/** Pointer-Down auf einem Endpunkt-Anfasser: diesen Endpunkt verschieben. */
+function onBordbrettGriffDown(e) {
+  if (!bordbrettModus) return;
+  e.preventDefault(); e.stopPropagation();
+  const id    = e.currentTarget.dataset.linie;
+  const ende  = e.currentTarget.dataset.ende === '1';
+  const linie = bordbrettLinien().find(l => l.id === id);
+  if (!linie || !linie.stuecke.length) return;
+  const byId = bayElsById();
+  // Der gegenüberliegende Endpunkt bleibt stehen und wird zum Anker.
+  const st = ende ? linie.stuecke[0] : linie.stuecke[linie.stuecke.length - 1];
+  const anker = { b: st.b, k: st.k, t: ende ? st.t0 : st.t1 };
+  try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (_) {}
+  drag = { type: 'bordbrettGriff', linie, anker, graph: kantenGraph(byId), byId,
+           eckPunkte: eckSnapPunkte(), gezogen: false };
+  bbZugLaenge = linienLaenge(linie, byId);
+}
+
+/**
+ * Setzt die Linie auf eine exakt eingegebene Länge (Feineingabe im Editor).
+ * Der Anfang bleibt stehen, das Ende wandert entlang der Kantenkette.
+ */
+function setzeLinienLaenge(linie, meter) {
+  const byId = bayElsById();
+  const geo  = linienGeo(linie, byId);
+  if (!geo.length || !(meter > 0)) return false;
+
+  let rest = meter;
+  const neu = [];
+  for (const g of geo) {
+    if (rest <= 0) break;
+    if (g.laenge <= rest + 1e-9) { neu.push({ ...g.st }); rest -= g.laenge; continue; }
+    const anteil = rest / g.laenge;
+    neu.push({ b: g.st.b, k: g.st.k, t0: g.st.t0, t1: g.st.t0 + (g.st.t1 - g.st.t0) * anteil });
+    rest = 0;
+  }
+  if (rest > 1e-6) {
+    // Verlängern: am letzten Stück weiter, notfalls über die nächste Kante.
+    const graph = kantenGraph(byId);
+    const letzt = geo[geo.length - 1];
+    const voll  = kantenLaenge(letzt.p, letzt.q);
+    const richtung = letzt.st.t1 >= letzt.st.t0 ? 1 : -1;
+    const platz = (richtung > 0 ? (1 - letzt.st.t1) : letzt.st.t1) * voll;
+    const nimm = Math.min(platz, rest);
+    if (nimm > 0) {
+      neu[neu.length - 1] = { ...letzt.st, t1: letzt.st.t1 + richtung * (nimm / voll) };
+      rest -= nimm;
+    }
+    if (rest > 1e-6) {
+      // Über die anschließende Kante weiterlaufen: der Zielpunkt wird gesucht,
+      // indem die Kette Kante für Kante verlängert wird.
+      const endKnoten = punktSchluessel(richtung > 0 ? letzt.q : letzt.p);
+      const kandidaten = (graph.knoten.get(endKnoten) || [])
+        .map(i => graph.kanten[i])
+        .filter(e => !(String(e.b) === String(letzt.st.b) && e.k === letzt.st.k));
+      // Die Kante nehmen, die am geradesten weiterläuft – so folgt die Linie
+      // der Gerüstbahn und springt nicht auf die Wandseite.
+      const richtungsVek = { x: (letzt.b.x - letzt.a.x), y: (letzt.b.y - letzt.a.y) };
+      const norm = Math.hypot(richtungsVek.x, richtungsVek.y) || 1;
+      let beste = null, bestesMass = -2;
+      kandidaten.forEach(e => {
+        const vorwaerts = e.n1 === endKnoten;
+        const v = vorwaerts ? { x: e.q.x - e.p.x, y: e.q.y - e.p.y }
+                            : { x: e.p.x - e.q.x, y: e.p.y - e.q.y };
+        const n2 = Math.hypot(v.x, v.y) || 1;
+        const cos = (richtungsVek.x * v.x + richtungsVek.y * v.y) / (norm * n2);
+        if (cos > bestesMass) { bestesMass = cos; beste = { e, vorwaerts }; }
+      });
+      if (beste) {
+        const anteil = Math.min(1, rest / beste.e.laenge);
+        neu.push({ b: beste.e.b, k: beste.e.k,
+                   t0: beste.vorwaerts ? 0 : 1,
+                   t1: beste.vorwaerts ? anteil : 1 - anteil });
+      }
+    }
+  }
+  linie.stuecke = neu.filter(st => Math.abs(st.t1 - st.t0) > 0.0005);
+  return true;
+}
+
+/* ── Editor einer Linie ──────────────────────────────────────────────────── */
+
+/**
+ * Bordbrett bearbeiten: Länge, Lagen und Achszuordnung.
+ * Erreichbar durch Antippen der Linie – vorher war ein einmal gesetztes
+ * Bordbrett gar nicht mehr änderbar.
+ */
+function openBordbrettSheet(linie) {
+  closeSheet();
+  const byId = bayElsById();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay'; overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet'; sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = 'Bordbrett';
+  sheet.appendChild(hdr);
+
+  const info = document.createElement('p');
+  info.className = 'pdf-sheet-note';
+  const felder = [...new Set(linie.stuecke.map(st => {
+    const bay = allBaysFlat().find(b => String(b.id) === String(st.b));
+    return bay ? bayName(bay) : null;
+  }).filter(Boolean))];
+  info.textContent = felder.length
+    ? `Verläuft über ${felder.join(', ')}.`
+    : 'Bordbrettlinie auf der Feldkante.';
+  sheet.appendChild(info);
+
+  /* ── Länge (Feineingabe) ─────────────────────────────────────────────── */
+  const lLbl = document.createElement('div');
+  lLbl.className = 'sheet-section-label';
+  lLbl.textContent = 'Aufmaßlänge (gezeichnete Linie)';
+  sheet.appendChild(lLbl);
+
+  const lRow = document.createElement('div');
+  lRow.className = 'sheet-adj-row';
+  const lInp = document.createElement('input');
+  lInp.type = 'number'; lInp.className = 'sheet-inp';
+  lInp.min = '0.05'; lInp.step = '0.01'; lInp.inputMode = 'decimal';
+  lInp.value = linienLaenge(linie, byId).toFixed(2);
+  lInp.addEventListener('change', () => {
+    const v = parseFloat(lInp.value);
+    if (!isNaN(v) && v > 0) {
+      setzeLinienLaenge(linie, v);
+      normalizeBordbrett();
+      lInp.value = linienLaenge(linie, bayElsById()).toFixed(2);
+      renderAll(); scheduleAutosave2d(); updateBordbrettBar();
+      baueLagen();
+    }
+  });
+  const lUnit = document.createElement('span');
+  lUnit.className = 'sheet-unit'; lUnit.textContent = 'm';
+  lRow.appendChild(lInp); lRow.appendChild(lUnit);
+  sheet.appendChild(lRow);
+
+  /* ── Lagen ───────────────────────────────────────────────────────────── */
+  const lagLbl = document.createElement('div');
+  lagLbl.className = 'sheet-section-label';
+  lagLbl.textContent = 'Lagen';
+  sheet.appendChild(lagLbl);
+
+  const lagBox = document.createElement('div');
+  lagBox.className = 'bb-lagen';
+  sheet.appendChild(lagBox);
+
+  const summe = document.createElement('div');
+  summe.className = 'bb-summe';
+  sheet.appendChild(summe);
+
+  function baueLagen() {
+    lagBox.innerHTML = '';
+    if (!Array.isArray(linie.lagen) || !linie.lagen.length) {
+      linie.lagen = [{ id: ++_bbId, laenge: null }];
+    }
+    const b2 = bayElsById();
+    linie.lagen.forEach((lg, i) => {
+      const zeile = document.createElement('div');
+      zeile.className = 'bb-lage';
+
+      const nr = document.createElement('span');
+      nr.className = 'bb-lage-nr';
+      nr.textContent = 'Lage ' + (i + 1);
+      zeile.appendChild(nr);
+
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.className = 'bb-lage-inp';
+      inp.min = '0'; inp.step = '0.01'; inp.inputMode = 'decimal';
+      inp.placeholder = fmtQty(linienLaenge(linie, b2));
+      inp.title = 'Leer lassen = so lang wie die gezeichnete Linie';
+      inp.value = lg.laenge == null ? '' : lg.laenge.toFixed(2);
+      inp.addEventListener('input', () => {
+        const v = parseFloat(inp.value);
+        lg.laenge = (inp.value === '' || isNaN(v) || v <= 0) ? null : +v.toFixed(2);
+        aktualisiereSumme();
+        updateBordbrettBar();
+        scheduleAutosave2d();
+      });
+      zeile.appendChild(inp);
+
+      const einheit = document.createElement('span');
+      einheit.className = 'bb-lage-unit'; einheit.textContent = 'm';
+      zeile.appendChild(einheit);
+
+      const weg = document.createElement('button');
+      weg.type = 'button'; weg.className = 'bb-lage-weg';
+      weg.textContent = '×';
+      weg.title = 'Diese Lage löschen';
+      weg.disabled = linie.lagen.length <= 1;
+      weg.addEventListener('click', () => {
+        linie.lagen.splice(i, 1);
+        baueLagen(); updateBordbrettBar(); scheduleAutosave2d();
+      });
+      zeile.appendChild(weg);
+
+      lagBox.appendChild(zeile);
+    });
+
+    const add = document.createElement('button');
+    add.type = 'button'; add.className = 'bb-lage-add';
+    add.textContent = '+ Lage';
+    add.title = 'Weitere Bordbrettlage auf derselben Linie';
+    add.addEventListener('click', () => {
+      linie.lagen.push({ id: ++_bbId, laenge: null });
+      baueLagen(); updateBordbrettBar(); scheduleAutosave2d();
+    });
+    lagBox.appendChild(add);
+    aktualisiereSumme();
+  }
+
+  function aktualisiereSumme() {
+    const b2 = bayElsById();
+    summe.textContent = `${linie.lagen.length} Lage${linie.lagen.length === 1 ? '' : 'n'}`
+      + `  ·  zusammen ${fmtQty(linienGesamt(linie, b2))} m Bordbrett`;
+  }
+  baueLagen();
+
+  /* ── Achszuordnung ───────────────────────────────────────────────────── */
+  const aLbl = document.createElement('div');
+  aLbl.className = 'sheet-section-label';
+  aLbl.textContent = 'Achse';
+  sheet.appendChild(aLbl);
+
+  const aRow = document.createElement('div');
+  aRow.className = 'pos-toggle-row sheet-absch-row';
+  const mkChip = (id, name, color) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'pos-chip absch-chip' + ((linie.achsId || null) === id ? ' active' : '');
+    chip.textContent = name;
+    chip.style.setProperty('--pos-color', color);
+    chip.addEventListener('click', () => {
+      linie.achsId = id;
+      aRow.querySelectorAll('.absch-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      scheduleAutosave2d(); renderAll();
+    });
+    aRow.appendChild(chip);
+  };
+  mkChip(null, 'Automatisch (nach Lage)', '#8a97a5');
+  abschnitteList().forEach(a => mkChip(a.id, a.name, a.color));
+  sheet.appendChild(aRow);
+
+  /* ── Aktionen ────────────────────────────────────────────────────────── */
+  const act = document.createElement('div');
+  act.className = 'sheet-actions';
+  const del = document.createElement('button');
+  del.type = 'button'; del.className = 'sheet-del';
+  del.textContent = 'Bordbrett löschen';
+  del.addEventListener('click', () => {
+    state.bordbrettLinien = bordbrettLinien().filter(x => x !== linie);
+    closeSheet(); renderAll(); scheduleAutosave2d(); updateBordbrettBar();
+    showToast('Bordbrett entfernt');
+  });
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'sheet-ok'; ok.textContent = 'Fertig';
+  ok.addEventListener('click', () => { closeSheet(); renderAll(); });
+  act.appendChild(del); act.appendChild(ok);
+  sheet.appendChild(act);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
 }
 
 /** Bedienleiste des Modus: zeigt die aktuelle Summe und blendet sich mit dem
@@ -2732,13 +3263,14 @@ function updateBordbrettBar() {
 
   const info = document.getElementById('bordbrettBarInfo');
   if (info) {
-    const n = bordbrettKantenListe().length;
-    info.textContent = n
-      ? `Bordbrett ${fmtQty(bordbrettGesamt())} m · ${n} Kante${n === 1 ? '' : 'n'}`
-      : 'Bordbrett 0,00 m';
+    const n = sichtbareLinien().length;
+    info.textContent = bbZugLaenge != null
+      ? `Bordbrett ${fmtQty(bbZugLaenge)} m`
+      : (n ? `Bordbrett ${fmtQty(bordbrettGesamt())} m · ${n} Linie${n === 1 ? '' : 'n'}`
+           : 'Bordbrett 0,00 m');
   }
   const leeren = document.getElementById('bordbrettLeerenBtn');
-  if (leeren) leeren.disabled = bordbrettKantenListe().length === 0;
+  if (leeren) leeren.disabled = bordbrettLinien().length === 0;
 
   const btn = document.getElementById('bordbrettBtn');
   if (btn) {
@@ -2760,60 +3292,118 @@ function updateBordbrettReadout() {
 /**
  * Zeichnet die Bordbretter.
  *
- * Außerhalb des Modus bleibt es bei einem kräftigen, aber schmalen Strich auf
- * der Kante: man sieht sofort, wo Bordbrett ist, ohne dass die Zeichnung
- * zuläuft. Im Modus kommen die noch freien Kanten als feine Hilfslinien dazu,
- * damit erkennbar ist, was überhaupt markierbar ist.
+ * Die Linie liegt deutlich sichtbar auf der Feldkante und ist farblich klar
+ * vom Feldrahmen abgesetzt. Kanten OHNE Bordbrett bleiben neutral – nur im
+ * Zeichenmodus erscheinen sie als feine Hilfslinien, damit erkennbar ist,
+ * worauf man ziehen kann. Zusätzlich werden die Gebäudeecken als Fangpunkte
+ * markiert.
  */
 function renderBordbretter(g, hs, els) {
-  const markiert = bordbrettKantenSet();
-  if (!markiert.size && !bordbrettModus) return;
+  const byId = bayElsById(els);
+  const linien = sichtbareLinien();
+  if (!linien.length && !bordbrettModus) return;
 
   const linie = (p, q, attrs) => svgEl('line', {
     x1: p.x, y1: p.y, x2: q.x, y2: q.y, 'stroke-linecap': 'round', ...attrs
   });
 
-  els.forEach(el => {
-    if (el.type !== 'bay') return;
-    const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
-    if (!bay) return;
-    for (let k = 0; k < 4; k++) {
-      const [p, q] = bayKante(el, k);
-      const an = markiert.has(bordbrettSchluessel(bay.id, k));
-
-      if (an) {
-        // Weiß unterlegt: auf einer dunklen Feldkante bliebe der Strich sonst
-        // unsichtbar, auf einer hellen Fläche wirkte er verwaschen.
-        g.appendChild(linie(p, q, {
-          stroke: '#fff', 'stroke-width': hs(bordbrettModus ? 9 : 7),
-          'stroke-opacity': 0.9, 'pointer-events': 'none'
-        }));
-        g.appendChild(linie(p, q, {
-          stroke: '#0f8f8e', 'stroke-width': hs(bordbrettModus ? 5.5 : 4),
-          'pointer-events': 'none'
-        }));
-      } else if (bordbrettModus) {
+  // Hilfslinien auf allen freien Kanten – nur im Modus.
+  if (bordbrettModus) {
+    byId.forEach(el => {
+      for (let k = 0; k < 4; k++) {
+        const [p, q] = bayKante(el, k);
         g.appendChild(linie(p, q, {
           stroke: '#0f8f8e', 'stroke-width': hs(3),
-          'stroke-dasharray': `${hs(7)},${hs(5)}`, 'stroke-opacity': 0.6,
+          'stroke-dasharray': `${hs(7)},${hs(5)}`, 'stroke-opacity': 0.45,
           'pointer-events': 'none'
         }));
       }
+    });
+  }
 
-      // Trefferfläche nur im Modus: außerhalb darf ein Tipp auf die Feldkante
-      // weiterhin das Feld öffnen.
-      if (bordbrettModus) {
-        const hit = linie(p, q, {
-          stroke: 'rgba(0,0,0,0.001)', 'stroke-width': hs(26), style: 'cursor:pointer'
+  linien.forEach(l => {
+    const geo = linienGeo(l, byId);
+    if (!geo.length) return;
+    geo.forEach(st => {
+      // Weiß unterlegt: auf einer dunklen Feldkante bliebe der Strich sonst
+      // unsichtbar, auf einer hellen Fläche wirkte er verwaschen.
+      g.appendChild(linie(st.a, st.b, {
+        stroke: '#fff', 'stroke-width': hs(bordbrettModus ? 10 : 8),
+        'stroke-opacity': 0.9, 'pointer-events': 'none'
+      }));
+      g.appendChild(linie(st.a, st.b, {
+        stroke: '#e8590c', 'stroke-width': hs(bordbrettModus ? 6 : 4.5),
+        'pointer-events': 'none'
+      }));
+
+      // Trefferfläche: ein Tipp auf die Linie öffnet ihren Editor.
+      const hit = linie(st.a, st.b, {
+        stroke: 'rgba(0,0,0,0.001)', 'stroke-width': hs(bordbrettModus ? 26 : 14),
+        style: 'cursor:pointer'
+      });
+      const tt = svgEl('title', {});
+      tt.textContent = `Bordbrett ${fmtQty(linienLaenge(l, byId))} m · `
+                     + `${(l.lagen || []).length} Lage${(l.lagen || []).length === 1 ? '' : 'n'}`
+                     + ' – antippen zum Bearbeiten';
+      hit.appendChild(tt);
+      hit.addEventListener('click', ev => { ev.stopPropagation(); openBordbrettSheet(l); });
+      g.appendChild(hit);
+    });
+
+    // Anfasser an beiden Enden – damit die Linie nachträglich verschiebbar ist.
+    if (bordbrettModus) {
+      const enden = [{ pt: geo[0].a, ende: 0 }, { pt: geo[geo.length - 1].b, ende: 1 }];
+      enden.forEach(({ pt, ende }) => {
+        const griff = svgEl('circle', {
+          cx: pt.x, cy: pt.y, r: hs(11),
+          fill: '#fff', stroke: '#e8590c', 'stroke-width': hs(3.5),
+          style: 'cursor:grab'
         });
-        const tt = svgEl('title', {});
-        tt.textContent = `${an ? 'Bordbrett entfernen' : 'Bordbrett setzen'} · `
-                       + fmtQty(kantenLaenge(p, q)) + ' m';
-        hit.appendChild(tt);
-        g.appendChild(hit);
-      }
+        griff.dataset.linie = l.id;
+        griff.dataset.ende  = String(ende);
+        griff.addEventListener('pointerdown', onBordbrettGriffDown);
+        g.appendChild(griff);
+      });
     }
   });
+
+  // Gebäudeecken als Fangpunkte sichtbar machen.
+  eckSnapPunkte(els).filter(e => e.aussen).forEach(e => {
+    g.appendChild(svgEl('circle', {
+      cx: e.x, cy: e.y, r: hs(bordbrettModus ? 7 : 4.5),
+      fill: bordbrettModus ? '#ffd43b' : 'none',
+      stroke: '#e8590c', 'stroke-width': hs(2.2),
+      'pointer-events': 'none'
+    }));
+    if (bordbrettModus) {
+      const t = svgEl('text', {
+        x: e.x, y: e.y - hs(13), 'text-anchor': 'middle',
+        'font-size': hs(15), 'font-weight': '700',
+        fill: '#e8590c', 'pointer-events': 'none'
+      });
+      t.textContent = 'Ecke';
+      g.appendChild(t);
+    }
+  });
+
+  // Länge der gerade gezogenen Linie live am Zeiger.
+  if (bbZugLaenge != null && drag && drag.linie) {
+    const geo = linienGeo(drag.linie, byId);
+    if (geo.length) {
+      const p = geo[geo.length - 1].b;
+      const box = svgEl('rect', {
+        x: p.x + hs(12), y: p.y - hs(26), width: hs(96), height: hs(26),
+        rx: hs(7), fill: '#e8590c', 'pointer-events': 'none'
+      });
+      const t = svgEl('text', {
+        x: p.x + hs(60), y: p.y - hs(8), 'text-anchor': 'middle',
+        'font-size': hs(16), 'font-weight': '800', fill: '#fff',
+        'pointer-events': 'none'
+      });
+      t.textContent = fmtQty(bbZugLaenge) + ' m';
+      g.appendChild(box); g.appendChild(t);
+    }
+  }
 }
 
 /** Grün gestrichelte Vorschau am Andockziel + hervorgehobener Andockpunkt. */
@@ -2993,10 +3583,11 @@ function onSvgPointerMove(e) {
   if (!drag) return;
   const pt = screenToSvg(e.clientX, e.clientY);
 
-  if (drag.type === 'bordbrett') {
-    bordbrettStreichen(pt);
+  if (drag.type === 'bordbrettNeu' || drag.type === 'bordbrettGriff') {
+    bordbrettZiehen(pt);
     return;
   }
+  if (drag.type === 'bordbrettTipp') return;   // Tipp auf eine Linie – kein Ziehen
 
   if (drag.type === 'rotate') {
     // Erst ab einer echten Zieh-Bewegung frei drehen. Ohne diese Schwelle
@@ -3066,9 +3657,14 @@ function onSvgPointerUp(e) {
   // verwerfen. Zeitstempel statt Flag, damit nichts hängen bleiben kann,
   // falls der Klick einmal ausbleibt.
   handleReleasedAt = Date.now();
-  if (d.type === 'bordbrett') {
-    if (d.geaendert) { renderAll(); scheduleAutosave2d(); }
-    updateBordbrettBar();
+  if (d.type === 'bordbrettNeu' || d.type === 'bordbrettGriff') {
+    drag = d;                 // beendeBordbrettZug() räumt selbst auf
+    beendeBordbrettZug();
+    return;
+  }
+  if (d.type === 'bordbrettTipp') {
+    // Der Klick auf die Trefferfläche öffnet den Editor (siehe
+    // renderBordbretter) – hier ist nichts weiter zu tun.
     return;
   }
   if (d.type === 'rotate') {
@@ -3170,6 +3766,48 @@ function beginCanvasGesture() {
   }
 }
 
+/**
+ * Startet die Langdruck-Erkennung für den zuletzt aufgesetzten Finger.
+ *
+ * Ein Finger, der lange genug still liegt, meint keine Bewegung der Ansicht:
+ *   • über einem Feld     → Mehrfachauswahl mit diesem Feld beginnen
+ *   • über leerer Fläche  → Auswahlrahmen aufziehen
+ * Sobald sich der Finger nennenswert bewegt (onCanvasPointerMove) oder er
+ * vorher abgehoben wird, verfällt die Erkennung – Pan und Pinch bleiben
+ * dadurch unverändert.
+ */
+function starteLangdruck(clientX, clientY) {
+  clearTimeout(langdruckTimer);
+  if (bordbrettModus || drag) return;
+  const start = { x: clientX, y: clientY };
+  langdruckTimer = setTimeout(() => {
+    if (drag || rahmen || canvasPointers.size !== 1) return;
+    const p = [...canvasPointers.values()][0];
+    if (Math.hypot(p.x - start.x, p.y - start.y) > GESTE_TOLERANZ_PX) return;
+    const welt = screenToSvg(start.x, start.y);
+    const treffer = bayUnterPunkt(welt);
+    if (treffer) starteMehrfachMitFeld(treffer.bay);
+    else starteRahmen(start, start);
+  }, LANGDRUCK_MS);
+}
+
+/** Zwei Finger, die ruhig aufliegen, meinen einen Rahmen – kein Pinch.
+ *  Jede nennenswerte Bewegung innerhalb der Wartezeit bricht das ab. */
+function starteZweiFingerRahmen() {
+  clearTimeout(langdruckTimer);
+  if (bordbrettModus || drag) return;
+  const start = [...canvasPointers.values()].map(p => ({ x: p.x, y: p.y }));
+  if (start.length !== 2) return;
+  langdruckTimer = setTimeout(() => {
+    if (drag || rahmen || canvasPointers.size !== 2) return;
+    const jetzt = [...canvasPointers.values()];
+    const ruhig = jetzt.every((p, i) =>
+      Math.hypot(p.x - start[i].x, p.y - start[i].y) <= GESTE_TOLERANZ_PX);
+    if (!ruhig) return;
+    starteRahmen(jetzt[0], jetzt[1]);
+  }, ZWEIFINGER_RUHE_MS);
+}
+
 function onCanvasPointerDown(e) {
   if (drag) return;                                    // Handle-Drag hat Vorrang (stoppt Propagation ohnehin selbst)
   // Neue Berührung → die Klick-Sperre der VORIGEN Geste verfällt. Ohne dieses
@@ -3185,11 +3823,34 @@ function onCanvasPointerDown(e) {
   // eine echte Pan-/Pinch-Bewegung bestätigt hat.
   canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   beginCanvasGesture();
+  // Mehrfachauswahl entsteht aus der Geste, nicht aus einem Modus-Knopf.
+  if (canvasPointers.size === 1)      starteLangdruck(e.clientX, e.clientY);
+  else if (canvasPointers.size === 2) starteZweiFingerRahmen();
 }
 
 function onCanvasPointerMove(e) {
   if (!canvasPointers.has(e.pointerId)) return;
+  const vorher = canvasPointers.get(e.pointerId);
   canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  // Läuft ein Auswahlrahmen, gehört die Bewegung ihm – nicht der Ansicht.
+  if (rahmen) {
+    const ids = [...canvasPointers.keys()];
+    aktualisiereRahmen({ x: e.clientX, y: e.clientY },
+                       ids.length === 2 && e.pointerId === ids[0] ? 'a' : 'b');
+    e.preventDefault();
+    return;
+  }
+  // Eine echte Bewegung ist kein langes Tippen mehr. Die Toleranz ist
+  // großzügig: ein zitternder Finger auf dem Gerüst soll die Auswahl nicht
+  // verhindern, eine gewollte Wischbewegung sie aber sofort abbrechen.
+  if (langdruckTimer && vorher) {
+    const g = canvasGesture;
+    const weg = g && g.mode === 'pan'
+      ? Math.hypot(e.clientX - g.startClientX, e.clientY - g.startClientY)
+      : Math.hypot(e.clientX - vorher.x, e.clientY - vorher.y);
+    if (weg > GESTE_TOLERANZ_PX) { clearTimeout(langdruckTimer); langdruckTimer = null; }
+  }
   if (!canvasGesture) return;
 
   const svg = document.getElementById('planSvg');
@@ -3231,7 +3892,16 @@ function onCanvasPointerMove(e) {
 
 function onCanvasPointerUp(e) {
   canvasPointers.delete(e.pointerId);
+  clearTimeout(langdruckTimer); langdruckTimer = null;
   try { document.getElementById('planSvg').releasePointerCapture(e.pointerId); } catch (err) { /* ignorieren */ }
+  if (rahmen) {
+    // Der Rahmen endet, sobald der erste Finger abhebt – so bleibt die Geste
+    // auch mit zwei Fingern eindeutig.
+    beendeRahmen();
+    canvasGesture = null;
+    if (!canvasPointers.size) scheduleCameraSettle(60);
+    return;
+  }
   if (canvasGesture && canvasGesture.moved) canvasJustMoved = true;
   beginCanvasGesture();
   if (!canvasPointers.size) scheduleCameraSettle(60);
@@ -3578,7 +4248,7 @@ function openEditSheet(si, bi) {
   // A" …) – oder keinem, dann verhält es sich wie bisher.
   const abschLabel = document.createElement('div');
   abschLabel.className = 'sheet-section-label';
-  abschLabel.textContent = 'Abschnitt';
+  abschLabel.textContent = 'Achse';
 
   const abschRow = document.createElement('div');
   abschRow.className = 'pos-toggle-row sheet-absch-row';
@@ -3598,21 +4268,20 @@ function openEditSheet(si, bi) {
       });
       abschRow.appendChild(chip);
     };
-    mk(null, 'Ohne Abschnitt', '#8a97a5');
+    mk(null, 'Ohne Achse', '#8a97a5');
     abschnitteList().forEach(a => mk(a.id, a.name, a.color));
 
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'pos-chip absch-new-chip';
-    add.textContent = '+ neuer Abschnitt';
+    add.textContent = '+ neue Achse';
     add.addEventListener('click', () => {
-      const name = prompt('Name des Abschnitts (z. B. „Nordseite"):',
-                          `Abschnitt ${abschnitteList().length + 1}`);
-      if (name === null) return;
-      const a = addAbschnitt(name.trim());
+      const a = addAbschnitt(naechsterAchsName());
       bay.abschnittId = a.id;
       buildAbschRow();
       requestRender({ sidebar: true, bulk: true });
+      showToast(`Achse „${a.name}" angelegt`,
+                { label: 'Umbenennen', onClick: () => achseUmbenennen(a.id) });
     });
     abschRow.appendChild(add);
   }
@@ -4524,6 +5193,371 @@ function currentSelectionBays() {
 }
 
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Mehrfachauswahl – ohne eigenen Modus-Knopf
+   --------------------------------------------------------------------------
+   Früher brauchte es erst einen Schalter „Mehrere auswählen" in der
+   Werkzeugleiste, dann das Antippen der Felder, dann das Werkzeug-Menü für
+   die Aktion. Drei Orte für einen Vorgang – auf dem Gerüst mit Handschuhen
+   zwei zu viel.
+
+   Jetzt entsteht die Mehrfachauswahl direkt im Plan:
+
+     • LANGES TIPPEN auf ein Feld → Auswahl beginnt mit diesem Feld, jeder
+                                    weitere Tipp nimmt eines dazu bzw. wieder
+                                    heraus.
+     • ZWEI-FINGER-RAHMEN         → zwei Finger kurz ruhig aufliegen lassen,
+                                    der aufgezogene Rahmen wählt alles darin.
+     • LANGES TIPPEN auf leere
+       Fläche                     → derselbe Rahmen mit einem Finger.
+
+   Sobald mehr als ein Feld ausgewählt ist, erscheint die Aktionsleiste am
+   oberen Rand der Zeichenfläche (renderMehrfachBar) – dort, wo hingeschaut
+   wird, und nicht im Panel am anderen Bildschirmrand.
+
+   Der interne Zustand (bulkMode / bulkSelected) bleibt derselbe wie bisher:
+   es gibt weiterhin genau EINE Auswahlverwaltung.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const LANGDRUCK_MS       = 450;   // ab wann ein Tipp ein „langes Tippen" ist
+const ZWEIFINGER_RUHE_MS = 300;   // so lange müssen zwei Finger stillhalten
+const GESTE_TOLERANZ_PX  = 10;    // bis hierhin gilt ein Finger als unbewegt
+
+let langdruckTimer = null;
+let rahmen         = null;   // { a: {x,y}, b: {x,y} } in Client-Koordinaten
+
+/** Liegt der Weltpunkt in diesem Polygon? */
+function punktInPoly(pt, pts) {
+  let drin = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a.y > pt.y) !== (b.y > pt.y) &&
+        pt.x < (b.x - a.x) * (pt.y - a.y) / (b.y - a.y) + a.x) drin = !drin;
+  }
+  return drin;
+}
+
+/** Sichtbares Feld unter einem Weltpunkt – oder null. */
+function bayUnterPunkt(pt, els) {
+  const liste = els || computeLayout();
+  for (let i = liste.length - 1; i >= 0; i--) {
+    const el = liste[i];
+    if (el.type !== 'bay') continue;
+    const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
+    if (!bay || !isBayVisible(bay)) continue;
+    if (punktInPoly(pt, el.pts)) return { el, bay };
+  }
+  return null;
+}
+
+/** Mittelpunkt eines Feld-Polygons (für die Rahmenauswahl). */
+function polyMitte(pts) {
+  const n = pts.length || 1;
+  return { x: pts.reduce((s, p) => s + p.x, 0) / n,
+           y: pts.reduce((s, p) => s + p.y, 0) / n };
+}
+
+/** Startet die Mehrfachauswahl mit genau einem Feld (langes Tippen). */
+function starteMehrfachMitFeld(bay) {
+  if (!bay) return;
+  if (bordbrettModus) beendeBordbrettModus();
+  bulkMode = true;
+  bulkSelected.clear();
+  bulkSelected.add(bay.id);
+  // Der Klick, der auf das Loslassen folgt, darf das Feld nicht gleich wieder
+  // abwählen – dieselbe Sperre, die auch nach einem Wischen greift.
+  canvasJustMoved = true;
+  renderAll();
+  showToast('Mehrfachauswahl – weitere Felder antippen');
+}
+
+/** Beendet die Mehrfachauswahl vollständig. */
+function hebeAuswahlAuf() {
+  bulkMode = false;
+  bulkSelected.clear();
+  bulkHL = null; bulkHR = null;
+  selectedSi = null; selectedBi = null;
+  renderAll();
+}
+
+/* ── Auswahlrahmen ───────────────────────────────────────────────────────── */
+
+function rahmenEl() {
+  let el = document.getElementById('auswahlRahmen');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'auswahlRahmen';
+    el.className = 'auswahl-rahmen hidden';
+    document.getElementById('viewerPanel')?.appendChild(el);
+  }
+  return el;
+}
+
+function zeichneRahmen() {
+  const el = rahmenEl();
+  const panel = document.getElementById('viewerPanel');
+  if (!rahmen || !panel) { el.classList.add('hidden'); return; }
+  const r = panel.getBoundingClientRect();
+  el.style.left   = (Math.min(rahmen.a.x, rahmen.b.x) - r.left) + 'px';
+  el.style.top    = (Math.min(rahmen.a.y, rahmen.b.y) - r.top)  + 'px';
+  el.style.width  = Math.abs(rahmen.a.x - rahmen.b.x) + 'px';
+  el.style.height = Math.abs(rahmen.a.y - rahmen.b.y) + 'px';
+  el.classList.remove('hidden');
+}
+
+/** Beginnt einen Auswahlrahmen zwischen zwei Bildschirmpunkten. */
+function starteRahmen(a, b) {
+  if (bordbrettModus) return;
+  clearTimeout(langdruckTimer);
+  canvasGesture = null;             // Pan/Pinch geben ab
+  rahmen = { a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } };
+  zeichneRahmen();
+  showToast('Rahmen aufziehen – alle Felder darin werden ausgewählt');
+}
+
+function aktualisiereRahmen(pt, welcher) {
+  if (!rahmen) return;
+  rahmen[welcher || 'b'] = { x: pt.x, y: pt.y };
+  zeichneRahmen();
+}
+
+/** Schließt den Rahmen ab und übernimmt alle Felder darin in die Auswahl. */
+function beendeRahmen() {
+  rahmenEl().classList.add('hidden');
+  if (!rahmen) return;
+  const { a, b } = rahmen;
+  rahmen = null;
+  canvasJustMoved = true;           // der folgende Klick gehört noch zur Geste
+  if (Math.abs(a.x - b.x) < 12 && Math.abs(a.y - b.y) < 12) return;
+
+  const p1 = screenToSvg(Math.min(a.x, b.x), Math.min(a.y, b.y));
+  const p2 = screenToSvg(Math.max(a.x, b.x), Math.max(a.y, b.y));
+  const treffer = [];
+  computeLayout().forEach(el => {
+    if (el.type !== 'bay') return;
+    const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
+    if (!bay || !isBayVisible(bay)) return;
+    const m = polyMitte(el.pts);
+    if (m.x >= p1.x && m.x <= p2.x && m.y >= p1.y && m.y <= p2.y) treffer.push(bay);
+  });
+  if (!treffer.length) { showToast('Kein Feld im Rahmen'); return; }
+  if (bordbrettModus) beendeBordbrettModus();
+  bulkMode = true;
+  bulkSelected.clear();
+  treffer.forEach(x => bulkSelected.add(x.id));
+  renderAll();
+  showToast(`${treffer.length} Feld${treffer.length === 1 ? '' : 'er'} ausgewählt`);
+}
+
+/* ── Aktionsleiste am oberen Rand ────────────────────────────────────────────
+   Sie zeigt genau das, was mit mehreren Feldern sinnvoll ist – und nichts
+   sonst. Jeder Knopf ist mindestens 44 px hoch.                            */
+
+function renderMehrfachBar() {
+  const bar = document.getElementById('mehrfachBar');
+  if (!bar) return;
+  const sel = currentSelectionBays().filter(isBayVisible);
+  const zeigen = bulkMode && sel.length > 1;
+  bar.classList.toggle('hidden', !zeigen);
+  if (!zeigen) { bar.innerHTML = ''; return; }
+
+  bar.innerHTML = '';
+  const n = sel.length;
+
+  const zahl = document.createElement('span');
+  zahl.className = 'mf-zahl';
+  zahl.textContent = n + ' Felder';
+  zahl.title = n + ' Felder ausgewählt';
+  bar.appendChild(zahl);
+
+  const knopf = (ico, text, titel, fn, klasse) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mf-btn' + (klasse ? ' ' + klasse : '');
+    b.title = titel;
+    const i = document.createElement('span');
+    i.className = 'mf-ico'; i.textContent = ico; i.setAttribute('aria-hidden', 'true');
+    const t = document.createElement('span');
+    t.className = 'mf-txt'; t.textContent = text;
+    b.appendChild(i); b.appendChild(t);
+    b.addEventListener('click', fn);
+    bar.appendChild(b);
+    return b;
+  };
+
+  knopf('↕', 'Höhe', 'Höhe aller ausgewählten Felder ändern',
+        () => openBulkHoeheSheet(sel));
+  knopf('⊞', 'Zusatzbauteile', 'Zusatzbauteil auf alle ausgewählten Felder anwenden',
+        () => openBulkBauteilSheet(sel));
+  knopf('📋', 'Kopieren', 'Erstes ausgewähltes Feld als Vorlage kopieren', () => {
+    pasteOpts.positionen = true; pasteOpts.hoehen = true;
+    savePasteOpts();
+    copyBayPositions(sel[0]);
+  });
+  const einf = knopf('📥', 'Einfügen', 'Kopiertes auf alle ausgewählten Felder anwenden', () => {
+    const k = pasteBayPositionsToAll(sel);
+    renderAll();
+    showToast(`Auf ${k} Feld${k === 1 ? '' : 'er'} angewendet · ${pasteScopeText()}`);
+  });
+  einf.disabled = !copiedBayData;
+  if (!copiedBayData) einf.title = 'Noch nichts kopiert';
+
+  knopf('🗑', 'Löschen', n + ' Felder löschen', () => loescheAuswahl(sel), 'mf-gefahr');
+  knopf('✕', 'Auswahl aufheben', 'Auswahl aufheben', hebeAuswahlAuf);
+}
+
+/** Löscht die ausgewählten Felder – mit Rückholmöglichkeit über den Toast. */
+function loescheAuswahl(sel) {
+  const ids = new Set(sel.map(b => b.id));
+  finalizeUndoSnapshot();
+  state.sections.forEach(sec => { sec.bays = sec.bays.filter(b => !ids.has(b.id)); });
+  state.sections = state.sections.filter(sec => sec.bays.length);
+  bulkSelected.clear();
+  selectedSi = null; selectedBi = null;
+  normalizeBordbrett();
+  renderAll();
+  finalizeUndoSnapshot();
+  showToast(`${ids.size} Feld${ids.size === 1 ? '' : 'er'} gelöscht`,
+            { label: 'Rückgängig', onClick: performUndo });
+}
+
+/** Höhe für mehrere Felder – ein Blatt statt eines Blocks im Panel. */
+function openBulkHoeheSheet(bays) {
+  closeSheet();
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay'; overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet'; sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = `Höhe für ${bays.length} Feld${bays.length === 1 ? '' : 'er'}`;
+  sheet.appendChild(hdr);
+
+  // Vorbelegung aus dem ersten Feld – so ist der häufigste Fall („alle wie
+  // dieses") ein Tipp auf „Übernehmen".
+  let hL = bays[0].hL != null ? bays[0].hL : null;
+  let hR = bays[0].hR != null ? bays[0].hR : null;
+
+  const row = document.createElement('div');
+  row.className = 'bay-height-row';
+  const mk = (txt, get, set) => {
+    const f = document.createElement('div'); f.className = 'bay-height-field';
+    const l = document.createElement('span'); l.className = 'bay-height-label'; l.textContent = txt;
+    const i = document.createElement('input');
+    i.type = 'number'; i.className = 'bay-height-inp';
+    i.placeholder = '–'; i.min = '0'; i.step = '0.05'; i.inputMode = 'decimal';
+    i.value = get() == null ? '' : get().toFixed(2);
+    i.addEventListener('input', () => {
+      const v = parseFloat(i.value);
+      set((isNaN(v) || v < 0) ? null : +v.toFixed(2));
+    });
+    f.appendChild(l); f.appendChild(i);
+    return { f, i };
+  };
+  const links  = mk('H links',  () => hL, v => hL = v);
+  const rechts = mk('H rechts', () => hR, v => hR = v);
+  const eq = document.createElement('button');
+  eq.type = 'button'; eq.className = 'bay-height-eq'; eq.textContent = '=';
+  eq.title = 'Beide Höhen gleich setzen';
+  eq.addEventListener('click', () => {
+    const src = hL != null ? hL : hR;
+    if (src == null) return;
+    hL = src; hR = src;
+    links.i.value = src.toFixed(2); rechts.i.value = src.toFixed(2);
+  });
+  row.appendChild(links.f); row.appendChild(eq); row.appendChild(rechts.f);
+  sheet.appendChild(row);
+
+  const act = document.createElement('div');
+  act.className = 'sheet-actions';
+  const abbr = document.createElement('button');
+  abbr.type = 'button'; abbr.className = 'sheet-del'; abbr.textContent = 'Abbrechen';
+  abbr.addEventListener('click', closeSheet);
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'sheet-ok';
+  ok.textContent = `Auf ${bays.length} Feld${bays.length === 1 ? '' : 'er'} übernehmen`;
+  ok.addEventListener('click', () => {
+    bays.forEach(b => { if (hL != null) b.hL = hL; if (hR != null) b.hR = hR; });
+    renderAll(); closeSheet();
+    showToast(`Höhe auf ${bays.length} Feld${bays.length === 1 ? '' : 'ern'} übernommen`);
+  });
+  act.appendChild(abbr); act.appendChild(ok);
+  sheet.appendChild(act);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/**
+ * Zusatzbauteile bei Mehrfachauswahl.
+ *
+ * Bisher fehlte genau dieser Schritt: ein Bauteil ließ sich zwar auf alle
+ * Felder legen, aber ohne Fenster für Länge bzw. Lagen – Innengeländer und
+ * Konsole landeten damit ohne Menge im Aufmaß. Jetzt führt JEDES Bauteil
+ * (auch die Konsole) über ein Einstellblatt, in dem Länge/Lagen einmal für
+ * die gesamte Auswahl festgelegt werden.
+ */
+function openBulkBauteilSheet(bays) {
+  closeSheet();
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay'; overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet'; sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = `Zusatzbauteil für ${bays.length} Feld${bays.length === 1 ? '' : 'er'}`;
+  sheet.appendChild(hdr);
+
+  const hint = document.createElement('p');
+  hint.className = 'pdf-sheet-note';
+  hint.textContent = 'Bauteil wählen – danach werden Länge bzw. Lagen einmal für '
+                   + 'alle ausgewählten Felder eingestellt.';
+  sheet.appendChild(hint);
+
+  const grid = document.createElement('div');
+  grid.className = 'bauteil-grid';
+  POSITIONS.forEach(p => {
+    grid.appendChild(bauteilKarte(p, bays, {
+      aufSetzen: () => {
+        closeSheet();
+        if (p.konsole) openBulkKonsoleSheet(bays);
+        else openBulkPosSheet(p.key, bays);
+      },
+      aufEntfernen: () => {
+        bays.forEach(bay => {
+          normalizeBay(bay);
+          bay.positions = bay.positions.filter(x => x.cat !== p.key);
+        });
+        renderAll(); closeSheet();
+        showToast(`${p.label} bei ${bays.length} Feld${bays.length === 1 ? '' : 'ern'} entfernt`);
+      }
+    }));
+  });
+  sheet.appendChild(grid);
+
+  const act = document.createElement('div');
+  act.className = 'sheet-actions';
+  const fertig = document.createElement('button');
+  fertig.type = 'button'; fertig.className = 'sheet-ok'; fertig.textContent = 'Fertig';
+  fertig.addEventListener('click', closeSheet);
+  act.appendChild(fertig);
+  sheet.appendChild(act);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Werkzeug-Menü
    --------------------------------------------------------------------------
@@ -4593,107 +5627,194 @@ function updateWerkzeugBadge() {
   if (btn) btn.classList.toggle('wz-mehrfach', an);
 }
 
-/** Baut alle Blöcke des Menüs neu auf. */
+/** Baut alle Blöcke des Panels neu auf. */
 function renderWerkzeugPanel() {
   renderWzAuswahl();
+  renderWzMasse();
+  renderWzBauteile();
   renderBulkBar();
   renderAbschnittBar();
   renderWzAnsicht();
 }
 
-/* ── Block „Auswahl" ─────────────────────────────────────────────────────────
-   Der Einstieg in alles Weitere. Er beantwortet drei Fragen auf einen Blick:
-   Ist die Mehrfachauswahl an? Wie viele Felder sind markiert? Wie werde ich
-   sie wieder los?                                                           */
+/* ══════════════════════════════════════════════════════════════════════════
+   Werkzeug-Panel – Sektionen
+   --------------------------------------------------------------------------
+   Vier feste Sektionen in immer derselben Reihenfolge, jede mit Überschrift
+   und einzeln einklappbar:
+
+     1  Auswahl        welches Feld / welche Felder, Richtung, Länge, Höhe
+     2  Abmessungen    Länge, Höhe, Gerüsttiefe
+     3  Zusatzbauteile alle Bauteile als gleich große Karten im 2-Raster
+     4  Aktionen       Kopieren, Einfügen, Duplizieren, Löschen
+
+   Danach folgen „Achsen" und „Ansicht" – seltener gebraucht, aber am selben
+   Ort. Keine Pillenwolke mehr: Farbe kodiert AUSSCHLIESSLICH den Zustand
+   (aktiv / inaktiv), nicht mehr den Bauteiltyp.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const WZ_ZU_KEY = 'geruest.2d.wzSektionen';
+
+/** Welche Sektionen sind eingeklappt? (Schlüssel → true) */
+function ladeWzZu() {
+  try { return JSON.parse(localStorage.getItem(WZ_ZU_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+let wzZu = ladeWzZu();
+
+function setWzZu(key, zu) {
+  wzZu[key] = !!zu;
+  try { localStorage.setItem(WZ_ZU_KEY, JSON.stringify(wzZu)); } catch (_) {}
+}
+
+/**
+ * Überschrift eines Panel-Blocks. Mit `schluessel` wird der ganze Kopf zum
+ * Schalter, der die Sektion ein- und ausklappt (Zustand bleibt gespeichert).
+ */
+function wzKopf(text, ico, schluessel) {
+  const h = document.createElement('div');
+  h.className = 'wz-kopfzeile';
+  if (ico) {
+    const i = document.createElement('span');
+    i.className = 'wz-kopf-ico'; i.textContent = ico; i.setAttribute('aria-hidden', 'true');
+    h.appendChild(i);
+  }
+  const t = document.createElement('span');
+  t.className = 'wz-kopf-txt'; t.textContent = text;
+  h.appendChild(t);
+
+  if (schluessel) {
+    const gruppe = () => h.parentElement;
+    const chev = document.createElement('button');
+    chev.type = 'button';
+    chev.className = 'wz-klapp';
+    chev.setAttribute('aria-label', text + ' ein-/ausklappen');
+    const sync = () => {
+      const zu = !!wzZu[schluessel];
+      chev.textContent = zu ? '＋' : '−';
+      chev.setAttribute('aria-expanded', String(!zu));
+      chev.title = zu ? text + ' ausklappen' : text + ' einklappen';
+      if (gruppe()) gruppe().classList.toggle('wz-zu', zu);
+    };
+    const um = () => { setWzZu(schluessel, !wzZu[schluessel]); sync(); };
+    chev.addEventListener('click', e => { e.stopPropagation(); um(); });
+    h.addEventListener('click', um);
+    h.classList.add('wz-kopf-klappbar');
+    h.appendChild(chev);
+    // Beim Anhängen an die Gruppe steht das Elternteil erst später fest –
+    // deshalb im nächsten Frame nachziehen.
+    requestAnimationFrame(sync);
+    setTimeout(sync, 0);
+  }
+  return h;
+}
+
+/* ── 1 · Auswahl ─────────────────────────────────────────────────────────────
+   Beantwortet auf einen Blick: Was ist ausgewählt? Wie liegt es? Wie werde
+   ich die Auswahl wieder los?                                              */
 
 function renderWzAuswahl() {
   const el = document.getElementById('wzAuswahl');
   if (!el) return;
   el.innerHTML = '';
-  el.appendChild(wzKopf('Auswahl', '☑'));
+  el.appendChild(wzKopf('Auswahl', '☑', 'auswahl'));
 
   const alleBays = visibleBaysFlat();
+  const sel = currentSelectionBays().filter(isBayVisible);
 
-  // Der Hauptschalter. Bewusst groß und über die volle Breite: er ist der
-  // meistgesuchte Knopf des ganzen Menüs.
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.className = 'bulk-toggle-btn wz-hauptschalter' + (bulkMode ? ' active' : '');
-  toggleBtn.setAttribute('aria-pressed', String(bulkMode));
-  toggleBtn.innerHTML = '';
-  const tIco = document.createElement('span');
-  tIco.className = 'wz-schalter-ico';
-  tIco.textContent = bulkMode ? '✕' : '☑';
-  const tTxt = document.createElement('span');
-  tTxt.className = 'wz-schalter-txt';
-  tTxt.textContent = bulkMode ? 'Mehrfachauswahl beenden' : 'Mehrfachauswahl aktivieren';
-  toggleBtn.appendChild(tIco); toggleBtn.appendChild(tTxt);
-  toggleBtn.addEventListener('click', () => {
-    bulkMode = !bulkMode;
-    // Bordbrett-Modus und Mehrfachauswahl deuten denselben Tipp verschieden
-    // (Kante gegen Feld) und schließen sich deshalb gegenseitig aus.
-    if (bulkMode && bordbrettModus) beendeBordbrettModus();
-    if (!bulkMode) { bulkSelected.clear(); bulkHL = null; bulkHR = null; }
-    renderAll();
-  });
-  el.appendChild(toggleBtn);
-
-  if (!bulkMode) {
-    // Einzelauswahl: zeigen, WAS ausgewählt ist, und den direkten Weg ins
-    // Bearbeiten-Blatt anbieten.
-    const sel = currentSelectionBays();
-    const zeile = document.createElement('p');
-    zeile.className = 'wz-hinweis';
-    if (sel.length) {
-      zeile.innerHTML = '';
-      const stark = document.createElement('strong');
-      stark.textContent = 'Feld ' + bayLabel(state.sections[selectedSi], selectedBi);
-      zeile.appendChild(stark);
-      zeile.appendChild(document.createTextNode(' ausgewählt'));
-      el.appendChild(zeile);
-
-      const bearbBtn = document.createElement('button');
-      bearbBtn.type = 'button';
-      bearbBtn.className = 'wz-aktion';
-      bearbBtn.textContent = '✎ Feld bearbeiten';
-      bearbBtn.addEventListener('click', () => openEditSheet(selectedSi, selectedBi));
-      el.appendChild(bearbBtn);
-    } else {
-      zeile.textContent = 'Feld im Plan antippen zum Bearbeiten – oder oben die '
-                        + 'Mehrfachauswahl einschalten und mehrere Felder markieren.';
-      el.appendChild(zeile);
-    }
-    return;
-  }
-
-  // Mehrfachauswahl aktiv ------------------------------------------------
+  // Zähler + Ziel: eine Zeile, die bei jeder Aktion darüber steht.
   const zaehler = document.createElement('div');
-  zaehler.className = 'wz-zaehler' + (bulkSelected.size ? ' voll' : '');
+  zaehler.className = 'wz-zaehler' + (sel.length ? ' voll' : '');
   const zNum = document.createElement('span');
   zNum.className = 'wz-zaehler-zahl';
-  zNum.textContent = String(bulkSelected.size);
+  zNum.textContent = String(sel.length);
   const zTxt = document.createElement('span');
   zTxt.className = 'wz-zaehler-txt';
-  zTxt.textContent = `von ${alleBays.length} Feld${alleBays.length === 1 ? '' : 'ern'} ausgewählt`;
+  zTxt.textContent = sel.length === 1 && selectedSi != null && !bulkMode
+    ? `Feld ${bayLabel(state.sections[selectedSi], selectedBi)} ausgewählt`
+    : `von ${alleBays.length} Feld${alleBays.length === 1 ? '' : 'ern'} ausgewählt`;
   zaehler.appendChild(zNum); zaehler.appendChild(zTxt);
   el.appendChild(zaehler);
 
-  const hinweis = document.createElement('p');
-  hinweis.className = 'wz-hinweis';
-  hinweis.textContent = 'Felder im Plan antippen – angetippt = markiert, nochmal antippen = wieder abgewählt.';
-  el.appendChild(hinweis);
+  if (!sel.length) {
+    const hinweis = document.createElement('p');
+    hinweis.className = 'wz-hinweis';
+    hinweis.textContent = alleBays.length
+      ? 'Feld im Plan antippen. Lange tippen (oder zwei Finger ruhig aufliegen '
+        + 'lassen und einen Rahmen aufziehen) wählt mehrere Felder aus.'
+      : 'Zuerst Felder anlegen („+ Feld" in der Werkzeugleiste).';
+    el.appendChild(hinweis);
+  } else {
+    // Welche Felder? Als kompakte Aufzählung, damit auch bei Mehrfachauswahl
+    // klar ist, worauf sich alles Weitere bezieht.
+    const namen = document.createElement('p');
+    namen.className = 'wz-hinweis wz-auswahl-namen';
+    namen.textContent = sel.slice(0, 12).map(b => bayName(b)).join(', ')
+                      + (sel.length > 12 ? ` … (+${sel.length - 12})` : '');
+    el.appendChild(namen);
 
+    // Richtung – nur sinnvoll, wenn alle gewählten Felder in derselben
+    // Sektion liegen bzw. bei Einzelauswahl.
+    const secs = new Set(sel.map(b => sektionVonBay(b)).filter(x => x != null));
+    if (secs.size === 1) {
+      const si = [...secs][0];
+      const sec = state.sections[si];
+      const dirLabel = document.createElement('div');
+      dirLabel.className = 'wz-unterlabel';
+      dirLabel.textContent = 'Richtung';
+      el.appendChild(dirLabel);
+
+      const dirRow = document.createElement('div');
+      dirRow.className = 'wz-dir-row';
+      Object.entries(DIR_META).forEach(([d, m]) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'wz-dir-btn' + (sec.dir === d ? ' active' : '');
+        b.textContent = m.label;
+        b.title = 'Achse nach ' + m.label + ' ausrichten';
+        b.addEventListener('click', () => {
+          setSectionAngle(sec, DIR_TO_ANGLE[d]);
+          invalidateEckenCache();
+          renderAll(); scheduleAutosave2d();
+        });
+        dirRow.appendChild(b);
+      });
+      el.appendChild(dirRow);
+    }
+
+    // Länge und Höhe der Auswahl – als Kennzahl, nicht als Eingabe. Geändert
+    // wird in der Sektion „Abmessungen" direkt darunter.
+    const werte = document.createElement('div');
+    werte.className = 'wz-werte-row';
+    const laenge = sel.reduce((s, b) => s + (b.len || 0), 0);
+    const hoehen = [...new Set(sel.map(b => bayHoehe(b)).filter(h => h != null))];
+    const mkWert = (lbl, val) => {
+      const w = document.createElement('div');
+      w.className = 'wz-wert';
+      const l = document.createElement('span'); l.className = 'wz-wert-lbl'; l.textContent = lbl;
+      const v = document.createElement('span'); v.className = 'wz-wert-val'; v.textContent = val;
+      w.appendChild(l); w.appendChild(v);
+      return w;
+    };
+    werte.appendChild(mkWert('Länge', fmtQty(laenge) + ' m'));
+    werte.appendChild(mkWert('Höhe', hoehen.length === 0 ? '–'
+      : hoehen.length === 1 ? fmtQty(hoehen[0]) + ' m'
+      : `${fmtQty(Math.min(...hoehen))}–${fmtQty(Math.max(...hoehen))} m`));
+    el.appendChild(werte);
+  }
+
+  // Auswahlhilfen: alle / keine.
   const reihe = document.createElement('div');
   reihe.className = 'wz-aktion-reihe';
 
   const alleBtn = document.createElement('button');
-  // Der Zweitname `bulk-sel-btn` bleibt: „Alle"/„Keine" heissen seit jeher so
-  // und werden in den Abnahmetests darueber angesprochen. Das Aussehen kommt
-  // von `wz-aktion` – zwei Namen, ein Knopf.
+  // Der Zweitname `bulk-sel-btn` bleibt: „Alle"/„Keine" heißen seit jeher so
+  // und werden in den Abnahmetests darüber angesprochen.
   alleBtn.type = 'button'; alleBtn.className = 'wz-aktion bulk-sel-btn';
   alleBtn.textContent = '⬚ Alle Felder auswählen';
   alleBtn.disabled = !alleBays.length;
   alleBtn.addEventListener('click', () => {
+    bulkMode = true;
     alleBays.forEach(b => bulkSelected.add(b.id));
     renderAll();
     showToast(alleBays.length + ' Feld' + (alleBays.length === 1 ? '' : 'er') + ' ausgewählt');
@@ -4702,18 +5823,27 @@ function renderWzAuswahl() {
   const keineBtn = document.createElement('button');
   keineBtn.type = 'button'; keineBtn.className = 'wz-aktion bulk-sel-btn';
   keineBtn.textContent = '⨯ Auswahl aufheben';
-  keineBtn.disabled = !bulkSelected.size;
-  keineBtn.addEventListener('click', () => { bulkSelected.clear(); renderAll(); });
+  keineBtn.disabled = !sel.length;
+  keineBtn.addEventListener('click', hebeAuswahlAuf);
 
   reihe.appendChild(alleBtn); reihe.appendChild(keineBtn);
   el.appendChild(reihe);
 
-  // Auswahl über eine Achse/einen Abschnitt: „alle Felder der Achse B".
+  if (sel.length === 1 && !bulkMode && selectedSi != null) {
+    const bearbBtn = document.createElement('button');
+    bearbBtn.type = 'button';
+    bearbBtn.className = 'wz-aktion';
+    bearbBtn.textContent = '✎ Feld bearbeiten';
+    bearbBtn.addEventListener('click', () => openEditSheet(selectedSi, selectedBi));
+    el.appendChild(bearbBtn);
+  }
+
+  // Auswahl über eine Achse: „alle Felder der Achse B".
   const achsen = abschnitteList();
   if (achsen.length) {
     const lbl = document.createElement('div');
     lbl.className = 'wz-unterlabel';
-    lbl.textContent = 'Achse/Abschnitt komplett auswählen';
+    lbl.textContent = 'Achse komplett auswählen';
     el.appendChild(lbl);
 
     const row = document.createElement('div');
@@ -4746,7 +5876,7 @@ function renderWzAuswahl() {
   if (posMitFeldern.length) {
     const lbl = document.createElement('div');
     lbl.className = 'wz-unterlabel';
-    lbl.textContent = 'Alle Felder mit einer Position auswählen';
+    lbl.textContent = 'Alle Felder mit einem Bauteil auswählen';
     el.appendChild(lbl);
 
     const row = document.createElement('div');
@@ -4756,9 +5886,9 @@ function renderWzAuswahl() {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'wz-achs-chip';
-      chip.style.setProperty('--absch-color', p.color);
       chip.textContent = `${p.label} (${treffer.length})`;
       chip.addEventListener('click', () => {
+        bulkMode = true;
         bulkSelected.clear();
         treffer.forEach(b => bulkSelected.add(b.id));
         renderAll();
@@ -4768,6 +5898,473 @@ function renderWzAuswahl() {
     });
     el.appendChild(row);
   }
+}
+
+/** Sektionsindex eines Feldes (oder null). */
+function sektionVonBay(bay) {
+  for (let si = 0; si < state.sections.length; si++) {
+    if (state.sections[si].bays.some(b => b.id === bay.id)) return si;
+  }
+  return null;
+}
+
+/** Anzeigename eines Feldes („A1") – unabhängig von der Auswahl. */
+function bayName(bay) {
+  const si = sektionVonBay(bay);
+  if (si == null) return '?';
+  const sec = state.sections[si];
+  return bayLabel(sec, sec.bays.findIndex(b => b.id === bay.id));
+}
+
+/* ── 2 · Abmessungen ─────────────────────────────────────────────────────────
+   Länge, Höhe und Gerüsttiefe – die drei Zahlen, die ein Gerüstfeld
+   ausmachen. Sie wirken auf die aktuelle Auswahl; die Gerüsttiefe gilt für
+   die ganze Zeichnung und steht deshalb abgesetzt darunter.                */
+
+function renderWzMasse() {
+  const el = document.getElementById('wzMasse');
+  if (!el) return;
+  el.innerHTML = '';
+  el.appendChild(wzKopf('Abmessungen', '📐', 'masse'));
+
+  const sel = currentSelectionBays().filter(isBayVisible);
+
+  if (!sel.length) {
+    const hint = document.createElement('p');
+    hint.className = 'wz-hinweis';
+    hint.textContent = 'Kein Feld ausgewählt – Länge und Höhe wirken auf die Auswahl.';
+    el.appendChild(hint);
+  } else {
+    const ziel = document.createElement('div');
+    ziel.className = 'wz-ziel';
+    ziel.textContent = sel.length === 1
+      ? `wirkt auf Feld ${bayName(sel[0])}`
+      : `wirkt auf ${sel.length} ausgewählte Felder`;
+    el.appendChild(ziel);
+
+    // ── Länge ──────────────────────────────────────────────────────────────
+    const lenLabel = document.createElement('div');
+    lenLabel.className = 'wz-unterlabel';
+    lenLabel.textContent = 'Feldlänge';
+    el.appendChild(lenLabel);
+
+    const lenRow = document.createElement('div');
+    lenRow.className = 'wz-preset-row';
+    const setzeLaenge = v => {
+      if (!(v > 0)) return;
+      sel.forEach(b => { b.len = +v.toFixed(2); });
+      invalidateEckenCache();
+      normalizeBordbrett();
+      renderAll(); scheduleAutosave2d();
+    };
+    FIELD_PRESETS.forEach(l => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'wz-preset' + (sel.every(x => Math.abs(x.len - l) < 0.005) ? ' active' : '');
+      b.textContent = fmtQty(l) + ' m';
+      b.addEventListener('click', () => setzeLaenge(l));
+      lenRow.appendChild(b);
+    });
+    el.appendChild(lenRow);
+
+    const lenFrei = document.createElement('div');
+    lenFrei.className = 'wz-eingabe-row';
+    const lenInp = document.createElement('input');
+    lenInp.type = 'number'; lenInp.className = 'wz-eingabe';
+    lenInp.min = '0.25'; lenInp.step = '0.01'; lenInp.inputMode = 'decimal';
+    lenInp.placeholder = 'eigenes Maß';
+    const gleich = sel.every(x => Math.abs(x.len - sel[0].len) < 0.005);
+    if (gleich) lenInp.value = sel[0].len.toFixed(2);
+    lenInp.addEventListener('change', () => {
+      const v = parseFloat(lenInp.value);
+      if (!isNaN(v) && v > 0) setzeLaenge(v);
+    });
+    const lenUnit = document.createElement('span');
+    lenUnit.className = 'wz-eingabe-unit'; lenUnit.textContent = 'm';
+    lenFrei.appendChild(lenInp); lenFrei.appendChild(lenUnit);
+    el.appendChild(lenFrei);
+
+    // ── Höhe ───────────────────────────────────────────────────────────────
+    const hLabel = document.createElement('div');
+    hLabel.className = 'wz-unterlabel';
+    hLabel.textContent = 'Höhe';
+    el.appendChild(hLabel);
+
+    const heightRow = document.createElement('div');
+    heightRow.className = 'bay-height-row';
+    const applyHeightBtn = document.createElement('button');
+    applyHeightBtn.type = 'button'; applyHeightBtn.className = 'bulk-height-apply-btn';
+    const syncApply = () => {
+      applyHeightBtn.textContent = sel.length === 1
+        ? 'Höhe übernehmen'
+        : 'Höhe auf ' + sel.length + ' Felder übernehmen';
+      applyHeightBtn.disabled = bulkHL == null && bulkHR == null;
+    };
+    const mkH = (labelTxt, get, set) => {
+      const field = document.createElement('div');
+      field.className = 'bay-height-field';
+      const lab = document.createElement('span');
+      lab.className = 'bay-height-label'; lab.textContent = labelTxt;
+      const hInp = document.createElement('input');
+      hInp.type = 'number'; hInp.className = 'bay-height-inp';
+      hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
+      hInp.value = get() == null ? '' : get().toFixed(2);
+      hInp.addEventListener('input', () => {
+        const v = parseFloat(hInp.value);
+        set((isNaN(v) || v < 0) ? null : +v.toFixed(2));
+        syncApply();
+      });
+      field.appendChild(lab); field.appendChild(hInp);
+      return { field, input: hInp };
+    };
+    const hLinks  = mkH('H links',  () => bulkHL, v => bulkHL = v);
+    const hRechts = mkH('H rechts', () => bulkHR, v => bulkHR = v);
+    const hEq = document.createElement('button');
+    hEq.type = 'button'; hEq.className = 'bay-height-eq';
+    hEq.title = 'Beide Höhen gleich setzen'; hEq.textContent = '=';
+    hEq.addEventListener('click', () => {
+      const src = bulkHL != null ? bulkHL : bulkHR;
+      if (src == null) return;
+      bulkHL = src; bulkHR = src;
+      hLinks.input.value = src.toFixed(2); hRechts.input.value = src.toFixed(2);
+      syncApply();
+    });
+    heightRow.appendChild(hLinks.field);
+    heightRow.appendChild(hEq);
+    heightRow.appendChild(hRechts.field);
+    el.appendChild(heightRow);
+
+    const hUeber = document.createElement('button');
+    hUeber.type = 'button';
+    hUeber.className = 'wz-aktion wz-aktion-klein';
+    hUeber.textContent = '↧ Höhe aus Auswahl übernehmen';
+    hUeber.title = 'Übernimmt die Höhen des ersten ausgewählten Feldes in die Eingabefelder';
+    hUeber.addEventListener('click', () => {
+      const q = sel[0];
+      bulkHL = q.hL != null ? q.hL : null;
+      bulkHR = q.hR != null ? q.hR : null;
+      hLinks.input.value  = bulkHL == null ? '' : bulkHL.toFixed(2);
+      hRechts.input.value = bulkHR == null ? '' : bulkHR.toFixed(2);
+      syncApply();
+    });
+    el.appendChild(hUeber);
+
+    syncApply();
+    applyHeightBtn.addEventListener('click', () => {
+      sel.forEach(bay => {
+        if (bulkHL != null) bay.hL = bulkHL;
+        if (bulkHR != null) bay.hR = bulkHR;
+      });
+      renderAll(); scheduleAutosave2d();
+      showToast('Höhe auf ' + sel.length + ' Feld' + (sel.length === 1 ? '' : 'ern') + ' übernommen');
+    });
+    el.appendChild(applyHeightBtn);
+  }
+
+  // ── Gerüsttiefe (zeichnungsweit) ─────────────────────────────────────────
+  const tLabel = document.createElement('div');
+  tLabel.className = 'wz-unterlabel';
+  tLabel.textContent = 'Gerüsttiefe (ganze Zeichnung)';
+  el.appendChild(tLabel);
+
+  const tRow = document.createElement('div');
+  tRow.className = 'wz-preset-row';
+  const setzeTiefe = v => {
+    if (!(v > 0)) return;
+    state.depth = +v.toFixed(2);
+    invalidateEckenCache();
+    renderAll(); scheduleAutosave2d();
+  };
+  TIEFE_PRESETS.forEach(d => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'wz-preset' + (Math.abs(state.depth - d) < 0.005 ? ' active' : '');
+    b.textContent = fmtQty(d) + ' m';
+    b.addEventListener('click', () => setzeTiefe(d));
+    tRow.appendChild(b);
+  });
+  el.appendChild(tRow);
+
+  const tFrei = document.createElement('div');
+  tFrei.className = 'wz-eingabe-row';
+  const tInp = document.createElement('input');
+  tInp.type = 'number'; tInp.className = 'wz-eingabe';
+  tInp.min = '0.10'; tInp.step = '0.01'; tInp.inputMode = 'decimal';
+  tInp.value = state.depth;
+  tInp.addEventListener('change', () => setzeTiefe(parseFloat(tInp.value)));
+  const tUnit = document.createElement('span');
+  tUnit.className = 'wz-eingabe-unit'; tUnit.textContent = 'm';
+  tFrei.appendChild(tInp); tFrei.appendChild(tUnit);
+  el.appendChild(tFrei);
+}
+
+/* ── 3 · Zusatzbauteile ──────────────────────────────────────────────────────
+   Alle Bauteile als GLEICH GROSSE Karten in einem 2-spaltigen Raster: gleiche
+   Höhe, gleiche Typografie, gleicher Rahmen. Die Farbe sagt nur noch, ob das
+   Bauteil an der Auswahl hängt oder nicht – nicht mehr, um welchen Typ es
+   sich handelt. Aktive Karten tragen ein Häkchen und darunter den Wert
+   („Konsole 0,30 · 4 Lagen · 10,28 m").                                    */
+
+/**
+ * Eine Bauteil-Karte.
+ * @param {Object} p        Eintrag aus POSITIONS
+ * @param {Array}  bays     Felder, auf die sich die Karte bezieht
+ * @param {Object} aktionen { aufSetzen, aufEntfernen }
+ */
+function bauteilKarte(p, bays, aktionen) {
+  const mit  = bays.filter(b => (b.positions || []).some(x => x.cat === p.key));
+  const alle = bays.length > 0 && mit.length === bays.length;
+  const teil = mit.length > 0 && !alle;
+
+  const karte = document.createElement('button');
+  karte.type = 'button';
+  karte.className = 'bauteil-karte'
+    + (alle ? ' aktiv' : '') + (teil ? ' teilweise' : '');
+  karte.dataset.cat = p.key;
+  karte.setAttribute('aria-pressed', String(alle));
+
+  const kopf = document.createElement('span');
+  kopf.className = 'bk-kopf';
+  const haken = document.createElement('span');
+  haken.className = 'bk-haken';
+  haken.textContent = alle ? '✓' : (teil ? '–' : '');
+  haken.setAttribute('aria-hidden', 'true');
+  const name = document.createElement('span');
+  name.className = 'bk-name';
+  name.textContent = p.label;
+  kopf.appendChild(haken); kopf.appendChild(name);
+  karte.appendChild(kopf);
+
+  const wert = document.createElement('span');
+  wert.className = 'bk-wert';
+  wert.textContent = bauteilWertText(p, mit);
+  karte.appendChild(wert);
+
+  karte.title = alle
+    ? `${p.label} bei allen ausgewählten Feldern – antippen zum Ändern, ✕ entfernt`
+    : teil ? `${p.label} bei ${mit.length} von ${bays.length} Feldern – antippen zum Einstellen`
+           : `${p.label} einstellen und auf die Auswahl anwenden`;
+  karte.addEventListener('click', () => aktionen.aufSetzen());
+
+  if (alle || teil) {
+    const weg = document.createElement('span');
+    weg.className = 'bk-weg';
+    weg.textContent = '✕';
+    weg.title = `${p.label} bei allen ausgewählten Feldern entfernen`;
+    weg.setAttribute('role', 'button');
+    weg.addEventListener('click', e => { e.stopPropagation(); aktionen.aufEntfernen(); });
+    karte.appendChild(weg);
+  }
+  return karte;
+}
+
+/** Untertitel einer aktiven Bauteil-Karte: der WERT, nicht der Typ. */
+function bauteilWertText(p, mitFeldern) {
+  if (!mitFeldern.length) return 'nicht gesetzt';
+  const texte = new Set();
+  let meter = 0, hatMeter = false;
+  mitFeldern.forEach(b => {
+    (b.positions || []).filter(x => x.cat === p.key).forEach(pos => {
+      if (p.konsole) {
+        texte.add((pos.typ || KONSOLE_TYPES_2D[0]) + ' · '
+                + (isMeterBilling(pos) ? 'lfd. Meter' : lagenLabel(pos.lagen)));
+      } else if (p.feld) {
+        texte.add(abstuetzMassText(pos, b));
+      } else {
+        const q = qtyLabel(pos, b);
+        if (q) texte.add(q);
+      }
+      const m = posMeters(pos, b);
+      if (m != null) { meter += m; hatMeter = true; }
+    });
+  });
+  const kern = texte.size === 0 ? '' : texte.size === 1 ? [...texte][0] : 'gemischt';
+  const summe = hatMeter ? fmtQty(meter) + ' m' : '';
+  return [p.label, kern, summe].filter(Boolean).join(' · ');
+}
+
+function renderWzBauteile() {
+  const el = document.getElementById('wzBauteile');
+  if (!el) return;
+  el.innerHTML = '';
+  el.appendChild(wzKopf('Zusatzbauteile', '⊞', 'bauteile'));
+
+  const sel = currentSelectionBays().filter(isBayVisible);
+  if (!sel.length) {
+    const hint = document.createElement('p');
+    hint.className = 'wz-hinweis';
+    hint.textContent = 'Kein Feld ausgewählt – Bauteile wirken auf die Auswahl.';
+    el.appendChild(hint);
+    return;
+  }
+
+  const ziel = document.createElement('div');
+  ziel.className = 'wz-ziel';
+  ziel.textContent = sel.length === 1
+    ? `wirkt auf Feld ${bayName(sel[0])}`
+    : `wirkt auf ${sel.length} ausgewählte Felder`;
+  el.appendChild(ziel);
+
+  const grid = document.createElement('div');
+  grid.className = 'bauteil-grid';
+  POSITIONS.forEach(p => {
+    grid.appendChild(bauteilKarte(p, sel, {
+      aufSetzen: () => {
+        if (p.konsole) openBulkKonsoleSheet(sel);
+        else openBulkPosSheet(p.key, sel);
+      },
+      aufEntfernen: () => {
+        sel.forEach(bay => {
+          normalizeBay(bay);
+          bay.positions = bay.positions.filter(x => x.cat !== p.key);
+        });
+        renderAll(); scheduleAutosave2d();
+        showToast(`${p.label} bei ${sel.length} Feld${sel.length === 1 ? '' : 'ern'} entfernt`);
+      }
+    }));
+  });
+  el.appendChild(grid);
+}
+
+/**
+ * Konsole für eine Feldmenge: Typ, Abrechnungsart und Lagen bzw. Meter.
+ * Bewusst dasselbe Blatt für ein Feld wie für fünfzig – so gibt es keine
+ * zweite Konsolen-Bedienung, die anders rechnet.
+ */
+function openBulkKonsoleSheet(bays) {
+  if (!bays.length) return;
+  closeSheet();
+
+  const vorhanden = bays.map(b => (b.positions || []).find(x => x.cat === 'konsole')).find(Boolean);
+  let typ     = (vorhanden && vorhanden.typ) || bulkKonsTyp;
+  let billing = (vorhanden && vorhanden.billing) || bulkKonsBilling;
+  let lagen   = (vorhanden && vorhanden.lagen != null) ? String(vorhanden.lagen) : bulkKonsLagen;
+  let meter   = (vorhanden && vorhanden.meterValue != null) ? vorhanden.meterValue : bulkKonsMeter;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sheetOverlay'; overlay.className = 'sheet-overlay';
+  overlay.addEventListener('click', closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.id = 'bottomSheet'; sheet.className = 'bottom-sheet';
+  sheet.addEventListener('click', e => e.stopPropagation());
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sheet-header';
+  hdr.textContent = `Konsole für ${bays.length} Feld${bays.length === 1 ? '' : 'er'}`;
+  sheet.appendChild(hdr);
+
+  const typLbl = document.createElement('div');
+  typLbl.className = 'sheet-section-label'; typLbl.textContent = 'Breite';
+  sheet.appendChild(typLbl);
+  const typRow = document.createElement('div');
+  typRow.className = 'bulk-kons-typ-row';
+  KONSOLE_TYPES_2D.forEach(t => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'bulk-ktype-btn' + (typ === t ? ' active' : '');
+    b.textContent = t;
+    b.addEventListener('click', () => {
+      typ = t;
+      typRow.querySelectorAll('.bulk-ktype-btn').forEach(x => x.classList.toggle('active', x === b));
+    });
+    typRow.appendChild(b);
+  });
+  sheet.appendChild(typRow);
+
+  const billLbl = document.createElement('div');
+  billLbl.className = 'sheet-section-label'; billLbl.textContent = 'Abrechnung';
+  sheet.appendChild(billLbl);
+  const billRow = document.createElement('div');
+  billRow.className = 'bulk-kons-bill-row';
+
+  const lagenLbl = document.createElement('div');
+  lagenLbl.className = 'sheet-section-label'; lagenLbl.textContent = 'Lagen';
+  const lagenRow = document.createElement('div');
+  lagenRow.className = 'bulk-kons-lagen-row';
+
+  const meterLbl = document.createElement('div');
+  meterLbl.className = 'sheet-section-label'; meterLbl.textContent = 'Länge je Feld';
+  const meterRow = document.createElement('div');
+  meterRow.className = 'konsole-meter-row';
+
+  const syncBill = () => {
+    const m = billing === 'meter';
+    lagenLbl.style.display = m ? 'none' : '';
+    lagenRow.style.display = m ? 'none' : '';
+    meterLbl.style.display = m ? '' : 'none';
+    meterRow.style.display = m ? '' : 'none';
+  };
+  [['lagen', 'pro Lage'], ['meter', 'in Metern']].forEach(([val, lbl]) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'bulk-kbill-btn' + (billing === val ? ' active' : '');
+    b.textContent = lbl;
+    b.addEventListener('click', () => {
+      billing = val;
+      billRow.querySelectorAll('.bulk-kbill-btn').forEach(x => x.classList.toggle('active', x === b));
+      syncBill();
+    });
+    billRow.appendChild(b);
+  });
+  sheet.appendChild(billRow);
+
+  sheet.appendChild(lagenLbl);
+  [['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen'], ['alle', 'alle Lagen']]
+    .forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'bulk-klagen-btn' + (lagen === val ? ' active' : '');
+      b.textContent = lbl;
+      b.addEventListener('click', () => {
+        lagen = val;
+        lagenRow.querySelectorAll('.bulk-klagen-btn').forEach(x => x.classList.toggle('active', x === b));
+      });
+      lagenRow.appendChild(b);
+    });
+  sheet.appendChild(lagenRow);
+
+  sheet.appendChild(meterLbl);
+  const meterInp = document.createElement('input');
+  meterInp.type = 'number'; meterInp.className = 'kmeter-inp';
+  meterInp.min = '0'; meterInp.step = 'any'; meterInp.inputMode = 'decimal';
+  meterInp.placeholder = 'je Feld die Feldlänge';
+  meterInp.value = meter == null ? '' : String(meter);
+  meterInp.addEventListener('input', () => {
+    const v = parseFloat(meterInp.value);
+    meter = (meterInp.value === '' || isNaN(v) || v < 0) ? null : v;
+  });
+  const meterUnit = document.createElement('span');
+  meterUnit.className = 'kmeter-unit'; meterUnit.textContent = 'm';
+  meterRow.appendChild(meterInp); meterRow.appendChild(meterUnit);
+  sheet.appendChild(meterRow);
+  syncBill();
+
+  const act = document.createElement('div');
+  act.className = 'sheet-actions';
+  const abbr = document.createElement('button');
+  abbr.type = 'button'; abbr.className = 'sheet-del'; abbr.textContent = 'Abbrechen';
+  abbr.addEventListener('click', closeSheet);
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'sheet-ok';
+  ok.textContent = `Auf ${bays.length} Feld${bays.length === 1 ? '' : 'er'} anwenden`;
+  ok.addEventListener('click', () => {
+    bulkKonsTyp = typ; bulkKonsBilling = billing;
+    bulkKonsLagen = lagen; bulkKonsMeter = meter;
+    bays.forEach(bay => {
+      normalizeBay(bay);
+      bay.positions.push({
+        id: ++_bId, cat: 'konsole', typ,
+        lagen, billing,
+        meterValue: billing === 'meter' ? meter : null
+      });
+    });
+    renderAll(); closeSheet(); scheduleAutosave2d();
+    showToast('Konsole auf ' + bays.length + ' Feld' + (bays.length === 1 ? '' : 'ern') + ' ergänzt');
+  });
+  act.appendChild(abbr); act.appendChild(ok);
+  sheet.appendChild(act);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
 }
 
 /** Alle (sichtbaren) Felder einer Achse/eines Abschnitts markieren –
@@ -4783,21 +6380,6 @@ function waehleAbschnittFelder(id) {
   });
   renderAll();
   showToast(`${bulkSelected.size} Feld${bulkSelected.size === 1 ? '' : 'er'} aus „${abschnittName(id)}" ausgewählt`);
-}
-
-/** Überschrift eines Menüblocks. */
-function wzKopf(text, ico) {
-  const h = document.createElement('div');
-  h.className = 'wz-kopfzeile';
-  if (ico) {
-    const i = document.createElement('span');
-    i.className = 'wz-kopf-ico'; i.textContent = ico; i.setAttribute('aria-hidden', 'true');
-    h.appendChild(i);
-  }
-  const t = document.createElement('span');
-  t.className = 'wz-kopf-txt'; t.textContent = text;
-  h.appendChild(t);
-  return h;
 }
 
 /* ── Block „Ansicht" – der Handy-Modus ───────────────────────────────────────
@@ -4850,32 +6432,19 @@ function renderAbschnittBar() {
   if (!el) return;
   el.innerHTML = '';
 
-  const head = wzKopf('Achsen / Abschnitte', '🧭');
+  const head = wzKopf('Achsen', '🧭', 'achsen');
   head.classList.add('absch-head');
+  el.appendChild(head);
 
+  // Anlegen geht über den festen Knopf „+ Achse" in der Werkzeugleiste. Ein
+  // zweiter, gleichrangiger Knopf hier hätte nur eine zweite Gewohnheit
+  // erzeugt – deshalb steht hier nur noch die Verwaltung.
   const addBtn = document.createElement('button');
   addBtn.type = 'button'; addBtn.className = 'absch-add-btn';
   addBtn.textContent = '+ Achse';
-  addBtn.title = 'Neue Achse / neuen Abschnitt anlegen (z. B. „Achse A", „Nordseite")';
-  addBtn.addEventListener('click', () => {
-    const name = prompt('Name der Achse / des Abschnitts (z. B. „Achse A", „Nordseite"):',
-                        `Achse ${String.fromCharCode(65 + abschnitteList().length)}`);
-    if (name === null) return;
-    const a = addAbschnitt(name.trim());
-    // Direkt nutzbar: liegt eine Auswahl vor, wandert sie gleich in die neue
-    // Achse – das ist der mit Abstand häufigste nächste Schritt.
-    const sel = currentSelectionBays();
-    if (sel.length) {
-      assignAbschnitt(sel, a.id);
-      showToast(`Achse „${a.name}" angelegt · ${sel.length} Feld${sel.length === 1 ? '' : 'er'} zugeordnet`);
-    } else {
-      showToast(`Achse „${a.name}" angelegt`);
-    }
-    renderAll();
-  });
-
-  head.appendChild(addBtn);
-  el.appendChild(head);
+  addBtn.title = 'Neue Achse anlegen (derselbe Knopf wie oben in der Werkzeugleiste)';
+  addBtn.addEventListener('click', neueAchseAnlegen);
+  el.appendChild(addBtn);
 
   /* ── Zuweisen: Achse für die aktuelle Auswahl ──────────────────────────
      Der Kernfall aus der Praxis: fünf Felder markieren → Achse B zuweisen.
@@ -4914,22 +6483,8 @@ function renderAbschnittBar() {
       abschRow.appendChild(chip);
     };
     abschnitteList().forEach(a => mkAbschChip(a.id, a.name, a.color));
-    mkAbschChip(null, 'Ohne Abschnitt', '#8a97a5');
+    mkAbschChip(null, 'Ohne Achse', '#8a97a5');
 
-    const newAbschBtn = document.createElement('button');
-    newAbschBtn.type = 'button';
-    newAbschBtn.className = 'bulk-pos-chip absch-new-chip';
-    newAbschBtn.textContent = '+ neue Achse';
-    newAbschBtn.addEventListener('click', () => {
-      const name = prompt('Name der Achse / des Abschnitts (z. B. „Achse A", „Nordseite"):',
-                          `Achse ${String.fromCharCode(65 + abschnitteList().length)}`);
-      if (name === null) return;
-      const a = addAbschnitt(name.trim());
-      assignAbschnitt(sel, a.id);
-      renderAll();
-      showToast(`${sel.length} Feld${sel.length === 1 ? '' : 'er'} → „${a.name}"`);
-    });
-    abschRow.appendChild(newAbschBtn);
     el.appendChild(abschRow);
   }
 
@@ -4987,8 +6542,8 @@ function renderAbschnittBar() {
     eye.addEventListener('click', () => {
       setAbschnittHidden(id, !hidden);
       showToast(hidden
-        ? `„${a ? a.name : 'Ohne Abschnitt'}" eingeblendet`
-        : `„${a ? a.name : 'Ohne Abschnitt'}" ausgeblendet · ${count} Feld${count === 1 ? '' : 'er'} bleiben erhalten`);
+        ? `„${a ? a.name : 'Ohne Achse'}" eingeblendet`
+        : `„${a ? a.name : 'Ohne Achse'}" ausgeblendet · ${count} Feld${count === 1 ? '' : 'er'} bleiben erhalten`);
       renderAll();
     });
     row.appendChild(eye);
@@ -4998,7 +6553,7 @@ function renderAbschnittBar() {
 
     const nameEl = document.createElement('span');
     nameEl.className = 'absch-name';
-    nameEl.textContent = a ? a.name : 'Ohne Abschnitt';
+    nameEl.textContent = a ? a.name : 'Ohne Achse';
 
     const cnt = document.createElement('span');
     cnt.className = 'absch-count';
@@ -5023,21 +6578,14 @@ function renderAbschnittBar() {
       const ren = document.createElement('button');
       ren.type = 'button'; ren.className = 'absch-mini-btn';
       ren.textContent = '✎'; ren.title = 'Achse umbenennen';
-      ren.addEventListener('click', () => {
-        const next = prompt('Neuer Name für die Achse / den Abschnitt:', a.name);
-        if (next === null) return;
-        const trimmed = next.trim();
-        if (!trimmed) return;
-        renameAbschnitt(a.id, trimmed);
-        renderAll();
-      });
+      ren.addEventListener('click', () => achseUmbenennen(a.id));
 
       const del = document.createElement('button');
       del.type = 'button'; del.className = 'absch-mini-btn danger';
       del.textContent = '×';
       del.title = 'Achse löschen (Felder bleiben erhalten)';
       del.addEventListener('click', () => {
-        if (count && !confirm(`Achse „${a.name}" löschen?\n\nDie ${count} zugeordneten Felder bleiben erhalten und gelten danach als „Ohne Abschnitt".`)) return;
+        if (count && !confirm(`Achse „${a.name}" löschen?\n\nDie ${count} zugeordneten Felder bleiben erhalten und gelten danach als „Ohne Achse".`)) return;
         deleteAbschnitt(a.id);
         showToast(`Achse „${a.name}" gelöscht`);
         renderAll();
@@ -5085,7 +6633,7 @@ function renderSelectionInfo() {
 
   const lbl = document.createElement('span');
   lbl.className = 'sel-info-label';
-  lbl.textContent = sum.names.length > 1 ? 'Abschnitte:' : 'Abschnitt:';
+  lbl.textContent = sum.names.length > 1 ? 'Achsen:' : 'Achse:';
   body.appendChild(lbl);
 
   const chips = document.createElement('span');
@@ -5098,7 +6646,7 @@ function renderSelectionInfo() {
     chips.appendChild(c);
   };
   sum.ids.forEach(id => addChip(abschnittName(id), abschnittColor(id)));
-  if (sum.hasUnassigned) addChip('Ohne Abschnitt', '#8a97a5');
+  if (sum.hasUnassigned) addChip('Ohne Achse', '#8a97a5');
   body.appendChild(chips);
   el.appendChild(body);
 
@@ -5311,18 +6859,17 @@ function openBulkPosSheet(catKey, bays) {
   requestAnimationFrame(() => sheet.classList.add('open'));
 }
 
-/** Block „Bearbeiten" im Werkzeug-Menü: alles, was auf die aktuelle Auswahl
- *  wirkt – Höhe, Kategorien, Konsolen, Kopieren, Vorlagen, Spiegeln.
- *
- *  Ziel ist IMMER `currentSelectionBays()`: bei eingeschalteter
- *  Mehrfachauswahl die angehakten Felder, sonst das einzeln ausgewählte.
- *  Dadurch tut derselbe Knopf in beiden Fällen dasselbe, und es gibt nur
- *  eine Auswahlquelle. */
+/* ── 4 · Aktionen ────────────────────────────────────────────────────────────
+   Kopieren, Einfügen, Duplizieren, Löschen – dazu Vorlagen und Spiegeln.
+   Ziel ist IMMER `currentSelectionBays()`: bei Mehrfachauswahl die markierten
+   Felder, sonst das einzeln ausgewählte. Derselbe Knopf tut in beiden Fällen
+   dasselbe, und es gibt nur eine Auswahlquelle.                            */
+
 function renderBulkBar() {
   const el = document.getElementById('bulkBar');
   if (!el) return;
   el.innerHTML = '';
-  el.appendChild(wzKopf('Bearbeiten', '✎'));
+  el.appendChild(wzKopf('Aktionen', '⚡', 'aktionen'));
 
   // Sammelaktionen wirken ausschließlich auf SICHTBARE Felder – Felder einer
   // ausgeblendeten Achse sollen sich nicht unbemerkt mitverändern.
@@ -5332,310 +6879,89 @@ function renderBulkBar() {
     const hint = document.createElement('p');
     hint.className = 'wz-hinweis';
     hint.textContent = allBaysFlat().length
-      ? 'Kein Feld ausgewählt. Feld im Plan antippen – oder oben die Mehrfachauswahl '
-        + 'einschalten und mehrere Felder markieren.'
+      ? 'Kein Feld ausgewählt. Feld im Plan antippen – langes Tippen wählt mehrere aus.'
       : 'Zuerst Felder anlegen („+ Feld" in der Werkzeugleiste).';
     el.appendChild(hint);
     return;
   }
 
-  // Woran wird gerade gearbeitet? Eine Zeile, die bei jeder Aktion darüber
-  // steht – auf der Baustelle die wichtigste Rückmeldung des Menüs.
+  const n = selectedBays.length;
   const ziel = document.createElement('div');
   ziel.className = 'wz-ziel';
-  ziel.textContent = bulkMode
-    ? `wirkt auf ${selectedBays.length} ausgewählte${selectedBays.length === 1 ? 's' : ''} Feld${selectedBays.length === 1 ? '' : 'er'}`
-    : `wirkt auf Feld ${bayLabel(state.sections[selectedSi], selectedBi)}`;
+  ziel.textContent = n === 1
+    ? `wirkt auf Feld ${bayName(selectedBays[0])}`
+    : `wirkt auf ${n} ausgewählte Felder`;
   el.appendChild(ziel);
 
-  // ── Höhe ───────────────────────────────────────────────────────────────
-  // Einmal eingeben, per Klick auf alle markierten Felder übertragen – ohne
-  // deren sonstige Positionen anzutasten.
-  const heightLabel = document.createElement('div');
-  heightLabel.className = 'wz-unterlabel';
-  heightLabel.textContent = 'Höhe setzen';
-  el.appendChild(heightLabel);
-
-  const heightForm = document.createElement('div');
-  heightForm.className = 'bulk-height-form';
-
-  const heightRow = document.createElement('div');
-  heightRow.className = 'bay-height-row';
-
-  const applyHeightBtn = document.createElement('button');
-  applyHeightBtn.type = 'button'; applyHeightBtn.className = 'bulk-height-apply-btn';
-
-  const syncApplyHeightBtn = () => {
-    const n = selectedBays.length;
-    applyHeightBtn.textContent = 'Höhe auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' übernehmen';
-    applyHeightBtn.disabled = bulkHL == null && bulkHR == null;
-  };
-
-  const makeBulkHeight = (labelTxt, get, set) => {
-    const field = document.createElement('div');
-    field.className = 'bay-height-field';
-    const lab = document.createElement('span');
-    lab.className = 'bay-height-label'; lab.textContent = labelTxt;
-    const hInp = document.createElement('input');
-    hInp.type = 'number'; hInp.className = 'bay-height-inp';
-    hInp.placeholder = '–'; hInp.min = '0'; hInp.step = '0.05'; hInp.inputMode = 'decimal';
-    hInp.value = get() == null ? '' : get().toFixed(2);
-    hInp.addEventListener('input', () => {
-      const v = parseFloat(hInp.value);
-      set((isNaN(v) || v < 0) ? null : +v.toFixed(2));
-      syncApplyHeightBtn();
-    });
-    field.appendChild(lab); field.appendChild(hInp);
-    return { field, input: hInp };
-  };
-  const bulkHLeft  = makeBulkHeight('H links',  () => bulkHL, v => bulkHL = v);
-  const bulkHRight = makeBulkHeight('H rechts', () => bulkHR, v => bulkHR = v);
-  const bulkHEqBtn = document.createElement('button');
-  bulkHEqBtn.type = 'button'; bulkHEqBtn.className = 'bay-height-eq';
-  bulkHEqBtn.title = 'Beide Höhen gleich setzen'; bulkHEqBtn.textContent = '=';
-  bulkHEqBtn.addEventListener('click', () => {
-    const src = bulkHL != null ? bulkHL : bulkHR;
-    if (src == null) return;
-    bulkHL = src; bulkHR = src;
-    bulkHLeft.input.value = src.toFixed(2); bulkHRight.input.value = src.toFixed(2);
-    syncApplyHeightBtn();
-  });
-  heightRow.appendChild(bulkHLeft.field);
-  heightRow.appendChild(bulkHEqBtn);
-  heightRow.appendChild(bulkHRight.field);
-  heightForm.appendChild(heightRow);
-
-  // Höhe aus der Auswahl übernehmen: sind alle markierten Felder gleich hoch,
-  // stehen die Werte auf Knopfdruck in den Feldern – Tippfehler entfallen.
-  const hUebernehmen = document.createElement('button');
-  hUebernehmen.type = 'button';
-  hUebernehmen.className = 'wz-aktion wz-aktion-klein';
-  hUebernehmen.textContent = '↧ Höhe aus Auswahl übernehmen';
-  hUebernehmen.title = 'Übernimmt die Höhen des ersten ausgewählten Feldes in die Eingabefelder';
-  hUebernehmen.addEventListener('click', () => {
-    const q = selectedBays[0];
-    bulkHL = q.hL != null ? q.hL : null;
-    bulkHR = q.hR != null ? q.hR : null;
-    bulkHLeft.input.value  = bulkHL == null ? '' : bulkHL.toFixed(2);
-    bulkHRight.input.value = bulkHR == null ? '' : bulkHR.toFixed(2);
-    syncApplyHeightBtn();
-  });
-  heightForm.appendChild(hUebernehmen);
-
-  syncApplyHeightBtn();
-  applyHeightBtn.addEventListener('click', () => {
-    selectedBays.forEach(bay => {
-      if (bulkHL != null) bay.hL = bulkHL;
-      if (bulkHR != null) bay.hR = bulkHR;
-    });
-    renderAll();
-    showToast('Höhe auf ' + selectedBays.length + ' Feld'
-      + (selectedBays.length === 1 ? '' : 'ern') + ' übernommen');
-  });
-  heightForm.appendChild(applyHeightBtn);
-  el.appendChild(heightForm);
-
-  // ── Kategorien / Zusatzbauteile ────────────────────────────────────────
-  // Chip togglet die Kategorie auf ALLEN ausgewählten Feldern gleichzeitig
-  // ein/aus. Menge bleibt je Feld automatisch (Länge/Höhe/Feldlänge).
-  const posLabel = document.createElement('div');
-  posLabel.className = 'wz-unterlabel';
-  posLabel.textContent = 'Eigenschaften / Kategorien';
-  el.appendChild(posLabel);
-
-  const chipRow = document.createElement('div');
-  chipRow.className = 'bulk-chip-row';
-  POSITIONS.filter(p => !p.konsole).forEach(p => {
-    const allHave  = selectedBays.every(b => (b.positions || []).some(x => x.cat === p.key));
-    const someHave = !allHave && selectedBays.some(b => (b.positions || []).some(x => x.cat === p.key));
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'bulk-pos-chip' + (allHave ? ' active' : '') + (someHave ? ' partial' : '');
-    chip.textContent = p.label;
-    chip.style.setProperty('--pos-color', p.color);
-    chip.title = allHave ? 'Bei allen ausgewählten Feldern entfernen'
-               : someHave ? 'Bei einem Teil der Auswahl schon vorhanden – antippen zum Einstellen'
-               : 'Menge/Lagen einstellen und auf alle ausgewählten Felder anwenden';
-    chip.addEventListener('click', () => {
-      // Haben ALLE das Bauteil schon → Klick entfernt es (wie bisher).
-      // Sonst öffnet sich der Einstell-Dialog, in dem Menge bzw. Lagen EINMAL
-      // für die gesamte Auswahl festgelegt werden.
-      if (allHave) {
-        selectedBays.forEach(bay => {
-          normalizeBay(bay);
-          const idx = bay.positions.findIndex(x => x.cat === p.key);
-          if (idx >= 0) bay.positions.splice(idx, 1);
-        });
-        renderAll();
-        showToast(p.label + ' bei ' + selectedBays.length + ' Feld'
-          + (selectedBays.length === 1 ? '' : 'ern') + ' entfernt');
-        return;
-      }
-      openBulkPosSheet(p.key, selectedBays);
-    });
-    chipRow.appendChild(chip);
-  });
-  el.appendChild(chipRow);
-
-  // ── Konsole ────────────────────────────────────────────────────────────
-  // Braucht Typ + Lagen/Meter, daher eigenes Mini-Formular statt Toggle-Chip.
-  const konsLabel = document.createElement('div');
-  konsLabel.className = 'wz-unterlabel';
-  konsLabel.textContent = 'Konsole hinzufügen';
-  el.appendChild(konsLabel);
-
-  const konsForm = document.createElement('div');
-  konsForm.className = 'bulk-kons-form';
-
-  const typRow = document.createElement('div');
-  typRow.className = 'bulk-kons-typ-row';
-  KONSOLE_TYPES_2D.forEach(typ => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'bulk-ktype-btn' + (bulkKonsTyp === typ ? ' active' : '');
-    b.textContent = typ;
-    b.addEventListener('click', () => {
-      bulkKonsTyp = typ;
-      typRow.querySelectorAll('.bulk-ktype-btn').forEach(x => x.classList.toggle('active', x.textContent === typ));
-    });
-    typRow.appendChild(b);
-  });
-  konsForm.appendChild(typRow);
-
-  const billRow = document.createElement('div');
-  billRow.className = 'bulk-kons-bill-row';
-  [['lagen', 'pro Lage'], ['meter', 'in Metern']].forEach(([val, lbl]) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'bulk-kbill-btn' + (bulkKonsBilling === val ? ' active' : '');
-    b.textContent = lbl;
-    b.addEventListener('click', () => {
-      bulkKonsBilling = val;
-      billRow.querySelectorAll('.bulk-kbill-btn').forEach(x => x.classList.toggle('active', x === b));
-      lagenRow.style.display  = val === 'meter' ? 'none' : '';
-      meterRow.style.display  = val === 'meter' ? '' : 'none';
-    });
-    billRow.appendChild(b);
-  });
-  konsForm.appendChild(billRow);
-
-  // Meter-Abrechnung: ohne eigenen Wert rechnet jedes Feld mit seiner eigenen
-  // Feldlänge – der Wert hier überschreibt das für alle ausgewählten Felder.
-  const meterRow = document.createElement('div');
-  meterRow.className = 'konsole-meter-row';
-  meterRow.style.display = bulkKonsBilling === 'meter' ? '' : 'none';
-  const meterInp = document.createElement('input');
-  meterInp.type = 'number'; meterInp.className = 'kmeter-inp';
-  meterInp.min = '0'; meterInp.step = 'any'; meterInp.inputMode = 'decimal';
-  meterInp.placeholder = 'je Feld die Feldlänge';
-  meterInp.value = bulkKonsMeter == null ? '' : String(bulkKonsMeter);
-  meterInp.addEventListener('input', () => {
-    const v = parseFloat(meterInp.value);
-    bulkKonsMeter = (meterInp.value === '' || isNaN(v) || v < 0) ? null : v;
-  });
-  const meterUnit = document.createElement('span');
-  meterUnit.className = 'kmeter-unit'; meterUnit.textContent = 'm';
-  meterRow.appendChild(meterInp); meterRow.appendChild(meterUnit);
-  konsForm.appendChild(meterRow);
-
-  const lagenRow = document.createElement('div');
-  lagenRow.className = 'bulk-kons-lagen-row';
-  lagenRow.style.display = bulkKonsBilling === 'meter' ? 'none' : '';
-  [['1', '1 Lage'], ['2', '2 Lagen'], ['3', '3 Lagen'], ['4', '4 Lagen'], ['5', '5 Lagen'], ['alle', 'alle Lagen']].forEach(([val, lbl]) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'bulk-klagen-btn' + (bulkKonsLagen === val ? ' active' : '');
-    b.textContent = lbl;
-    b.addEventListener('click', () => {
-      bulkKonsLagen = val;
-      lagenRow.querySelectorAll('.bulk-klagen-btn').forEach(x => x.classList.toggle('active', x === b));
-    });
-    lagenRow.appendChild(b);
-  });
-  konsForm.appendChild(lagenRow);
-
-  const addKonsBtn = document.createElement('button');
-  addKonsBtn.type = 'button'; addKonsBtn.className = 'bulk-kons-add-btn';
-  addKonsBtn.textContent = '+ Auf ' + selectedBays.length + ' Feld' + (selectedBays.length === 1 ? '' : 'er') + ' anwenden';
-  addKonsBtn.addEventListener('click', () => {
-    selectedBays.forEach(bay => {
-      normalizeBay(bay);
-      bay.positions.push({
-        id: ++_bId, cat: 'konsole', typ: bulkKonsTyp,
-        lagen: bulkKonsLagen, billing: bulkKonsBilling,
-        meterValue: bulkKonsBilling === 'meter' ? bulkKonsMeter : null
-      });
-    });
-    renderAll();
-    showToast('Konsole auf ' + selectedBays.length + ' Feld'
-      + (selectedBays.length === 1 ? '' : 'ern') + ' ergänzt');
-  });
-  konsForm.appendChild(addKonsBtn);
-  el.appendChild(konsForm);
-
-  // ── Kopieren / Einfügen ────────────────────────────────────────────────
-  // „Position kopieren" nimmt die komplette Ausstattung eines Feldes auf,
-  // „Höhe kopieren" nur dessen Höhen. Beide legen im selben Zwischenspeicher
-  // ab und unterscheiden sich allein im Umfang, den sie einstellen – so
-  // bleibt es EIN Kopierweg und nicht zwei.
-  const cpLabel = document.createElement('div');
-  cpLabel.className = 'wz-unterlabel';
-  cpLabel.textContent = 'Kopieren & übertragen';
-  el.appendChild(cpLabel);
-
-  const cpBtnRow = document.createElement('div');
-  cpBtnRow.className = 'wz-aktion-reihe';
+  // ── Kopieren / Einfügen / Duplizieren / Löschen ─────────────────────────
+  const reihe1 = document.createElement('div');
+  reihe1.className = 'wz-aktion-reihe';
 
   const quelle = selectedBays[0];
   const posBtn = document.createElement('button');
   posBtn.type = 'button'; posBtn.className = 'wz-aktion';
-  posBtn.textContent = '📋 Position kopieren';
-  posBtn.title = selectedBays.length > 1
-    ? `Nimmt das erste ausgewählte Feld als Vorlage (Höhen, Zusatzbauteile, Achse, Notiz)`
+  posBtn.textContent = '📋 Kopieren';
+  posBtn.title = n > 1
+    ? 'Nimmt das erste ausgewählte Feld als Vorlage (Höhen, Zusatzbauteile, Achse, Notiz)'
     : 'Höhen, Zusatzbauteile, Achse und Notiz dieses Feldes kopieren';
   posBtn.addEventListener('click', () => {
     pasteOpts.positionen = true; pasteOpts.hoehen = true;
     savePasteOpts();
     copyBayPositions(quelle);
+    renderAll();
   });
 
-  const hBtn = document.createElement('button');
-  hBtn.type = 'button'; hBtn.className = 'wz-aktion';
-  hBtn.textContent = '📐 Höhe kopieren';
-  hBtn.title = 'Nur die Höhen dieses Feldes kopieren – Zusatzbauteile der Ziele bleiben unangetastet';
-  hBtn.addEventListener('click', () => {
-    pasteOpts.hoehen = true;
-    pasteOpts.positionen = false; pasteOpts.abschnitt = false;
-    pasteOpts.notiz = false; pasteOpts.laenge = false;
-    savePasteOpts();
-    copyBayPositions(quelle);
+  // Der Zweitname `bulk-paste-apply-btn` bleibt: die Abnahmetests sprechen den
+  // Knopf darüber an, und er trägt weiterhin die Zielanzahl in seiner
+  // Beschriftung – man sieht vor dem Tippen, worauf er wirkt.
+  const einfBtn = document.createElement('button');
+  einfBtn.type = 'button'; einfBtn.className = 'wz-aktion bulk-paste-apply-btn';
+  einfBtn.textContent = '📥 Einfügen (' + n + ' Feld' + (n === 1 ? '' : 'er') + ')';
+  einfBtn.disabled = !copiedBayData;
+  einfBtn.title = copiedBayData
+    ? 'Übernommen wird: ' + pasteScopeText()
+    : 'Noch nichts kopiert';
+  einfBtn.addEventListener('click', () => {
+    const k = pasteBayPositionsToAll(selectedBays);
+    renderAll(); scheduleAutosave2d();
+    showToast(`Auf ${k} Feld${k === 1 ? '' : 'er'} angewendet · ${pasteScopeText()}`);
   });
 
-  cpBtnRow.appendChild(posBtn); cpBtnRow.appendChild(hBtn);
-  el.appendChild(cpBtnRow);
+  reihe1.appendChild(posBtn); reihe1.appendChild(einfBtn);
+  el.appendChild(reihe1);
 
-  if (!copiedBayData) {
-    const cpHint = document.createElement('p');
-    cpHint.className = 'wz-hinweis';
-    cpHint.textContent = 'Noch nichts kopiert. Nach dem Kopieren erscheint hier „auf Auswahl anwenden".';
-    el.appendChild(cpHint);
-  } else {
+  const reihe2 = document.createElement('div');
+  reihe2.className = 'wz-aktion-reihe';
+
+  const dupBtn = document.createElement('button');
+  dupBtn.type = 'button'; dupBtn.className = 'wz-aktion';
+  dupBtn.textContent = '⧉ Duplizieren';
+  dupBtn.title = n === 1
+    ? 'Kopie des Feldes direkt dahinter anhängen'
+    : `${n} Felder als Kopie dahinter anhängen`;
+  dupBtn.addEventListener('click', () => dupliziereAuswahl(selectedBays));
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button'; delBtn.className = 'wz-aktion wz-aktion-gefahr';
+  delBtn.textContent = '🗑 Löschen';
+  delBtn.title = n === 1 ? 'Feld löschen' : `${n} Felder löschen`;
+  delBtn.addEventListener('click', () => loescheAuswahl(selectedBays));
+
+  reihe2.appendChild(dupBtn); reihe2.appendChild(delBtn);
+  el.appendChild(reihe2);
+
+  // Welche Eigenschaften werden beim Einfügen übernommen?
+  if (copiedBayData) {
     const cpWrap = document.createElement('div');
     cpWrap.className = 'bulk-paste-form';
-
-    const cpApply = document.createElement('button');
-    cpApply.type = 'button'; cpApply.className = 'bulk-paste-apply-btn';
-    const syncCpApply = () => {
-      const n = selectedBays.length;
-      const any = PASTE_FIELDS.some(([k]) => pasteOpts[k]);
-      cpApply.textContent = '📋 Auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' anwenden';
-      cpApply.disabled = !any;
-      cpApply.title = any ? 'Übernommen wird: ' + pasteScopeText()
-                          : 'Mindestens eine Eigenschaft auswählen';
-    };
-
-    cpWrap.appendChild(buildPasteScopeRow(syncCpApply));
-
+    const cpLabel = document.createElement('div');
+    cpLabel.className = 'wz-unterlabel';
+    cpLabel.textContent = 'Beim Einfügen übernehmen';
+    cpWrap.appendChild(cpLabel);
+    cpWrap.appendChild(buildPasteScopeRow(() => {
+      einfBtn.disabled = !PASTE_FIELDS.some(([k]) => pasteOpts[k]);
+      einfBtn.title = 'Übernommen wird: ' + pasteScopeText();
+    }));
     const cpInfo = document.createElement('div');
     cpInfo.className = 'bulk-paste-info';
     const nPos = (copiedBayData.positions || []).length;
@@ -5644,19 +6970,10 @@ function renderBulkBar() {
       + ` / ${copiedBayData.hR != null ? fmtQty(copiedBayData.hR) : '–'} m`
       + `  ·  Länge ${fmtQty(copiedBayData.len || 0)} m`;
     cpWrap.appendChild(cpInfo);
-
-    syncCpApply();
-    cpApply.addEventListener('click', () => {
-      const n = pasteBayPositionsToAll(selectedBays);
-      renderAll();
-      showToast(`Auf ${n} Feld${n === 1 ? '' : 'er'} angewendet · ${pasteScopeText()}`);
-    });
-    cpWrap.appendChild(cpApply);
     el.appendChild(cpWrap);
   }
 
   // ── Vorlagen ───────────────────────────────────────────────────────────
-  // Überschreibt Höhen + Positionen aller markierten Felder mit einem Klick.
   const favBulkLabel = document.createElement('div');
   favBulkLabel.className = 'wz-unterlabel';
   favBulkLabel.textContent = 'Vorlage anwenden';
@@ -5675,12 +6992,12 @@ function renderBulkBar() {
       const chip = document.createElement('button');
       chip.type = 'button'; chip.className = 'fav-chip-name';
       chip.textContent = fav.name;
-      chip.title = 'Auf ' + selectedBays.length + ' Feld' + (selectedBays.length === 1 ? '' : 'er') + ' anwenden';
+      chip.title = 'Auf ' + n + ' Feld' + (n === 1 ? '' : 'er') + ' anwenden';
       chip.addEventListener('click', () => {
         selectedBays.forEach(bay => applyFavoriteToBay(fav, bay));
-        renderAll();
-        showToast('Vorlage „' + fav.name + '" auf ' + selectedBays.length + ' Feld'
-          + (selectedBays.length === 1 ? '' : 'ern') + ' angewendet');
+        renderAll(); scheduleAutosave2d();
+        showToast('Vorlage „' + fav.name + '" auf ' + n + ' Feld'
+          + (n === 1 ? '' : 'ern') + ' angewendet');
       });
       favBulkWrap.appendChild(chip);
     });
@@ -5688,8 +7005,6 @@ function renderBulkBar() {
   el.appendChild(favBulkWrap);
 
   // ── Spiegeln ───────────────────────────────────────────────────────────
-  // Dupliziert genau die ausgewählten Felder (auch nicht benachbarte)
-  // gespiegelt zur gegenüberliegenden Seite.
   const mirrorLabel = document.createElement('div');
   mirrorLabel.className = 'wz-unterlabel';
   mirrorLabel.textContent = 'Auswahl spiegeln';
@@ -5711,6 +7026,31 @@ function renderBulkBar() {
   mirrorSelRow.appendChild(mirrorHSelBtn);
   mirrorSelRow.appendChild(mirrorVSelBtn);
   el.appendChild(mirrorSelRow);
+}
+
+/** Hängt hinter jedes ausgewählte Feld eine Kopie an – Höhen, Länge und
+ *  Zusatzbauteile inklusive. */
+function dupliziereAuswahl(bays) {
+  finalizeUndoSnapshot();
+  let n = 0;
+  // Rückwärts einfügen, damit sich die Indizes der noch offenen Felder nicht
+  // unter der Schleife verschieben.
+  state.sections.forEach(sec => {
+    for (let bi = sec.bays.length - 1; bi >= 0; bi--) {
+      const bay = sec.bays[bi];
+      if (!bays.some(b => b.id === bay.id)) continue;
+      const kopie = JSON.parse(JSON.stringify(bay));
+      kopie.id = ++_bId;
+      (kopie.positions || []).forEach(p => { p.id = ++_bId; });
+      sec.bays.splice(bi + 1, 0, kopie);
+      n++;
+    }
+  });
+  invalidateEckenCache();
+  renderAll(); scheduleAutosave2d();
+  finalizeUndoSnapshot();
+  showToast(`${n} Feld${n === 1 ? '' : 'er'} dupliziert`,
+            { label: 'Rückgängig', onClick: performUndo });
 }
 
 function renderSections() {
@@ -5808,7 +7148,7 @@ function renderSections() {
         tag.className = 'bay-absch-tag';
         tag.style.setProperty('--absch-color', bayAbsch.color);
         tag.textContent = bayAbsch.name;
-        tag.title = 'Abschnitt: ' + bayAbsch.name;
+        tag.title = 'Achse: ' + bayAbsch.name;
         top.appendChild(tag);
       }
 
@@ -6017,13 +7357,14 @@ function _runRender() {
   }
   // Werkzeug-Menue: Auswahl- und Bearbeiten-Block haengen an derselben
   // Bedarfsmeldung wie die frueheren Leisten in der Seitenleiste.
-  if (need.bulk)    { renderWzAuswahl(); renderBulkBar(); }
+  if (need.bulk)    { renderWzAuswahl(); renderWzMasse(); renderWzBauteile(); renderBulkBar(); }
   if (need.sidebar) renderSections();
   // Die Achsenliste zeigt auch die Zuweisung fuer die aktuelle Auswahl an und
   // muss deshalb bei BEIDEN Anlaessen mitziehen.
   if (need.bulk || need.sidebar) renderAbschnittBar();
   if (need.svg)     renderSvg();
   renderSelectionInfo();
+  renderMehrfachBar();
   updateWerkzeugBadge();
 }
 
@@ -6135,7 +7476,8 @@ function onLoadFile(e) {
       state.hideUnassigned = !!s.hideUnassigned;
       state.aufmass  = s.aufmass || null;
       state.ecken    = s.ecken || {};
-      state.bordbrettKanten = Array.isArray(s.bordbrettKanten) ? s.bordbrettKanten : [];
+      state.bordbrettLinien = Array.isArray(s.bordbrettLinien) ? s.bordbrettLinien : [];
+      state.bordbrettKanten = Array.isArray(s.bordbrettKanten) ? s.bordbrettKanten : null;
       state.bordbretter = Array.isArray(s.bordbretter) ? s.bordbretter : null;
       // Migrate v1 saves (no x0/y0): reconstruct chain positions
       let cx = 0, cy = 0;
@@ -6324,8 +7666,6 @@ const AUFMASS_MODI = [
   ['einzelfeld', 'nur Einzelfeld', 'Nur Wände, die aus genau einem Feld bestehen.']
 ];
 
-// Übliche Aufschläge in m – Schnellwahl im Dialog, freie Eingabe bleibt möglich.
-const AUFMASS_FELD_PRESETS = [0.80, 0.73];
 
 const AUFMASS_DEFAULTS = {
   // Standard: keine ZUSCHLÄGE. Sie werden bewusst vom Nutzer zugeschaltet,
@@ -6393,28 +7733,6 @@ function aufmassAktiv() {
   return r.eckzuschlag.aktiv || r.feldzuschlag.aktiv;
 }
 
-/** Kurzbeschreibung der aktiven Regeln (Dialog, PDF-Fußnote). */
-function aufmassRuleText() {
-  const r = aufmassRules();
-  const parts = ['Achsmaße der Gerüstkonstruktion (DIN 18451, 5.1.1)'];
-  if (r.eckzuschlag.aktiv) {
-    parts.push(`Außenecke beidseitig + ${fmtQty(eckZuschlagWert())} m (La = L + L1)`);
-  }
-  if (r.feldzuschlag.aktiv) {
-    const m = AUFMASS_MODI.find(x => x[0] === r.feldzuschlag.modus);
-    parts.push(`Aufschlag ${fmtQty(r.feldzuschlag.wert)} m ${m ? m[1] : ''}`.trim());
-  }
-  if (r.innenecke.aktiv) {
-    parts.push(`Innenecke ± ${fmtQty(innenEckWert())} m `
-             + '(durchlaufende Achse −, ausfüllende Achse +)');
-  }
-  if (Object.values(state.ecken || {}).some(w => w && w.umlauf && w.umlauf.length)) {
-    parts.push('Außenecken, an denen die Lage laut Festlegung um die Ecke läuft, '
-             + `+ ${fmtQty(eckZuschlagWert())} m am Feld an der Ecke`);
-  }
-  return parts.join('   ·   ');
-}
-
 /** Wände als Listen von Sektionsindizes: Ketten direkt aneinanderhängender
  *  Felder gleichen Winkels. Grundlage für den Feldzuschlag „je Wand". */
 function wallChains() {
@@ -6477,16 +7795,19 @@ function achseVonSektion(achsen, si) {
    bleibt 2,57 m lang – egal, wie sie auf dem Bildschirm liegt. Die Längs-
    kanten sind so lang wie das Feld, die Stirnkanten so tief wie das Gerüst.
 
-   Eine geometrische Kante zählt HÖCHSTENS EINMAL. Zwei nebeneinanderliegende
-   Felder teilen sich ihre Stirnkante; wäre sie an beiden Feldern markiert,
-   stünde sie sonst zweimal im Aufmaß. Vor dem Summieren werden die Kanten
-   deshalb über ihre Lage entdoppelt (beide Endpunkte, auf den Millimeter
-   gerundet, richtungsunabhängig).
+   Ein Bordbrett ist aber MEHR als eine Kante: es bestimmt die abrechnungs-
+   relevante Aufmaßlänge einer Gebäudeseite. Deshalb wird es als LINIE
+   geführt – eine Kette von Kantenstücken mit frei setzbarem Anfang und Ende
+   (auch mitten im Feld), mit mehreren Lagen und mit einer Zuordnung zu einer
+   Achse. Siehe „Datenmodell" weiter unten.
 
-   Gespeichert wird eine schlichte Liste `state.bordbrettKanten` mit Einträgen
-   `{ b: <Feld-ID>, k: 0…3 }`. Ältere Zeichnungen kennen stattdessen
-   `state.bordbretter` (gezeichnete Linien); die werden beim Laden EINMAL auf
-   Kanten umgestellt – siehe migriereBordbrettLinien().                     */
+   Eine geometrische Kante zählt trotzdem höchstens einmal: beim Übernehmen
+   alter Zeichnungen werden gleich liegende Kanten vorher entdoppelt (beide
+   Endpunkte, auf den Millimeter gerundet, richtungsunabhängig).
+
+   Ältere Zeichnungen kennen `state.bordbrettKanten` (markierte ganze Kanten)
+   bzw. noch älter `state.bordbretter` (frei gezeichnete Linien); beides wird
+   beim Laden EINMAL übernommen – siehe migriereBordbrettKanten().         */
 
 /** Die beiden Eckpunkte einer Feldkante. */
 function bayKante(el, k) {
@@ -6498,7 +7819,7 @@ function kantenLaenge(p, q) {
   return Math.hypot(q.x - p.x, q.y - p.y) / PX_PER_M;
 }
 
-/** Schlüssel einer markierten Kante innerhalb der Liste. */
+/** Schlüssel einer Kante innerhalb eines Feldes. */
 function bordbrettSchluessel(bayId, k) {
   return String(bayId) + '|' + k;
 }
@@ -6511,73 +7832,504 @@ function kantenGeoSchluessel(p, q) {
   return a < b ? a + '~' + b : b + '~' + a;
 }
 
-/** Markierte Kanten der Zeichnung (legt die Liste bei Altdaten transparent an). */
-function bordbrettKantenListe() {
-  if (!Array.isArray(state.bordbrettKanten)) state.bordbrettKanten = [];
-  return state.bordbrettKanten;
+/** Punkt-Schlüssel für die Nachbarschaft zweier Kanten (1 mm Raster). */
+function punktSchluessel(p) {
+  return `${Math.round(p.x * 10) / 10},${Math.round(p.y * 10) / 10}`;
 }
 
-/** Set der markierten Kanten für schnelle Nachfragen beim Zeichnen. */
-function bordbrettKantenSet() {
-  return new Set(bordbrettKantenListe().map(e => bordbrettSchluessel(e.b, e.k)));
+/** Lotfußpunkt von `p` auf die Strecke a–b (inkl. Abstand und Parameter t). */
+function lotAufStrecke(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+  const x = a.x + dx * t, y = a.y + dy * t;
+  return { x, y, t, dist: Math.hypot(p.x - x, p.y - y) };
 }
 
-function hatBordbrettKante(bayId, k) {
-  return bordbrettKantenListe().some(e => String(e.b) === String(bayId) && e.k === k);
+/* ── Datenmodell ─────────────────────────────────────────────────────────────
+   Eine Bordbrettlinie ist eine Kette von KANTENSTÜCKEN:
+
+     { id, stuecke: [ { b: <Feld-ID>, k: 0…3, t0: 0…1, t1: 0…1 } … ],
+       lagen: [ { id, laenge: null|Zahl } ],
+       achsId: null | <ID einer Achse> }
+
+   `t0`/`t1` sind die Parameter auf der Kante (0 = erster Eckpunkt,
+   1 = zweiter). Damit kann eine Linie MITTEN IM FELD beginnen und enden –
+   die frühere Fassung kannte nur ganze Kanten.
+
+   Jede Lage hat ihre eigene Länge; `laenge: null` heißt „so lang wie die
+   gezeichnete Linie". Die Bordbrettmeter oben rechts summieren über ALLE
+   Lagen aller Linien. Für das Aufmaß (PDF, Position 2) zählt dagegen die
+   GEOMETRISCHE Länge der Linie: sie beschreibt die Aufmaßlänge der Achse,
+   nicht die verbaute Brettmenge.                                           */
+
+let _bbId = 0;
+
+function bordbrettLinien() {
+  if (!Array.isArray(state.bordbrettLinien)) state.bordbrettLinien = [];
+  return state.bordbrettLinien;
+}
+
+function neueBordbrettId() {
+  const alle = bordbrettLinien();
+  let n = alle.length + 1;
+  while (alle.some(l => l.id === 'bb' + n)) n++;
+  return 'bb' + n;
+}
+
+function mkBordbrettLinie(stuecke, achsId) {
+  return {
+    id: neueBordbrettId(),
+    stuecke: stuecke.map(st => ({ b: st.b, k: +st.k, t0: st.t0, t1: st.t1 })),
+    lagen: [{ id: ++_bbId, laenge: null }],
+    achsId: achsId || null
+  };
 }
 
 /**
- * Setzt oder entfernt eine Kante.
- * @returns {boolean} true, wenn sich dadurch etwas geändert hat.
+ * Alles, worauf ein Bordbrett sitzen kann → Layout-Element.
+ *
+ * Das sind die FELDER (Schlüssel = Feld-ID) UND die ECKSTÜCKE (Schlüssel
+ * „E<Eckschlüssel>"). Das Eckstück gehört dazu, weil es am Bau ein echtes
+ * Bauteil ist: an einer Außenecke schließt es die Lücke zwischen den beiden
+ * Gerüstbahnen. Ohne es könnte eine Bordbrettlinie nicht bis an die
+ * GEBÄUDEECKE laufen, sondern nur bis zur äußeren Feldkante davor – genau
+ * der Fehler aus der Praxis (siehe § Eckensituation).
  */
-function setzeBordbrettKante(bayId, k, an) {
-  const liste = bordbrettKantenListe();
-  const i = liste.findIndex(e => String(e.b) === String(bayId) && e.k === k);
-  if (an && i < 0)  { liste.push({ b: bayId, k }); return true; }
-  if (!an && i >= 0) { liste.splice(i, 1); return true; }
-  return false;
+function bayElsById(els) {
+  const map = new Map();
+  (els || computeLayout()).forEach(el => {
+    if (el.type === 'bay') {
+      const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
+      if (bay) map.set(String(bay.id), el);
+    } else if (el.type === 'corner') {
+      const a = state.sections[el.si], b = state.sections[el.ni];
+      if (a && b) map.set('E' + eckKey(a, b), el);
+    }
+  });
+  return map;
 }
 
-/** Nimmt alle Bordbretter zurück. */
+/**
+ * Feld, dem ein Kantenstück zugerechnet wird.
+ *
+ * Auf einem Feld ist das dieses Feld. Auf einem ECKSTÜCK ist es das
+ * angrenzende Feld der Achse, an der das Eckstück hängt – dort taucht die
+ * Ecklänge im Aufmaß auf, und dort gilt auch die Höhe.
+ */
+function stueckFeld(st, byId) {
+  const el = (byId || bayElsById()).get(String(st.b));
+  if (!el) return null;
+  if (el.type === 'bay') return state.sections[el.si] && state.sections[el.si].bays[el.bi];
+  return eckFeldVon(el.si, el.siEndet);
+}
+
+/** Geometrie eines Kantenstücks: Anfangs-/Endpunkt und Länge in Metern. */
+function stueckGeo(st, byId) {
+  const el = byId.get(String(st.b));
+  if (!el) return null;
+  const [p, q] = bayKante(el, st.k);
+  const pt = t => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+  const a = pt(st.t0), b = pt(st.t1);
+  return { el, p, q, a, b, laenge: Math.hypot(b.x - a.x, b.y - a.y) / PX_PER_M };
+}
+
+/** Alle Kantenstücke einer Linie mit Geometrie (ungültige fallen weg). */
+function linienGeo(linie, byId) {
+  return (linie.stuecke || []).map(st => {
+    const g = stueckGeo(st, byId);
+    return g ? { st, ...g } : null;
+  }).filter(Boolean);
+}
+
+/** Gezeichnete Länge einer Linie in Metern (Grundlage der Aufmaßlänge). */
+function linienLaenge(linie, byId) {
+  return linienGeo(linie, byId || bayElsById()).reduce((s, g) => s + g.laenge, 0);
+}
+
+/** Länge einer einzelnen Lage: eigener Wert oder die gezeichnete Länge. */
+function lagenLaenge(linie, lage, byId) {
+  if (lage && lage.laenge != null && !isNaN(lage.laenge)) return +lage.laenge;
+  return linienLaenge(linie, byId);
+}
+
+/** Gesamtlänge EINER Linie über alle ihre Lagen. */
+function linienGesamt(linie, byId) {
+  const lagen = Array.isArray(linie.lagen) && linie.lagen.length
+    ? linie.lagen : [{ laenge: null }];
+  return lagen.reduce((s, lg) => s + lagenLaenge(linie, lg, byId), 0);
+}
+
+/** Ist die Linie sichtbar? (Mindestens eines ihrer Felder ist sichtbar.) */
+function linieSichtbar(linie) {
+  const byId = bayElsById();
+  return (linie.stuecke || []).some(st => {
+    const bay = stueckFeld(st, byId);
+    return bay && isBayVisible(bay);
+  });
+}
+
+/** Alle sichtbaren Linien. */
+function sichtbareLinien() {
+  return bordbrettLinien().filter(linieSichtbar);
+}
+
+/** Gesamtlänge aller Bordbretter in m – über alle Lagen. */
+function bordbrettGesamt(els) {
+  const byId = bayElsById(els);
+  return sichtbareLinien().reduce((s, l) => s + linienGesamt(l, byId), 0);
+}
+
+/** Gezeichnete Gesamtlänge (ohne Mehrfachlagen) – die Aufmaßlänge. */
+function bordbrettAufmassGesamt(els) {
+  const byId = bayElsById(els);
+  return sichtbareLinien().reduce((s, l) => s + linienLaenge(l, byId), 0);
+}
+
+/**
+ * Wie viel Bordbrettlinie liegt über einem bestimmten Feld?
+ * Grundlage der feldweisen Aufteilung im PDF (Position 2): ein angeschnittenes
+ * Feld bekommt genau den Teilbetrag, den die Linie über ihm abdeckt.
+ */
+function bordbrettLaengeJeFeld(els) {
+  const byId = bayElsById(els);
+  const map = new Map();
+  sichtbareLinien().forEach(l => {
+    linienGeo(l, byId).forEach(g => {
+      const bay = stueckFeld(g.st, byId);
+      if (!bay) return;
+      const key = String(bay.id);
+      map.set(key, (map.get(key) || 0) + g.laenge);
+    });
+  });
+  return map;
+}
+
+/**
+ * Bordbrettlänge einer Feldmenge (Achse, Abschnitt oder alle Felder) –
+ * über alle Lagen. Lagen mit eigener Länge werden anteilig auf die Felder
+ * verteilt, über die die Linie läuft.
+ */
+function bordbrettSummeFuer(bays, els) {
+  const byId = bayElsById(els);
+  const ids  = new Set(bays.map(b => String(b.id)));
+  let summe = 0;
+  sichtbareLinien().forEach(l => {
+    const geo = linienGeo(l, byId);
+    const ganz = geo.reduce((s, g) => s + g.laenge, 0);
+    if (!(ganz > 0)) return;
+    const anteil = geo.filter(g => {
+      const bay = stueckFeld(g.st, byId);
+      return bay && ids.has(String(bay.id));
+    }).reduce((s, g) => s + g.laenge, 0) / ganz;
+    if (anteil > 0) summe += linienGesamt(l, byId) * anteil;
+  });
+  return summe;
+}
+
+/** Achse (Index in achsenListe()) einer Linie – über ihr erstes Feld. */
+function linienAchse(linie, achsen, byId) {
+  const st = (linie.stuecke || [])[0];
+  if (!st) return -1;
+  const el = byId.get(String(st.b));
+  return el ? achseVonSektion(achsen, el.si) : -1;
+}
+
+/** Alle Bordbrettlinien, die über ein bestimmtes Feld laufen. */
+function linienUeberFeld(bayId, byId) {
+  const map = byId || bayElsById();
+  return sichtbareLinien().filter(l => (l.stuecke || []).some(st => {
+    const bay = stueckFeld(st, map);
+    return bay && String(bay.id) === String(bayId);
+  }));
+}
+
+/**
+ * Bordbrett je Achse: `[{ idx, name, laenge, aufmass }]`, nach Achsreihenfolge.
+ * `laenge`  = alle Lagen zusammen (Materialmenge)
+ * `aufmass` = die gezeichnete Linienlänge (Grundlage der Aufmaßfläche)
+ */
+function bordbrettJeAchse(achsen, els) {
+  const liste = achsen || achsenListe();
+  const byId  = bayElsById(els);
+  const summen = new Map();
+  sichtbareLinien().forEach(l => {
+    const idx = linienAchse(l, liste, byId);
+    const cur = summen.get(idx) || { laenge: 0, aufmass: 0 };
+    cur.laenge  += linienGesamt(l, byId);
+    cur.aufmass += linienLaenge(l, byId);
+    summen.set(idx, cur);
+  });
+  return [...summen.entries()]
+    .map(([idx, v]) => ({
+      idx,
+      name: liste[idx] ? liste[idx].name : 'Ohne Achse',
+      laenge: v.laenge,
+      aufmass: v.aufmass
+    }))
+    .sort((a, b) => a.idx - b.idx);
+}
+
+/* ── Ganze Kanten (Antippen) ─────────────────────────────────────────────────
+   Eine ganze Kante ist der Sonderfall t0 = 0, t1 = 1. Das Antippen einer
+   Kante legt genau so eine Linie an – dieselbe Bedienung wie bisher, nur mit
+   dem reicheren Modell dahinter.                                           */
+
+/** Geometrischer Schlüssel einer Feldkante (unabhängig vom Feld, von dem aus
+ *  sie beschrieben wird). Zwei nebeneinanderliegende Felder teilen sich ihre
+ *  Stirnkante – sie bekommen denselben Schlüssel und zählen deshalb einmal. */
+function kantenGeoVon(bayId, k, byId) {
+  const el = (byId || bayElsById()).get(String(bayId));
+  if (!el) return null;
+  const [p, q] = bayKante(el, +k);
+  return kantenGeoSchluessel(p, q);
+}
+
+/** Geometrischer Schlüssel eines Kantenstücks (Anfang/Ende der Teilstrecke). */
+function stueckGeoSchluessel(g) {
+  return kantenGeoSchluessel(g.a, g.b);
+}
+
+/** Trägt die Kante bereits ein Bordbrett – auch vom Nachbarfeld aus gesetzt? */
+function hatBordbrettKante(bayId, k, byId) {
+  const map = byId || bayElsById();
+  const geo = kantenGeoVon(bayId, k, map);
+  return bordbrettLinien().some(l =>
+    (l.stuecke || []).some(st =>
+      (String(st.b) === String(bayId) && +st.k === +k)
+      || (geo && kantenGeoVon(st.b, st.k, map) === geo)));
+}
+
+/** Setzt oder entfernt eine GANZE Kante.
+ *  @returns {boolean} true, wenn sich dadurch etwas geändert hat. */
+function setzeBordbrettKante(bayId, k, an) {
+  const byId = bayElsById();
+  if (an) {
+    // Eine geometrische Kante zählt höchstens einmal – auch wenn sie von
+    // beiden angrenzenden Feldern aus gemeint sein kann.
+    if (hatBordbrettKante(bayId, k, byId)) return false;
+    // An eine bestehende, direkt anschließende Linie anhängen, statt eine
+    // zweite daneben zu legen – sonst zerfiele eine Wand in lauter Stücke.
+    const el = byId.get(String(bayId));
+    if (el) {
+      const [p, q] = bayKante(el, k);
+      const passt = bordbrettLinien().find(l => {
+        const geo = linienGeo(l, byId);
+        if (!geo.length) return false;
+        const erst = geo[0], letzt = geo[geo.length - 1];
+        return (erst.st.t0 === 0 || erst.st.t0 === 1) && (letzt.st.t1 === 0 || letzt.st.t1 === 1)
+          && (punktSchluessel(letzt.b) === punktSchluessel(p)
+           || punktSchluessel(letzt.b) === punktSchluessel(q)
+           || punktSchluessel(erst.a)  === punktSchluessel(p)
+           || punktSchluessel(erst.a)  === punktSchluessel(q));
+      });
+      if (passt) {
+        const geo = linienGeo(passt, byId);
+        const letzt = geo[geo.length - 1], erst = geo[0];
+        const vorn = punktSchluessel(erst.a) === punktSchluessel(p)
+                  || punktSchluessel(erst.a) === punktSchluessel(q);
+        const anschlussHinten = punktSchluessel(letzt.b) === punktSchluessel(p)
+                             || punktSchluessel(letzt.b) === punktSchluessel(q);
+        const stueck = anschlussHinten
+          ? { b: bayId, k, t0: punktSchluessel(letzt.b) === punktSchluessel(p) ? 0 : 1,
+                            t1: punktSchluessel(letzt.b) === punktSchluessel(p) ? 1 : 0 }
+          : { b: bayId, k, t0: punktSchluessel(erst.a) === punktSchluessel(q) ? 0 : 1,
+                            t1: punktSchluessel(erst.a) === punktSchluessel(q) ? 1 : 0 };
+        if (anschlussHinten) passt.stuecke.push(stueck);
+        else if (vorn)       passt.stuecke.unshift(stueck);
+        else                 passt.stuecke.push(stueck);
+        return true;
+      }
+    }
+    bordbrettLinien().push(mkBordbrettLinie([{ b: bayId, k, t0: 0, t1: 1 }]));
+    return true;
+  }
+
+  // Entfernen: das Stück aus seiner Linie herausnehmen – auch, wenn es vom
+  // Nachbarfeld aus gesetzt wurde. Bleibt nichts übrig, verschwindet die Linie.
+  const geo = kantenGeoVon(bayId, k, byId);
+  let geaendert = false;
+  const rest = [];
+  bordbrettLinien().forEach(l => {
+    const vorher = (l.stuecke || []).length;
+    l.stuecke = (l.stuecke || []).filter(st =>
+      !((String(st.b) === String(bayId) && +st.k === +k)
+        || (geo && kantenGeoVon(st.b, st.k, byId) === geo)));
+    if (l.stuecke.length !== vorher) geaendert = true;
+    if (l.stuecke.length) rest.push(l);
+  });
+  if (geaendert) state.bordbrettLinien = rest;
+  return geaendert;
+}
+
+/**
+ * Kompatibilitätssicht: alle markierten Kantenstücke als flache Liste.
+ * Wird von der Zeichnung und von Auswertungen benutzt, die je Feld arbeiten.
+ * @returns {Array<{bayId:*, k:number, si:number, laenge:number, p:Object, q:Object, linie:Object}>}
+ */
+function bordbrettKanten(els) {
+  const byId = bayElsById(els);
+  const out = [];
+  sichtbareLinien().forEach(l => {
+    linienGeo(l, byId).forEach(g => {
+      out.push({ bayId: g.st.b, k: g.st.k, si: g.el.si,
+                 laenge: g.laenge, p: g.a, q: g.b, linie: l, stueck: g.st });
+    });
+  });
+  return out;
+}
+
+/** Nimmt alle Bordbretter zurück. @returns {number} Anzahl entfernter Linien. */
 function leereBordbrettKanten() {
-  const n = bordbrettKantenListe().length;
-  state.bordbrettKanten = [];
+  const n = bordbrettLinien().length;
+  state.bordbrettLinien = [];
   return n;
 }
 
 /**
- * Räumt die Liste auf: gültige Kantennummern, existierende Felder, keine
- * Doppelten. Läuft bei jedem Laden – so verschwinden Kanten gelöschter Felder
- * von selbst, statt als Geisterlänge im Aufmaß zu bleiben.
+ * Räumt die Linien auf: gültige Kantennummern, existierende Felder, keine
+ * leeren Linien, mindestens eine Lage. Läuft bei jedem Laden und nach jedem
+ * Löschen – so verschwinden Bordbretter gelöschter Felder von selbst, statt
+ * als Geisterlänge im Aufmaß zu bleiben.
  */
-function normalizeBordbrettKanten() {
-  migriereBordbrettLinien();
-  const bekannt = new Set();
-  state.sections.forEach(sec => (sec.bays || []).forEach(b => bekannt.add(String(b.id))));
+function normalizeBordbrett() {
+  migriereBordbrettKanten();
+  // Bekannt sind Felder UND Eckstücke – beides kann ein Bordbrett tragen.
+  const bekannt = new Set(bayElsById().keys());
+  const klemm = v => Math.max(0, Math.min(1, isFinite(v) ? +v : 0));
+
+  state.bordbrettLinien = (Array.isArray(state.bordbrettLinien) ? state.bordbrettLinien : [])
+    .map(l => {
+      if (!l || typeof l !== 'object') return null;
+      const stuecke = (Array.isArray(l.stuecke) ? l.stuecke : [])
+        .map(st => (st && typeof st === 'object')
+          ? { b: st.b, k: +st.k, t0: klemm(st.t0), t1: klemm(st.t1) } : null)
+        .filter(st => st && st.b != null && st.k >= 0 && st.k <= 3
+                   && bekannt.has(String(st.b)) && Math.abs(st.t1 - st.t0) > 0.0005);
+      if (!stuecke.length) return null;
+      const lagen = (Array.isArray(l.lagen) && l.lagen.length ? l.lagen : [{ laenge: null }])
+        .map(lg => ({
+          id: lg && lg.id != null ? lg.id : ++_bbId,
+          laenge: (lg && lg.laenge != null && lg.laenge !== '' && !isNaN(lg.laenge) && +lg.laenge > 0)
+                  ? +(+lg.laenge).toFixed(2) : null
+        }));
+      const achsId = abschnittById(l.achsId) ? l.achsId : null;
+      return { id: l.id || neueBordbrettId(), stuecke, lagen, achsId };
+    })
+    .filter(Boolean);
+
+  // Gleich LIEGENDE Stücke zählen nur einmal: zwei nebeneinanderliegende
+  // Felder teilen sich ihre Stirnkante, und eine zweimal übereinander
+  // gezogene Linie soll das Aufmaß nicht verdoppeln.
+  const byId = bayElsById();
   const gesehen = new Set();
-  state.bordbrettKanten = (Array.isArray(state.bordbrettKanten) ? state.bordbrettKanten : [])
-    .map(e => (e && typeof e === 'object') ? { b: e.b, k: +e.k } : null)
-    .filter(e => e && e.b != null && e.k >= 0 && e.k <= 3 && bekannt.has(String(e.b)))
-    .filter(e => {
-      const key = bordbrettSchluessel(e.b, e.k);
+  state.bordbrettLinien = state.bordbrettLinien.map(l => {
+    l.stuecke = l.stuecke.filter(st => {
+      const g = stueckGeo(st, byId);
+      if (!g) return false;
+      const key = stueckGeoSchluessel(g);
       if (gesehen.has(key)) return false;
       gesehen.add(key);
       return true;
     });
-  return state.bordbrettKanten;
+    return l;
+  }).filter(l => l.stuecke.length);
+  return state.bordbrettLinien;
 }
 
 /**
- * Übernimmt Bordbretter aus Zeichnungen der Vorgängerfassung.
+ * Übernimmt Bordbretter aus älteren Zeichnungen.
  *
- * Dort wurde eine LINIE entlang der Lagenkante gezeichnet. Diese Linie lief
- * genau über die Feldkanten, die der Nutzer gemeint hat – also werden alle
- * Kanten markiert, die vollständig unter der Linie liegen. Damit bleibt die
- * gezeichnete Aussage erhalten, und alte Projekte öffnen sich mit sichtbaren
- * Bordbrettern statt mit einer leeren Zeichnung.
+ *   1. `state.bordbretter`     – frei gezeichnete Linien (zwei Fassungen alt)
+ *   2. `state.bordbrettKanten` – markierte ganze Kanten (eine Fassung alt)
  *
- * Läuft genau einmal: danach ist `state.bordbretter` entfernt, und beim
- * nächsten Speichern steht nur noch die Kantenliste im Projekt.
+ * Beides wird zu Bordbrettlinien: die markierten Kanten werden dabei zu
+ * ZUSAMMENHÄNGENDEN Ketten verbunden, damit aus vier nebeneinanderliegenden
+ * Kanten EINE Linie mit einer Aufmaßlänge wird und nicht vier Einzelstücke.
+ * Die Längen bleiben dabei exakt erhalten – es geht kein Meter verloren.
+ *
+ * Läuft genau einmal: danach sind die alten Felder entfernt, und beim
+ * nächsten Speichern steht nur noch `bordbrettLinien` im Projekt.
+ */
+function migriereBordbrettKanten() {
+  migriereBordbrettLinien();                    // Schritt 1 (ältestes Format)
+  const kanten = Array.isArray(state.bordbrettKanten) ? state.bordbrettKanten : null;
+  delete state.bordbrettKanten;
+  if (!kanten || !kanten.length) return;
+  if (!Array.isArray(state.bordbrettLinien)) state.bordbrettLinien = [];
+
+  const byId = bayElsById();
+  // Jede geometrische Kante genau einmal – zwei Felder teilen sich ihre
+  // Stirnkante, die darf nicht doppelt in die Länge gehen.
+  const gesehen = new Set();
+  const stuecke = [];
+  kanten.forEach(e => {
+    if (!e || e.b == null) return;
+    const el = byId.get(String(e.b));
+    if (!el) return;
+    const k = +e.k;
+    if (!(k >= 0 && k <= 3)) return;
+    const [p, q] = bayKante(el, k);
+    const geo = kantenGeoSchluessel(p, q);
+    if (gesehen.has(geo)) return;
+    gesehen.add(geo);
+    stuecke.push({ b: e.b, k, p, q });
+  });
+  if (!stuecke.length) return;
+
+  // Ketten bilden: Stücke, die sich einen Endpunkt teilen, gehören zusammen.
+  const offen = new Set(stuecke.map((_, i) => i));
+  const anKnoten = new Map();
+  stuecke.forEach((st, i) => {
+    [punktSchluessel(st.p), punktSchluessel(st.q)].forEach(key => {
+      if (!anKnoten.has(key)) anKnoten.set(key, []);
+      anKnoten.get(key).push(i);
+    });
+  });
+
+  const naechstes = (key, ausser) =>
+    (anKnoten.get(key) || []).find(i => i !== ausser && offen.has(i));
+
+  while (offen.size) {
+    const start = offen.values().next().value;
+    offen.delete(start);
+    const kette = [{ ...stuecke[start], t0: 0, t1: 1 }];
+
+    // nach hinten wachsen
+    let endeKey = punktSchluessel(stuecke[start].q), vorher = start;
+    for (;;) {
+      const i = naechstes(endeKey, vorher);
+      if (i == null) break;
+      offen.delete(i);
+      const st = stuecke[i];
+      const vorwaerts = punktSchluessel(st.p) === endeKey;
+      kette.push({ ...st, t0: vorwaerts ? 0 : 1, t1: vorwaerts ? 1 : 0 });
+      endeKey = punktSchluessel(vorwaerts ? st.q : st.p);
+      vorher = i;
+    }
+    // nach vorne wachsen
+    let startKey = punktSchluessel(stuecke[start].p); vorher = start;
+    for (;;) {
+      const i = naechstes(startKey, vorher);
+      if (i == null) break;
+      offen.delete(i);
+      const st = stuecke[i];
+      const rueckwaerts = punktSchluessel(st.q) === startKey;
+      kette.unshift({ ...st, t0: rueckwaerts ? 0 : 1, t1: rueckwaerts ? 1 : 0 });
+      startKey = punktSchluessel(rueckwaerts ? st.p : st.q);
+      vorher = i;
+    }
+
+    state.bordbrettLinien.push(
+      mkBordbrettLinie(kette.map(x => ({ b: x.b, k: x.k, t0: x.t0, t1: x.t1 }))));
+  }
+}
+
+/**
+ * Ältestes Format: eine frei gezeichnete Linie entlang der Lagenkante. Sie
+ * lief genau über die gemeinten Feldkanten – also werden alle Kanten
+ * markiert, die vollständig unter ihr liegen. Das Ergebnis geht als
+ * `state.bordbrettKanten` weiter in migriereBordbrettKanten().
  */
 function migriereBordbrettLinien() {
   const linien = Array.isArray(state.bordbretter) ? state.bordbretter : null;
@@ -6611,90 +8363,90 @@ function migriereBordbrettLinien() {
         // der Linie liegt – ein bloßes Kreuzen reicht nicht.
         const treffer = [0.08, 0.3, 0.5, 0.7, 0.92].every(t =>
           aufLinie({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }, punkte));
-        if (treffer) setzeBordbrettKante(bay.id, k, true);
+        if (treffer && !state.bordbrettKanten.some(e => String(e.b) === String(bay.id) && +e.k === k)) {
+          state.bordbrettKanten.push({ b: bay.id, k });
+        }
       }
     });
   });
 }
 
-/** Lotfußpunkt von `p` auf die Strecke a–b (inkl. Abstand). */
-function lotAufStrecke(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const l2 = dx * dx + dy * dy;
-  const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
-  const x = a.x + dx * t, y = a.y + dy * t;
-  return { x, y, t, dist: Math.hypot(p.x - x, p.y - y) };
-}
+/* ── Gebäudeecken als Fangpunkte ─────────────────────────────────────────────
+   Eine Bordbrettlinie darf und soll an der GEBÄUDEECKE enden – also am
+   Schnittpunkt der beiden Gebäudeseiten, nicht an der äußeren Feldkante des
+   letzten Feldes davor. Steht ein Feld quer über der Ecke (der Fall aus der
+   Praxis: vier Felder nach Osten, das fünfte quer darüber nach Süden), teilt
+   dieser Punkt das Eckfeld: was davor liegt, gehört zur ersten Achse, was
+   dahinter liegt, zur anschließenden.
 
-/**
- * Alle markierten Kanten mit ihrer Geometrie – bereits ENTDOPPELT.
- *
- * Nur sichtbare Felder zählen: ein ausgeblendeter Abschnitt darf im Aufmaß
- * nicht auftauchen, sonst stimmte die Summe nicht mit dem überein, was auf
- * dem Bildschirm und im PDF steht.
- *
- * @returns {Array<{bayId:*, k:number, si:number, laenge:number, p:Object, q:Object}>}
- */
-function bordbrettKanten(els) {
-  const liste = bordbrettKantenListe();
-  if (!liste.length) return [];
-  const markiert = new Set(liste.map(e => bordbrettSchluessel(e.b, e.k)));
-  const gesehen = new Set();
+   Die Punkte kommen aus dem Eckstück, das computeLayout() ohnehin bildet:
+   `pts[0]` ist der innere Knoten, `pts[2]` die äußere Gebäudeecke.         */
+
+function eckSnapPunkte(els) {
+  const layout = els || computeLayout();
   const out = [];
-  (els || computeLayout()).forEach(el => {
-    if (el.type !== 'bay') return;
-    const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
-    if (!bay || !isBayVisible(bay)) return;
-    for (let k = 0; k < 4; k++) {
-      if (!markiert.has(bordbrettSchluessel(bay.id, k))) continue;
-      const [p, q] = bayKante(el, k);
-      const geo = kantenGeoSchluessel(p, q);
-      if (gesehen.has(geo)) continue;      // gemeinsame Kante zweier Felder
-      gesehen.add(geo);
-      out.push({ bayId: bay.id, k, si: el.si, laenge: kantenLaenge(p, q), p, q });
-    }
+  const gesehen = new Set();
+  const nimm = (p, aussen, art) => {
+    if (!p || !isFinite(p.x) || !isFinite(p.y)) return;
+    const key = Math.round(p.x) + ',' + Math.round(p.y) + ',' + (aussen ? 'a' : 'i');
+    if (gesehen.has(key)) return;
+    gesehen.add(key);
+    out.push({ x: p.x, y: p.y, art: art || 'aussen', aussen });
+  };
+
+  // 1. Eckstücke, die computeLayout() ohnehin bildet: pts[2] ist die äußere
+  //    Gebäudeecke, pts[0] der innere Knoten.
+  layout.forEach(el => {
+    if (el.type !== 'corner' || !el.pts) return;
+    nimm(el.pts[2], true,  el.kind);
+    nimm(el.pts[0], false, el.kind);
   });
+
+  // 2. Steht ein Feld QUER ÜBER der Ecke, gibt es kein Eckstück – die beiden
+  //    Gebäudeseiten überlappen sich dann. Die Ecke ist trotzdem da: sie ist
+  //    der Schnittpunkt der beiden äußeren Achslinien. Genau dort muss das
+  //    Bordbrett der ersten Achse enden dürfen.
+  const linien = achsAussenLinien(layout);
+  for (let i = 0; i < linien.length; i++) {
+    for (let j = i + 1; j < linien.length; j++) {
+      const p = linienSchnitt(linien[i], linien[j]);
+      if (!p) continue;
+      const nah = l => lotAufStrecke(p, l.a, l.b).dist <= state.depth * PX_PER_M * 3;
+      if (nah(linien[i]) && nah(linien[j])) nimm(p, true, 'aussen');
+    }
+  }
   return out;
 }
 
-/** Gesamtlänge aller Bordbretter in m (volle Genauigkeit). */
-function bordbrettGesamt(els) {
-  return bordbrettKanten(els).reduce((s, e) => s + e.laenge, 0);
+/** Die äußere Laufkante jeder Achse als Strecke (Anfang → Ende). */
+function achsAussenLinien(els) {
+  const layout = els || computeLayout();
+  return achsenListe().map(a => {
+    const sec = state.sections[a.chain[0]];
+    if (!sec) return null;
+    const dir = secVec(sec);
+    let min = null, max = null, pMin = null, pMax = null;
+    layout.forEach(el => {
+      if (el.type !== 'bay' || !a.chain.includes(el.si)) return;
+      bayKante(el, 2).forEach(p => {
+        const t = p.x * dir.dx + p.y * dir.dy;
+        if (min == null || t < min) { min = t; pMin = p; }
+        if (max == null || t > max) { max = t; pMax = p; }
+      });
+    });
+    return (pMin && pMax && (pMin.x !== pMax.x || pMin.y !== pMax.y))
+      ? { a: pMin, b: pMax } : null;
+  }).filter(Boolean);
 }
 
-/**
- * Bordbrettlänge einer Feldmenge (Achse, Abschnitt oder alle Felder).
- *
- * Entdoppelt wird VOR dem Filtern: eine Kante, die sich zwei Felder teilen,
- * gehört genau einer Seite – und die Gesamtsumme bleibt in jedem Fall richtig.
- */
-function bordbrettSummeFuer(bays, els) {
-  const ids = new Set(bays.map(b => String(b.id)));
-  return bordbrettKanten(els)
-    .filter(e => ids.has(String(e.bayId)))
-    .reduce((s, e) => s + e.laenge, 0);
-}
-
-/**
- * Bordbrett je Achse: `[{ idx, name, laenge }]`, nach Achsreihenfolge.
- * Kanten, deren Feld zu keiner Achse gehört (kann bei Altdaten vorkommen),
- * landen unter `idx: -1` – sie gehen damit in die Gesamtsumme ein, ohne
- * einer Achse untergeschoben zu werden.
- */
-function bordbrettJeAchse(achsen, els) {
-  const liste = achsen || achsenListe();
-  const summen = new Map();
-  bordbrettKanten(els).forEach(e => {
-    const idx = achseVonSektion(liste, e.si);
-    summen.set(idx, (summen.get(idx) || 0) + e.laenge);
-  });
-  return [...summen.entries()]
-    .map(([idx, laenge]) => ({
-      idx,
-      name: liste[idx] ? liste[idx].name : 'Ohne Achse',
-      laenge
-    }))
-    .sort((a, b) => a.idx - b.idx);
+/** Schnittpunkt zweier Geraden (durch je zwei Punkte) – null bei parallel. */
+function linienSchnitt(l1, l2) {
+  const x1 = l1.a.x, y1 = l1.a.y, x2 = l1.b.x, y2 = l1.b.y;
+  const x3 = l2.a.x, y3 = l2.a.y, x4 = l2.b.x, y4 = l2.b.y;
+  const n = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(n) < 1e-6) return null;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / n;
+  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
 }
 
 /* ── Ecken: Erkennung + Entscheidung des Nutzers ───────────────────────────── */
@@ -7100,6 +8852,232 @@ function aufmassAchsen() {
   });
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Aufmaß für das PDF – zwei Flächen je Achse
+   --------------------------------------------------------------------------
+   Für jede Achse werden genau zwei Flächen ausgewiesen:
+
+     Position 1  Gerüstfläche (gesamt)
+                 Summe über alle Felder aus Feldlänge × Feldhöhe. Die
+                 ungekürzte Bruttofläche der Achse.
+
+     Position 2  Positionierte Gerüstfläche (Aufmaß)
+                 Die tatsächlich abzurechnende Fläche. Grundlage ist die
+                 BORDBRETTLINIE: Aufmaßlänge × Höhe des Abschnitts.
+
+   Hat der Abschnitt nur EINE Höhe, steht dort eine Zeile. Bei MEHREREN Höhen
+   wird die Bordbrettlänge feldweise auf die überdeckten Felder aufgeteilt –
+   jedes Feld bekommt genau den Längenanteil, den die Linie über ihm abdeckt
+   (bei angeschnittenen Feldern also nur den Teilbetrag), multipliziert mit
+   SEINER Höhe. Am Ende steht die aufsummierte Abschnittsfläche.
+
+   Die Innen-/Außenecken-Korrektur (± Gerüsttiefe) bleibt gültig und wird auf
+   die so entstandenen Achslängen angewandt – dynamisch, nicht als fester
+   Wert.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Die Gliederung des Aufmaßes: die vom Nutzer angelegten Achsen, sonst die
+ * geometrischen Wände. EINE Quelle für PDF-Tabellen und Bordbrett-Zuordnung.
+ * @returns {Array<{id:string|null, name:string, bays:Array}>}
+ */
+function aufmassGruppen() {
+  if (abschnitteList().length) {
+    return baysByAbschnitt().map(g => ({
+      id: g.abschnitt ? g.abschnitt.id : null,
+      name: g.abschnitt ? g.abschnitt.name : 'Ohne Achse',
+      bays: g.bays
+    }));
+  }
+  // Ohne eigene Achsen bleiben die geometrischen Wände die Gliederung. Sie
+  // werden von LINKS NACH RECHTS sortiert – so folgt die Auflistung im PDF
+  // dem Blick über die Zeichnung und nicht der Reihenfolge des Zeichnens.
+  const layout = computeLayout();
+  const linkeKante = chain => {
+    let x = Infinity;
+    layout.forEach(el => {
+      if (el.type !== 'bay' || !chain.includes(el.si)) return;
+      el.pts.forEach(p => { if (p.x < x) x = p.x; });
+    });
+    return isFinite(x) ? x : 0;
+  };
+  return achsenListe()
+    .map(a => ({
+      id: null,
+      name: /^achse/i.test(a.name) ? a.name : `Achse ${a.name}`,
+      bays: a.bays,
+      x: linkeKante(a.chain)
+    }))
+    .sort((p, q) => p.x - q.x);
+}
+
+/**
+ * Ordnet jede Bordbrettlinie einer Aufmaßgruppe zu.
+ *
+ * Vorrang hat die ausdrückliche Zuordnung im Bordbrett-Editor (`achsId`).
+ * Ohne sie entscheidet die Lage: die Linie gehört zu der Gruppe, über deren
+ * Feldern der größte Teil ihrer Länge liegt. Genau dadurch bleibt im Eckfall
+ * das Stück VOR der Ecke bei der ersten Achse – auch wenn es baulich über dem
+ * Eckfeld der anschließenden Achse liegt.
+ *
+ * @returns {Array<{gruppe:number, laenge:number, jeFeld:Map<string,number>}>}
+ *          Index = Index in aufmassGruppen()
+ */
+function bordbrettJeGruppe(gruppen, els) {
+  const byId  = bayElsById(els);
+  const liste = gruppen || aufmassGruppen();
+  const gruppeVonBay = new Map();
+  liste.forEach((g, i) => g.bays.forEach(b => gruppeVonBay.set(String(b.id), i)));
+
+  const out = liste.map(() => ({ laenge: 0, jeFeld: new Map() }));
+  sichtbareLinien().forEach(l => {
+    const geo = linienGeo(l, byId);
+    if (!geo.length) return;
+    // Jedes Stück auf sein Feld abbilden (Eckstücke auf das angrenzende Feld).
+    const teile = geo.map(g => ({ laenge: g.laenge, bay: stueckFeld(g.st, byId) }))
+                     .filter(t => t.bay);
+    if (!teile.length) return;
+
+    // Wohin gehört die Linie? Ausdrückliche Zuordnung schlägt die Lage.
+    let ziel = -1;
+    if (l.achsId) ziel = liste.findIndex(g => g.id === l.achsId);
+    if (ziel < 0) {
+      const summen = new Map();
+      teile.forEach(t => {
+        const gi = gruppeVonBay.get(String(t.bay.id));
+        if (gi == null) return;
+        summen.set(gi, (summen.get(gi) || 0) + t.laenge);
+      });
+      let best = -1, bestL = -1;
+      summen.forEach((v, k) => { if (v > bestL) { bestL = v; best = k; } });
+      ziel = best;
+    }
+    if (ziel < 0 || !out[ziel]) return;
+
+    teile.forEach(t => {
+      const key = String(t.bay.id);
+      out[ziel].jeFeld.set(key, (out[ziel].jeFeld.get(key) || 0) + t.laenge);
+      out[ziel].laenge += t.laenge;
+    });
+  });
+  return out;
+}
+
+/**
+ * Die beiden Positionen je Achse – fertig für die PDF-Tabelle.
+ *
+ * @returns {Array<{name, pos1:{zeilen,summe,laenge}, pos2:{zeilen,summe,laenge,ohneBordbrett}}>}
+ */
+function pdfAufmassDaten(els) {
+  const layout  = els || computeLayout();
+  const gruppen = aufmassGruppen();
+  const bb      = bordbrettJeGruppe(gruppen, layout);
+  const korr    = eckKorrekturen();
+  const alle    = allBaysFlat();
+  const r2 = n => +n.toFixed(2);
+
+  return gruppen.map((g, gi) => {
+    /* ── Position 1: die ungekürzte Bruttofläche ─────────────────────────── */
+    const zeilen1 = g.bays.map(b => {
+      const h = bayHoehe(b);
+      return {
+        feld: bayName(b),
+        laenge: r2(b.len || 0),
+        hoehe: h != null ? r2(h) : null,
+        flaeche: h != null ? r2((b.len || 0) * h) : 0,
+        bemerkung: h == null ? 'Höhe fehlt' : ''
+      };
+    });
+    const summe1 = r2(zeilen1.reduce((s, z) => s + z.flaeche, 0));
+
+    /* ── Position 2: Aufmaß aus der Bordbrettlinie ───────────────────────── */
+    const jeFeld = (bb[gi] && bb[gi].jeFeld) || new Map();
+    const felder = [...jeFeld.entries()]
+      .map(([id, laenge]) => ({ bay: alle.find(b => String(b.id) === id), laenge }))
+      .filter(x => x.bay);
+
+    // Nach Zeichenreihenfolge sortieren – links nach rechts, wie im Plan.
+    const reihenfolge = new Map();
+    let nr = 0;
+    state.sections.forEach(sec => sec.bays.forEach(b => reihenfolge.set(String(b.id), nr++)));
+    felder.sort((a, b) => (reihenfolge.get(String(a.bay.id)) || 0)
+                        - (reihenfolge.get(String(b.bay.id)) || 0));
+
+    const hoehen = [...new Set(felder.map(f => bayHoehe(f.bay)).filter(h => h != null))];
+    const zeilen2 = [];
+    let laenge2 = 0;
+
+    if (!felder.length) {
+      // Ohne Bordbrettlinie gibt es keine Aufmaßlänge – das wird ausgewiesen
+      // und nicht stillschweigend durch die Bruttofläche ersetzt.
+      return {
+        name: g.name, bays: g.bays,
+        pos1: { zeilen: zeilen1, summe: summe1 },
+        pos2: { zeilen: [], summe: 0, laenge: 0, ohneBordbrett: true }
+      };
+    }
+
+    if (hoehen.length <= 1) {
+      // Eine Höhe → eine Zeile: Bordbrettlänge × Höhe.
+      const h = hoehen[0] != null ? hoehen[0] : null;
+      const delta = felder.reduce((s, f) => s + ((korr.get(f.bay.id) || {}).delta || 0), 0);
+      const laenge = Math.max(0, felder.reduce((s, f) => s + f.laenge, 0) + delta);
+      laenge2 = laenge;
+      zeilen2.push({
+        feld: felder.length === 1 ? bayName(felder[0].bay) : 'Achse gesamt',
+        laenge: r2(laenge),
+        hoehe: h != null ? r2(h) : null,
+        flaeche: h != null ? r2(laenge * h) : 0,
+        bemerkung: eckBemerkung(delta)
+      });
+    } else {
+      // Mehrere Höhen → feldweise aufschlüsseln, damit die Rechnung
+      // nachvollziehbar bleibt.
+      felder.forEach(f => {
+        const h = bayHoehe(f.bay);
+        const delta = (korr.get(f.bay.id) || {}).delta || 0;
+        const laenge = Math.max(0, f.laenge + delta);
+        laenge2 += laenge;
+        const voll = f.bay.len || 0;
+        const teil = laenge < voll - 0.005 ? 'anteilig' : '';
+        zeilen2.push({
+          feld: bayName(f.bay),
+          laenge: r2(laenge),
+          hoehe: h != null ? r2(h) : null,
+          flaeche: h != null ? r2(laenge * h) : 0,
+          bemerkung: [teil, eckBemerkung(delta)].filter(Boolean).join(' · ')
+        });
+      });
+    }
+    const summe2 = r2(zeilen2.reduce((s, z) => s + z.flaeche, 0));
+
+    return {
+      name: g.name, bays: g.bays,
+      pos1: { zeilen: zeilen1, summe: summe1 },
+      pos2: { zeilen: zeilen2, summe: summe2, laenge: r2(laenge2), ohneBordbrett: false }
+    };
+  });
+}
+
+/** Kurzhinweis zur Eckenkorrektur für die Spalte „Bemerkung". */
+function eckBemerkung(delta) {
+  if (!delta || Math.abs(delta) < 0.005) return '';
+  return (delta < 0 ? 'Ecke −' : 'Ecke +') + fmtQty(Math.abs(delta)) + ' m';
+}
+
+/** Bauvorhaben (Anschrift) aus dem verknüpften Projekt – für den PDF-Kopf. */
+function pdfBauvorhaben() {
+  if (!linkedProjectId) return '';
+  const proj = loadLinkedProjects().find(p => p.id === linkedProjectId);
+  if (!proj) return '';
+  const a = proj.anschrift || {};
+  return [
+    [a.strasse, a.nummer].filter(Boolean).join(' '),
+    [a.plz, a.ort].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+}
+
 /* ── PDF-Export (Vektor) ─────────────────────────────────────────────────────
    Der Plan wird NICHT mehr als Screenshot der Zeichenfläche eingebettet,
    sondern direkt als Vektorgrafik (Linien, Flächen, Text) in die PDF
@@ -7162,6 +9140,14 @@ const PDF_THEMES = {
     rule:     [186, 196, 206],
     bayFill:  [226, 238, 250],
     bayStroke:[44, 111, 168],
+    // Blatt 2: Akzent für Kopfbänder und Summen, ein neutraler Ton für den
+    // Zeilenwechsel, Grau für Hilfsangaben. Farbe ist NIE alleiniger
+    // Bedeutungsträger – Fettung, Linien und Position tragen dieselbe Aussage.
+    band:     [26, 74, 122],
+    bandInk:  [255, 255, 255],
+    sub:      [231, 238, 246],
+    zebra:    [246, 249, 252],
+    summe:    [219, 231, 243],
     colored:  true
   },
   monochrom: {
@@ -7173,6 +9159,11 @@ const PDF_THEMES = {
     rule:     [175, 175, 175],
     bayFill:  [240, 240, 240],
     bayStroke:[80, 80, 80],
+    band:     [58, 58, 58],
+    bandInk:  [255, 255, 255],
+    sub:      [234, 234, 234],
+    zebra:    [247, 247, 247],
+    summe:    [226, 226, 226],
     colored:  false
   }
 };
@@ -7370,8 +9361,8 @@ function pdfLegendEntries() {
   if (eckenListe().some(e => e.art === 'innen')) {
     entries.push({ label: 'Innenecke (Überlappung, ± Aufmaß)', color: '#c2691b' });
   }
-  if (bordbrettKantenListe().length) {
-    entries.push({ label: 'Bordbrett', color: '#0f8f8e', shape: 'line' });
+  if (bordbrettLinien().length) {
+    entries.push({ label: 'Bordbrett (Aufmaßlänge)', color: '#e8590c', shape: 'line' });
   }
   return entries;
 }
@@ -7617,13 +9608,13 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
     });
   });
 
-  // 3b. Bordbretter: die markierten Gerüstkanten. Sie gehören in den Plan,
-  //     weil die Menge im Aufmaß genau daraus folgt – ohne sie stünde dort
-  //     eine Zahl ohne Beleg. Kräftiger Strich, aber nur auf der Kante: das
-  //     Gerüst darunter bleibt vollständig lesbar.
+  // 3b. Bordbretter: die gezeichneten Linien. Sie gehören in den Plan, weil
+  //     die Aufmaßlänge im PDF genau daraus folgt – ohne sie stünde dort eine
+  //     Zahl ohne Beleg. Kräftiger Strich, aber nur auf der Kante: das Gerüst
+  //     darunter bleibt vollständig lesbar.
   const bbKanten = bordbrettKanten(layout);
   if (bbKanten.length) {
-    doc.setDrawColor(...pdfCol(theme, [15, 143, 142]));
+    doc.setDrawColor(...pdfCol(theme, [232, 89, 12]));
     doc.setLineWidth(1.1);
     bbKanten.forEach(k => {
       const seg = clipSeg(k.p.x, k.p.y, k.q.x, k.q.y);
@@ -8022,229 +10013,6 @@ function exportPdf() {
   openPdfSheet();
 }
 
-/**
- * Einstellblock für die Aufmaßregeln nach ATV DIN 18451. Bewusst im
- * PDF-Dialog: die Regeln wirken ausschließlich auf die Aufmaß-Auswertung im
- * Dokument, nicht auf die Zeichnung. Alle Werte sind frei änderbar – so lassen
- * sich künftige Anpassungen der Aufmaßregeln ohne Codeänderung einpflegen.
- */
-function buildAufmassSettings() {
-  const wrap = document.createElement('div');
-  wrap.className = 'aufmass-settings';
-
-  const lbl = document.createElement('div');
-  lbl.className = 'sheet-section-label';
-  lbl.textContent = 'Aufmaßregeln (ATV DIN 18451)';
-  wrap.appendChild(lbl);
-
-  const base = document.createElement('p');
-  base.className = 'pdf-sheet-note';
-  base.textContent = 'Grundlage sind immer die Achsmaße der Gerüstkonstruktion – '
-                   + 'unabhängig vom Gerüstsystem (5.1.1). Zuschläge werden im PDF '
-                   + 'getrennt ausgewiesen; die Zeichnung bleibt maßstäblich.';
-  wrap.appendChild(base);
-
-  const r = aufmassRules();
-  const summary = document.createElement('div');
-  summary.className = 'aufmass-summary';
-  const syncSummary = () => {
-    // Vorschau über GENAU die Felder, die auch im PDF landen – sonst zeigte der
-    // Dialog eine andere Zahl als das Dokument.
-    const calc = () => computeAufmass(visibleBaysFlat());
-    const m = pdfIncludeHidden ? withHiddenShown(calc) : calc();
-    summary.textContent = `Achsmaß ${fmtQty(m.achse)} m`
-      + (m.innenLaenge ? `  ${m.innenLaenge < 0 ? '−' : '+'}  ${fmtQty(Math.abs(m.innenLaenge))} m Innenecke` : '')
-      + (m.ecken ? `  +  ${m.ecken} × ${fmtQty(eckZuschlagWert())} m Ecke` : '')
-      + (m.felder ? `  +  ${m.felder} × ${fmtQty(aufmassRules().feldzuschlag.wert)} m Feld` : '')
-      + `  =  Aufmaß ${fmtQty(m.laenge)} m`
-      + (m.flaeche ? `  ·  ${fmtQty(m.flaeche)} m²` : '');
-    // Unbestätigte Innenecken sichtbar machen: die Zahl steht dann auf einer
-    // Annahme, die der Nutzer noch nicht geprüft hat.
-    const offen = aufmassRules().innenecke.aktiv ? offeneInnenecken() : [];
-    warn.style.display = offen.length ? '' : 'none';
-    if (offen.length) {
-      warn.textContent = offen.length === 1
-        ? 'Eine Innenecke ist noch nicht festgelegt – es gilt der Vorschlag '
-          + `„${state.sections[offen[0].durchSi].name} läuft durch". `
-          + 'In der Zeichnung auf das „?" tippen, um sie zu bestätigen.'
-        : `${offen.length} Innenecken sind noch nicht festgelegt. Es gilt der `
-          + 'Vorschlag „längere Achse läuft durch". In der Zeichnung auf das '
-          + '„?" tippen, um sie zu bestätigen.';
-    }
-  };
-  // Der Schalter „ausgeblendete mitexportieren" liegt weiter oben im Dialog und
-  // zieht die Vorschau hierüber nach.
-  wrap._syncSummary = syncSummary;
-
-  const warn = document.createElement('div');
-  warn.className = 'aufmass-warn';
-  warn.style.display = 'none';
-
-  // ── Außenecke ───────────────────────────────────────────────────────────
-  const eckRow = document.createElement('label');
-  eckRow.className = 'pdf-opt-row';
-  const eckChk = document.createElement('input');
-  eckChk.type = 'checkbox'; eckChk.checked = r.eckzuschlag.aktiv;
-  const eckTxt = document.createElement('span');
-  eckTxt.innerHTML = '<strong>Außenecken beidseitig mitrechnen</strong>'
-                   + '<br><span class="pdf-opt-hint">La = L + L1: die überlappende '
-                   + 'Ecklänge zählt bei beiden angrenzenden Seiten.</span>';
-  eckRow.appendChild(eckChk); eckRow.appendChild(eckTxt);
-  wrap.appendChild(eckRow);
-
-  const eckCfg = document.createElement('div');
-  eckCfg.className = 'aufmass-cfg-row';
-  const eckLab = document.createElement('span');
-  eckLab.className = 'aufmass-cfg-label';
-  eckLab.textContent = 'Ecklänge je Seite (m)';
-  const eckInp = document.createElement('input');
-  eckInp.type = 'number'; eckInp.className = 'aufmass-cfg-inp';
-  eckInp.min = '0'; eckInp.step = '0.01'; eckInp.inputMode = 'decimal';
-  eckInp.placeholder = state.depth.toFixed(2);
-  eckInp.title = 'Leer lassen = Gerüsttiefe (' + state.depth.toFixed(2).replace('.', ',') + ' m)';
-  eckInp.value = r.eckzuschlag.wert != null ? r.eckzuschlag.wert.toFixed(2) : '';
-  eckInp.addEventListener('input', () => {
-    const v = parseFloat(eckInp.value);
-    state.aufmass.eckzuschlag.wert = (eckInp.value === '' || isNaN(v) || v < 0) ? null : +v.toFixed(2);
-    syncSummary(); scheduleAutosave2d();
-  });
-  eckCfg.appendChild(eckLab); eckCfg.appendChild(eckInp);
-  wrap.appendChild(eckCfg);
-
-  const syncEck = () => { eckCfg.style.display = eckChk.checked ? '' : 'none'; };
-  eckChk.addEventListener('change', () => {
-    state.aufmass.eckzuschlag.aktiv = eckChk.checked;
-    syncEck(); syncSummary(); scheduleAutosave2d();
-  });
-  syncEck();
-
-  // ── Feldzuschlag ────────────────────────────────────────────────────────
-  const feldRow = document.createElement('label');
-  feldRow.className = 'pdf-opt-row';
-  const feldChk = document.createElement('input');
-  feldChk.type = 'checkbox'; feldChk.checked = r.feldzuschlag.aktiv;
-  const feldTxt = document.createElement('span');
-  feldTxt.innerHTML = '<strong>Festen Aufschlag berücksichtigen</strong>'
-                    + '<br><span class="pdf-opt-hint">0,80 m je Gerüstfeld, bei kleineren '
-                    + 'Systembreiten 0,73 m. Wert und Wirkungsbereich frei wählbar.</span>';
-  feldRow.appendChild(feldChk); feldRow.appendChild(feldTxt);
-  wrap.appendChild(feldRow);
-
-  const feldCfg = document.createElement('div');
-  feldCfg.className = 'aufmass-cfg-block';
-
-  const valRow = document.createElement('div');
-  valRow.className = 'aufmass-cfg-row';
-  const valLab = document.createElement('span');
-  valLab.className = 'aufmass-cfg-label';
-  valLab.textContent = 'Aufschlag (m)';
-  const valInp = document.createElement('input');
-  valInp.type = 'number'; valInp.className = 'aufmass-cfg-inp';
-  valInp.min = '0'; valInp.step = '0.01'; valInp.inputMode = 'decimal';
-  valInp.value = r.feldzuschlag.wert.toFixed(2);
-  valInp.addEventListener('input', () => {
-    const v = parseFloat(valInp.value);
-    if (!isNaN(v) && v >= 0) {
-      state.aufmass.feldzuschlag.wert = +v.toFixed(2);
-      presetRow.querySelectorAll('.aufmass-preset').forEach(b =>
-        b.classList.toggle('active', Math.abs(parseFloat(b.dataset.v) - v) < 0.005));
-      syncSummary(); scheduleAutosave2d();
-    }
-  });
-  valRow.appendChild(valLab); valRow.appendChild(valInp);
-  feldCfg.appendChild(valRow);
-
-  const presetRow = document.createElement('div');
-  presetRow.className = 'aufmass-preset-row';
-  AUFMASS_FELD_PRESETS.forEach(v => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'aufmass-preset' + (Math.abs(r.feldzuschlag.wert - v) < 0.005 ? ' active' : '');
-    b.dataset.v = String(v);
-    b.textContent = v.toFixed(2).replace('.', ',') + ' m';
-    b.addEventListener('click', () => {
-      state.aufmass.feldzuschlag.wert = v;
-      valInp.value = v.toFixed(2);
-      presetRow.querySelectorAll('.aufmass-preset').forEach(x => x.classList.toggle('active', x === b));
-      syncSummary(); scheduleAutosave2d();
-    });
-    presetRow.appendChild(b);
-  });
-  feldCfg.appendChild(presetRow);
-
-  const modeRow = document.createElement('div');
-  modeRow.className = 'aufmass-preset-row';
-  AUFMASS_MODI.forEach(([key, label, desc]) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'aufmass-preset' + (r.feldzuschlag.modus === key ? ' active' : '');
-    b.textContent = label;
-    b.title = desc;
-    b.addEventListener('click', () => {
-      state.aufmass.feldzuschlag.modus = key;
-      modeRow.querySelectorAll('.aufmass-preset').forEach(x => x.classList.toggle('active', x === b));
-      syncSummary(); scheduleAutosave2d();
-    });
-    modeRow.appendChild(b);
-  });
-  feldCfg.appendChild(modeRow);
-  wrap.appendChild(feldCfg);
-
-  const syncFeld = () => { feldCfg.style.display = feldChk.checked ? '' : 'none'; };
-  feldChk.addEventListener('change', () => {
-    state.aufmass.feldzuschlag.aktiv = feldChk.checked;
-    syncFeld(); syncSummary(); scheduleAutosave2d();
-  });
-  syncFeld();
-
-  syncSummary();
-  // ── Innenecke ───────────────────────────────────────────────────────────
-  // Steht bewusst NACH den beiden Zuschlägen: die sind Aufschläge auf das
-  // Aufmaß, dies hier ist eine Korrektur, die nur umverteilt.
-  const innRow = document.createElement('label');
-  innRow.className = 'pdf-opt-row';
-  const innChk = document.createElement('input');
-  innChk.type = 'checkbox'; innChk.checked = r.innenecke.aktiv;
-  const innTxt = document.createElement('span');
-  innTxt.innerHTML = '<strong>Innenecken verrechnen</strong>'
-                   + '<br><span class="pdf-opt-hint">An einer Innenecke überlappen '
-                   + 'sich beide Bahnen. Die durchlaufende Achse wird am letzten '
-                   + 'Feld vor der Ecke gekürzt, die ausfüllende um denselben Wert '
-                   + 'verlängert – in der Summe neutral.</span>';
-  innRow.appendChild(innChk); innRow.appendChild(innTxt);
-  wrap.appendChild(innRow);
-
-  const innCfg = document.createElement('div');
-  innCfg.className = 'aufmass-cfg-row aufmass-cfg-innen';
-  const innLab = document.createElement('span');
-  innLab.className = 'aufmass-cfg-label';
-  innLab.textContent = 'Ecklänge (m)';
-  const innInp = document.createElement('input');
-  innInp.type = 'number'; innInp.className = 'aufmass-cfg-inp';
-  innInp.min = '0'; innInp.step = '0.01'; innInp.inputMode = 'decimal';
-  innInp.placeholder = state.depth.toFixed(2);
-  innInp.title = 'Leer lassen = Gerüsttiefe (' + state.depth.toFixed(2).replace('.', ',') + ' m)';
-  innInp.value = r.innenecke.wert != null ? r.innenecke.wert.toFixed(2) : '';
-  innInp.addEventListener('input', () => {
-    const v = parseFloat(innInp.value);
-    state.aufmass.innenecke.wert = (innInp.value === '' || isNaN(v) || v < 0) ? null : +v.toFixed(2);
-    syncSummary(); scheduleAutosave2d();
-  });
-  innCfg.appendChild(innLab); innCfg.appendChild(innInp);
-  wrap.appendChild(innCfg);
-
-  const syncInn = () => { innCfg.style.display = innChk.checked ? '' : 'none'; };
-  innChk.addEventListener('change', () => {
-    state.aufmass.innenecke.aktiv = innChk.checked;
-    syncInn(); syncSummary(); scheduleAutosave2d(); renderAll();
-  });
-  syncInn();
-
-  wrap.appendChild(summary);
-  wrap.appendChild(warn);
-  return wrap;
-}
-
 /** Auswahl des PDF-Layouts. Die zuletzt gewählte Variante ist vorausgewählt,
  *  ein Tipp auf „PDF erstellen" genügt also im Alltag. */
 function openPdfSheet() {
@@ -8326,9 +10094,6 @@ function openPdfSheet() {
     hChk.addEventListener('change', () => {
       pdfIncludeHidden = hChk.checked;
       localStorage.setItem(PDF_HIDDEN_KEY, pdfIncludeHidden ? '1' : '0');
-      // Die Aufmaß-Vorschau rechnet über den Export-Umfang → mitziehen.
-      const box = sheet.querySelector('.aufmass-settings');
-      if (box && box._syncSummary) box._syncSummary();
     });
     const hTxt = document.createElement('span');
     hTxt.innerHTML = `<strong>Ausgeblendete Abschnitte mitexportieren</strong>`
@@ -8339,8 +10104,16 @@ function openPdfSheet() {
     sheet.appendChild(hRow);
   }
 
-  // ── Aufmaßregeln (ATV DIN 18451) ────────────────────────────────────────
-  sheet.appendChild(buildAufmassSettings());
+  /* Die früheren Auswahlmöglichkeiten am Ende des Dialogs (Aufmaßregeln nach
+     ATV DIN 18451: Außenecken-Zuschlag, fester Feldaufschlag, Innenecken-
+     Verrechnung samt Vorschauzeile) sind ersatzlos entfallen. Sie lieferten
+     durchgehend falsche Werte und standen quer zur neuen Aufmaßlogik, die die
+     abzurechnende Fläche aus der Bordbrettlinie ableitet (Position 2).
+
+     Die KORREKTURLOGIK selbst rechnet unverändert im Hintergrund weiter: die
+     Innenecken-Verrechnung ist wie bisher aktiv und arbeitet dynamisch mit der
+     eingestellten Gerüsttiefe (siehe aufmassRules(), eckKorrekturen()). Sie
+     wird nur nicht mehr abgedruckt und nicht mehr hier eingestellt. */
 
   const actRow = document.createElement('div');
   actRow.className = 'sheet-actions';
@@ -8439,9 +10212,6 @@ function aufmassZeilen(bays, els) {
     zeilen.push({ bez, menge, einheit });
   };
 
-  const m = computeAufmass(bays);
-  nimm('Gerüstfläche', m.flaeche, 'm²');
-
   aggregatePositions(bays).forEach(a => {
     const vorher = zeilen.length;
     // „Konsole 0,30 (Lagen)" ist eine Angabe über den Rechenweg, keine
@@ -8461,7 +10231,10 @@ function aufmassZeilen(bays, els) {
     if (zeilen.length === vorher) nimm(label, a.n, 'Stk');
   });
 
-  nimm('Bordbrett', bordbrettSummeFuer(bays, els), 'm');
+  // Das Bordbrett steht bewusst NICHT mehr als eigene Position im PDF: es
+  // wird nicht in laufenden Metern abgerechnet, sondern ist die Grundlage der
+  // Aufmaßlänge (Position 2). Die Gerüstfläche selbst steht ebenfalls nicht
+  // hier, sondern in den beiden Flächen-Positionen je Achse.
   return zeilen;
 }
 
@@ -8470,7 +10243,9 @@ function aufmassZeilen(bays, els) {
  *
  * Aufbau des Dokuments – bewusst kurz gehalten:
  *   Seite 1 (…n)  die Gerüstzeichnung, so groß wie das Blatt es zulässt
- *   Seite 2 (…n)  das Aufmaß je Achse bzw. Abschnitt, danach die Gesamtsumme
+ *   Seite 2 (…n)  das Aufmaß je Achse: Position 1 (Gerüstfläche gesamt) und
+ *                 Position 2 (positionierte Gerüstfläche), danach die
+ *                 Gesamtsumme über alle Achsen
  *   ggf.          Notizen, wenn welche erfasst sind
  *
  * Mehr Planseiten entstehen NUR, wenn die Zeichnung bei lesbarem Maßstab
@@ -8566,131 +10341,222 @@ async function buildPdfDocument(themeName) {
     });
   }
 
-  /* ── Aufmaß ──────────────────────────────────────────────────────────────
-     Gegliedert nach ABSCHNITT, sobald welche angelegt sind – das ist die vom
-     Nutzer selbst gewählte Struktur und trägt seine Namen. Ohne Abschnitte
-     bleibt es bei den ACHSEN, also den Wänden, die die Zeichnung ohnehin
-     hergibt.
+  /* ══════════════════════════════════════════════════════════════════════
+     Blatt 2 – Positionsauflistung
+     ----------------------------------------------------------------------
+     Aufbau von oben nach unten, immer gleich:
 
-     Der Platz wird gerechnet, nicht geraten: ein Block kommt auf dieselbe
-     Seite, solange er dort vollständig Platz hat; sonst beginnt eine neue.
-     Wird ein langer Block doch getrennt, wiederholt sich der Spaltenkopf.  */
+        ACHSE            Kopfband in der Akzentfarbe
+        Position 1       Gerüstfläche (gesamt) – die ungekürzte Bruttofläche
+        Position 2       Positionierte Gerüstfläche (Aufmaß) aus der
+                         Bordbrettlinie, bei mehreren Höhen feldweise
+        Zusatzbauteile   Mengen, die keine Fläche sind
+        …
+        GESAMT           über alle Achsen, deutlich abgesetzt
+
+     Farbe trägt nie allein die Bedeutung: Kopfbänder sind zusätzlich fett
+     und weiß auf dunklem Grund, Summen fett mit Oberlinie, Hilfsangaben
+     klein und grau. In Graustufen bleibt damit alles lesbar.
+     ══════════════════════════════════════════════════════════════════════ */
   if (allBays.length) {
-    const gruppen = abschnitteList().length
-      ? baysByAbschnitt().map(g => ({
-          titel: g.abschnitt ? g.abschnitt.name : 'Ohne Abschnitt',
-          bays: g.bays
-        }))
-      : aufmassAchsen().map(a => ({
-          titel: /^achse/i.test(a.name) ? a.name : `Achse ${a.name}`,
-          bays: a.bays
-        }));
+    const daten = pdfAufmassDaten(layout);
 
-    const bloecke = gruppen
-      .map(g => ({ ...g, zeilen: aufmassZeilen(g.bays, layout) }))
-      .filter(g => g.zeilen.length);
-
-    // Spalten: Position, Bezeichnung, Menge, Einheit – mehr steht auf einem
-    // Aufmaßblatt nicht.
+    // Spalten: Feld · Länge · Höhe · Fläche · Bemerkung
     const COLS = [
-      { t: 'Pos.',        w: 0.09, a: 'left'  },
-      { t: 'Bezeichnung', w: 0.55, a: 'left'  },
-      { t: 'Menge',       w: 0.22, a: 'right' },
-      { t: 'Einheit',     w: 0.14, a: 'left'  }
+      { t: 'Feld',        w: 0.20, a: 'left'  },
+      { t: 'Länge (m)',   w: 0.15, a: 'right' },
+      { t: 'Höhe (m)',    w: 0.15, a: 'right' },
+      { t: 'Fläche (m²)', w: 0.18, a: 'right' },
+      { t: 'Bemerkung',   w: 0.32, a: 'left'  }
     ];
     const cx = []; let acc = margin;
     COLS.forEach(c => { cx.push(acc); acc += c.w * availW; });
     const zelle = (i, txt, y) => {
       const c = COLS[i];
       const x = c.a === 'right' ? cx[i] + c.w * availW - 2 : cx[i] + 2;
-      doc.text(txt, x, y, { align: c.a });
+      doc.text(String(txt), x, y, { align: c.a });
     };
 
-    const ZEILE_H = 6.2, KOPF_H = 6.4, TITEL_H = 7.5, BLOCK_ABSTAND = 4;
-
+    const ZEILE_H = 5.8, KOPF_H = 6.0, BAND_H = 8.4, SUB_H = 6.6, SUMME_H = 7.2;
+    const BLOCK_ABSTAND = 4.5;
     let ay = 0;
+    let offeneWiederholung = null;   // { achse, position } für Fortsetzungen
 
-    /* Der Spaltenkopf steht EINMAL je Seite, nicht einmal je Achse. Vorher
-       kostete jeder Block Titel + Spaltenkopf + Trennstrich – bei vielen
-       kurzen Abschnitten mehr Platz als die Mengen selbst, und das Blatt war
-       nach fünf Achsen voll. Auf einer neuen Seite wird er wiederholt, sonst
-       stünden dort Zahlen ohne Spaltenbezeichnung. */
+    const kopfLinksAufmass = [
+      state.project ? state.project : null,
+      pdfBauvorhaben() ? 'Bauvorhaben: ' + pdfBauvorhaben() : null,
+      'Gerüsttiefe ' + fmtQty(state.depth) + ' m'
+    ].filter(Boolean).join('   ·   ');
+
+    const neueAufmassSeite = () => {
+      ay = startPage({ links: kopfLinksAufmass, rechts: 'Aufmaß' }) + 4;
+      if (offeneWiederholung) {
+        achsBand(offeneWiederholung.achse + ' (Fortsetzung)');
+        if (offeneWiederholung.position) posBand(offeneWiederholung.position);
+        spaltenKopf();
+      }
+    };
+    const platzPruefen = h => { if (ay + h > contentBottom) neueAufmassSeite(); };
+
+    /** Kopfband einer Achse: dunkler Balken, weiße fette Schrift. */
+    const achsBand = (name, rechts) => {
+      doc.setFillColor(...pdfCol(theme, theme.band));
+      doc.rect(margin, ay, availW, BAND_H, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+      doc.setTextColor(...theme.bandInk);
+      doc.text(String(name).toUpperCase(), margin + 2.5, ay + 5.8);
+      if (rechts) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8.4);
+        doc.text(String(rechts), margin + availW - 2.5, ay + 5.8, { align: 'right' });
+      }
+      ay += BAND_H + 1.4;
+    };
+
+    /** Zwischenüberschrift einer Position: heller Balken mit Akzentkante. */
+    const posBand = (text, rechts) => {
+      doc.setFillColor(...pdfCol(theme, theme.sub));
+      doc.rect(margin, ay, availW, SUB_H, 'F');
+      doc.setFillColor(...pdfCol(theme, theme.band));
+      doc.rect(margin, ay, 1.6, SUB_H, 'F');       // Akzentkante links
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.6);
+      doc.setTextColor(...theme.ink);
+      doc.text(String(text), margin + 4, ay + 4.5);
+      if (rechts) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+        doc.setTextColor(...theme.inkSoft);
+        doc.text(String(rechts), margin + availW - 2.5, ay + 4.5, { align: 'right' });
+      }
+      ay += SUB_H + 0.8;
+    };
+
     const spaltenKopf = () => {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.8);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.4);
       doc.setTextColor(...theme.inkSoft);
       COLS.forEach((c, i) => zelle(i, c.t, ay + 4));
       ay += KOPF_H;
       doc.setDrawColor(...theme.rule); doc.setLineWidth(0.3);
       doc.line(margin, ay, margin + availW, ay);
-      ay += 1.5;
+      ay += 1.2;
     };
 
-    const neueAufmassSeite = () => {
-      ay = startPage({ rechts: 'Aufmaß' }) + 4;
-      spaltenKopf();
+    /** Eine Tabellenzeile mit Zebrastreifen. */
+    const datenZeile = (z, index) => {
+      platzPruefen(ZEILE_H);
+      if (index % 2 === 1) {
+        doc.setFillColor(...pdfCol(theme, theme.zebra));
+        doc.rect(margin, ay, availW, ZEILE_H, 'F');
+      }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6);
+      doc.setTextColor(...theme.ink);
+      zelle(0, z.feld, ay + 4);
+      zelle(1, fmtQty(z.laenge), ay + 4);
+      zelle(2, z.hoehe != null ? fmtQty(z.hoehe) : '–', ay + 4);
+      doc.setFont('helvetica', 'bold');
+      zelle(3, fmtQty(z.flaeche), ay + 4);
+      if (z.bemerkung) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6);
+        doc.setTextColor(...theme.inkSoft);
+        zelle(4, z.bemerkung, ay + 4);
+      }
+      ay += ZEILE_H;
     };
+
+    /** Abschlusszeile einer Position – hervorgehoben. */
+    const summenZeile = (text, wert) => {
+      platzPruefen(SUMME_H + 1);
+      doc.setFillColor(...pdfCol(theme, theme.summe));
+      doc.rect(margin, ay, availW, SUMME_H, 'F');
+      doc.setDrawColor(...pdfCol(theme, theme.band)); doc.setLineWidth(0.5);
+      doc.line(margin, ay, margin + availW, ay);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+      doc.setTextColor(...theme.ink);
+      doc.text(String(text), margin + 2.5, ay + 5);
+      doc.text(fmtQty(wert) + ' m²', margin + availW - 2.5, ay + 5, { align: 'right' });
+      ay += SUMME_H + BLOCK_ABSTAND;
+    };
+
+    /** Eine Position (Überschrift + Tabelle + Summe). */
+    const position = (achsName, titel, rechts, zeilen, summe, leerText) => {
+      offeneWiederholung = { achse: achsName, position: titel };
+      // Die Überschrift darf nie allein am Seitenende stehen.
+      platzPruefen(SUB_H + KOPF_H + ZEILE_H + SUMME_H + 4);
+      posBand(titel, rechts);
+      if (!zeilen.length) {
+        doc.setFont('helvetica', 'italic'); doc.setFontSize(8.4);
+        doc.setTextColor(...theme.inkSoft);
+        doc.text(leerText || 'Keine Angaben.', margin + 2.5, ay + 4);
+        ay += ZEILE_H + BLOCK_ABSTAND;
+        return;
+      }
+      spaltenKopf();
+      zeilen.forEach((z, i) => datenZeile(z, i));
+      summenZeile('Summe ' + titel.replace(/^Position \d+\s*[–·-]\s*/, ''), summe);
+    };
+
     neueAufmassSeite();
 
-    // Platz, den ein Block auf einem FRISCHEN Blatt hätte.
-    const platzAufLeererSeite = contentBottom - (margin + PDF_HEADER_H + 4 + KOPF_H + 1.5);
+    let gesamtBrutto = 0, gesamtAufmass = 0;
 
-    const blockTitel = (txt, fortsetzung) => {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.6);
-      doc.setTextColor(...theme.ink);
-      doc.text(fortsetzung ? txt + ' (Fortsetzung)' : txt, margin, ay + 4.4);
-      ay += TITEL_H;
-    };
+    daten.forEach(a => {
+      offeneWiederholung = { achse: a.name, position: null };
+      platzPruefen(BAND_H + SUB_H + KOPF_H + ZEILE_H + SUMME_H + 6);
+      achsBand(a.name, `${a.bays.length} Feld${a.bays.length === 1 ? '' : 'er'}`);
 
-    const zeichneBlock = (titel, zeilen) => {
-      const gesamtH = TITEL_H + zeilen.length * ZEILE_H + BLOCK_ABSTAND;
-      const platz   = contentBottom - ay;
-      // Der Block wandert nur dann auf ein neues Blatt, wenn er dort auch
-      // wirklich ganz hineinpasst – sonst wäre der Umbruch reine Verschwendung.
-      if (gesamtH > platz && gesamtH <= platzAufLeererSeite) neueAufmassSeite();
-      blockTitel(titel, false);
-      let nr = 0;
-      zeilen.forEach(z => {
-        if (ay + ZEILE_H > contentBottom) {
-          neueAufmassSeite();
-          blockTitel(titel, true);
-        }
-        nr++;
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      position(a.name, 'Position 1 – Gerüstfläche (gesamt)',
+               'Feldlänge × Feldhöhe', a.pos1.zeilen, a.pos1.summe);
+
+      position(a.name, 'Position 2 – Positionierte Gerüstfläche (Aufmaß)',
+               a.pos2.ohneBordbrett ? '' : `Aufmaßlänge ${fmtQty(a.pos2.laenge)} m`,
+               a.pos2.zeilen, a.pos2.summe,
+               'Für diese Achse ist keine Bordbrettlinie erfasst – ohne sie gibt es keine Aufmaßlänge.');
+
+      // Zusatzbauteile: Mengen, die keine Fläche sind. Sie stehen bewusst
+      // NACH den beiden Flächen, damit die Flächen den Blick zuerst bekommen.
+      const bauteile = aufmassZeilen(a.bays, layout);
+      if (bauteile.length) {
+        offeneWiederholung = { achse: a.name, position: 'Zusatzbauteile' };
+        platzPruefen(SUB_H + ZEILE_H * Math.min(bauteile.length, 3) + 4);
+        posBand('Zusatzbauteile');
+        bauteile.forEach((z, i) => {
+          platzPruefen(ZEILE_H);
+          if (i % 2 === 1) {
+            doc.setFillColor(...pdfCol(theme, theme.zebra));
+            doc.rect(margin, ay, availW, ZEILE_H, 'F');
+          }
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6);
+          doc.setTextColor(...theme.ink);
+          doc.text(z.bez, margin + 2.5, ay + 4);
+          doc.setFont('helvetica', 'bold');
+          doc.text(fmtQty(z.menge), cx[3] + COLS[3].w * availW - 2, ay + 4, { align: 'right' });
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(...theme.inkSoft);
+          doc.text(z.einheit, cx[4] + 2, ay + 4);
+          ay += ZEILE_H;
+        });
+        ay += BLOCK_ABSTAND;
+      }
+
+      gesamtBrutto  += a.pos1.summe;
+      gesamtAufmass += a.pos2.summe;
+    });
+
+    /* ── Gesamtsumme über alle Achsen ─────────────────────────────────── */
+    offeneWiederholung = null;
+    if (daten.length) {
+      platzPruefen(BAND_H + 2 * SUMME_H + 6);
+      ay += 2;
+      achsBand('Gesamt über alle Achsen');
+      const gesamtZeile = (text, wert, stark) => {
+        doc.setFillColor(...pdfCol(theme, stark ? theme.summe : theme.zebra));
+        doc.rect(margin, ay, availW, SUMME_H, 'F');
+        doc.setFont('helvetica', stark ? 'bold' : 'normal'); doc.setFontSize(stark ? 10 : 9);
         doc.setTextColor(...theme.ink);
-        zelle(0, String(nr), ay + 4);
-        zelle(1, z.bez, ay + 4);
-        doc.setFont('helvetica', 'bold');
-        zelle(2, fmtQty(z.menge), ay + 4);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...theme.inkSoft);
-        zelle(3, z.einheit, ay + 4);
-        ay += ZEILE_H;
-      });
-      doc.setDrawColor(...theme.rule); doc.setLineWidth(0.2);
-      doc.line(margin, ay, margin + availW, ay);
-      ay += BLOCK_ABSTAND;
-    };
-
-    bloecke.forEach(b => zeichneBlock(b.titel, b.zeilen));
-
-    // ── Gesamt ────────────────────────────────────────────────────────────
-    // Über ALLE Felder gerechnet, nicht als Summe der Blöcke: eine Außenecke
-    // zählt bei beiden angrenzenden Seiten, und ein Bordbrett zwischen zwei
-    // Abschnitten gehört nur einmal in die Summe.
-    if (bloecke.length > 1) {
-      const gesamt = aufmassZeilen(allBays, layout);
-      if (gesamt.length) zeichneBlock('Gesamt', gesamt);
-    }
-
-    // Grundlage der Rechnung – eine Zeile, klein, am Ende. Ohne sie wäre nicht
-    // nachvollziehbar, welche Zuschläge in den Zahlen stecken.
-    const grundlage = aufmassRuleText();
-    if (grundlage) {
-      if (ay + 8 > contentBottom) neueAufmassSeite();
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.2);
-      doc.setTextColor(...theme.inkSoft);
-      doc.splitTextToSize('Grundlage: ' + grundlage, availW)
-        .forEach(line => { doc.text(line, margin, ay + 3); ay += 3.4; });
+        doc.text(text, margin + 2.5, ay + 5);
+        doc.text(fmtQty(wert) + ' m²', margin + availW - 2.5, ay + 5, { align: 'right' });
+        ay += SUMME_H + 0.8;
+      };
+      gesamtZeile('Gerüstfläche (gesamt)', +gesamtBrutto.toFixed(2), false);
+      gesamtZeile('Positionierte Gerüstfläche (Aufmaß)', +gesamtAufmass.toFixed(2), true);
     }
   }
 
@@ -8817,7 +10683,6 @@ function applyMode() {
    Anker beim Einhängen garantiert schon wieder an seinem Platz.            */
 const HANDY_AUSGELAGERT = [
   ['bordbrettBtn',    'tbTrennerProjekt'],
-  ['tdMenuBtn',       'td-exportPdfBtn'],
   ['td-exportPdfBtn', 'tbTrennerWerkzeug']
 ];
 
@@ -8863,15 +10728,85 @@ function feldlisteImMenue() {
       || (werkzeugOffen && window.innerWidth < FELDLISTE_DOCK_AB);
 }
 
+/* ── Feldübersicht am linken Rand ein-/ausklappen ────────────────────────────
+   Die Liste bleibt inhaltlich unverändert; sie lässt sich nur wegklappen,
+   wenn die Zeichenfläche gebraucht wird. Bedienung auf drei Wegen, alle mit
+   demselben Ergebnis:
+
+     • Tipp auf den Griff (Chevron) am Rand
+     • Wisch nach links = einklappen, nach rechts = ausklappen
+     • (die Liste zieht im Handy-Modus ohnehin ins Werkzeug-Panel um)
+
+   Der Zustand liegt in localStorage und überlebt damit Sitzung UND
+   Projektwechsel – wer einmal zugeklappt hat, findet die Zeichnung beim
+   nächsten Öffnen genauso groß wieder.                                     */
+
+let feldlisteOffen = true;
+
+function ladeFeldlisteOffen() {
+  try { return localStorage.getItem(GK.feldliste) !== '0'; }
+  catch (_) { return true; }
+}
+
+/** Klappt die Feldübersicht ein/aus. `merken: false` für Zustände, die nicht
+ *  die Wahl des Nutzers sind (z. B. Aufräumen beim Dokumentwechsel). */
+function setFeldliste(offen, { merken = true } = {}) {
+  feldlisteOffen = !!offen;
+  document.body.classList.toggle('feldliste-zu', !feldlisteOffen);
+  const griff = document.getElementById('feldlisteGriff');
+  if (griff) {
+    griff.setAttribute('aria-expanded', String(feldlisteOffen));
+    const chev = griff.querySelector('.fg-chevron');
+    if (chev) chev.textContent = feldlisteOffen ? '\u2039' : '\u203a';
+    griff.title = feldlisteOffen ? 'Feldübersicht einklappen' : 'Feldübersicht ausklappen';
+  }
+  if (merken) { try { localStorage.setItem(GK.feldliste, feldlisteOffen ? '1' : '0'); } catch (_) {} }
+  // Die Zeichenfläche wird breiter bzw. wieder schmaler.
+  _vpCache = null;
+  if (autoFit) fitCameraToContent();
+  applyCamera();
+}
+
+function toggleFeldliste() { setFeldliste(!feldlisteOffen); }
+
+/** Wischgeste auf einem Element: links/rechts über 40 px, ohne nennenswerte
+ *  Bewegung nach oben/unten (sonst wäre es ein Scrollen). */
+function wischGeste(el, { links, rechts }) {
+  if (!el) return;
+  let start = null;
+  el.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    start = { x: e.clientX, y: e.clientY, t: Date.now() };
+  });
+  const ende = e => {
+    if (!start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    const dauer = Date.now() - start.t;
+    start = null;
+    if (dauer > 900 || Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    if (dx < 0 && links)  links();
+    if (dx > 0 && rechts) rechts();
+  };
+  el.addEventListener('pointerup', ende);
+  el.addEventListener('pointercancel', () => { start = null; });
+}
+
 function syncSidePanelOrt() {
   const side   = document.getElementById('sidePanel');
   const slot   = document.getElementById('wzFelder');
   const layout = document.getElementById('appLayout');
   if (!side || !slot || !layout) return;
+  const griff = document.getElementById('feldlisteGriff');
   if (feldlisteImMenue()) {
     if (side.parentElement !== slot) slot.appendChild(side);
-  } else if (side.parentElement !== layout) {
-    layout.insertBefore(side, layout.firstChild);
+    // Im Menü hat die Liste keinen linken Rand – dort wäre der Griff sinnlos.
+    if (griff) griff.hidden = true;
+    document.body.classList.remove('feldliste-zu');
+  } else {
+    if (side.parentElement !== layout) layout.insertBefore(side, layout.firstChild);
+    if (griff && griff.parentElement !== layout) layout.insertBefore(griff, side.nextSibling);
+    if (griff) griff.hidden = false;
+    document.body.classList.toggle('feldliste-zu', !feldlisteOffen);
   }
 }
 
@@ -8904,8 +10839,12 @@ function init() {
     scheduleAutosave2d();
   });
 
-  // Alles, was einmal je Zeichnung gebraucht wird, liegt hinter EINEM Knopf.
+  // Alles, was einmal je Zeichnung gebraucht wird, liegt im Hauptmenü hinter
+  // dem Projektnamen oben links – nicht mehr als eigener Knopf in der Leiste.
   document.getElementById('tdMenuBtn')?.addEventListener('click', openProjektSheet);
+
+  // „+ Achse" – fester Platz in der Leiste, ein Tipp genügt.
+  document.getElementById('addAchseBtn')?.addEventListener('click', neueAchseAnlegen);
 
   document.getElementById('tdProjectSearch')?.addEventListener('input', e => {
     tdSuche = e.target.value;
@@ -9057,6 +10996,23 @@ function init() {
 
   setWerkzeugPanel(ladeWerkzeugOffen(), { merken: false });
 
+  /* ── Feldübersicht links ───────────────────────────────────────────────
+     Griff antippen ODER wischen – beides klappt sie ein und aus. */
+  document.getElementById('feldlisteGriff')?.addEventListener('click', toggleFeldliste);
+  wischGeste(document.getElementById('feldlisteGriff'), {
+    links:  () => setFeldliste(false),
+    rechts: () => setFeldliste(true)
+  });
+  wischGeste(document.getElementById('sidePanel'), {
+    links: () => { if (!feldlisteImMenue()) setFeldliste(false); }
+  });
+  setFeldliste(ladeFeldlisteOffen(), { merken: false });
+
+  // Werkzeug-Panel: Wisch nach rechts schließt es (Griff im Kopf).
+  wischGeste(document.querySelector('#werkzeugPanel .wz-kopf'), {
+    rechts: () => setWerkzeugPanel(false)
+  });
+
   renderAllNow();
   renderWzAnsicht();
 }
@@ -9093,7 +11049,7 @@ function resetState2d() {
 
   state = {
     project: '', depth: 0.73, abschnitte: [], hideUnassigned: false,
-    aufmass: null, ecken: {}, bordbrettKanten: [], sections: []
+    aufmass: null, ecken: {}, bordbrettLinien: [], sections: []
   };
   _sId = 0; _bId = 0; _aId = 0;
   linkedProjectId = null;
@@ -9111,7 +11067,9 @@ function resetState2d() {
   drag = null; movePreview = null;
   addCtx = null; addCtxDirFixed = false; pendingLen = null; pendingDir = 'S';
   canvasGesture = null; canvasJustMoved = false;
-  bordbrettModus = false;
+  bordbrettModus = false; bbZugLaenge = null;
+  rahmen = null;
+  clearTimeout(langdruckTimer); langdruckTimer = null;
 
   // Ansicht: neues Dokument beginnt wieder eingepasst
   camera = { cx: 200, cy: 150, scale: 1 };
@@ -9549,7 +11507,7 @@ function tdGenId(prefix) {
 function leereZeichnung() {
   return {
     depth: 0.73, sections: [], abschnitte: [], hideUnassigned: false,
-    aufmass: null, ecken: {}, bordbrettKanten: [], _sId: 0, _bId: 0
+    aufmass: null, ecken: {}, bordbrettLinien: [], _sId: 0, _bId: 0
   };
 }
 

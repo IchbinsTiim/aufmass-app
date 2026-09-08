@@ -96,8 +96,8 @@ let info = await page.evaluate(() => {
 assert(!info.hidden, 'Auswahl-Info ist bei Mehrfachauswahl sichtbar');
 assert(info.dx < 40 && info.dy < 40, `Auswahl-Info sitzt oben links (Δ ${info.dx}/${info.dy} px)`);
 assert(/2 Felder ausgewählt/.test(info.text), 'Auswahl-Info nennt die Anzahl: ' + JSON.stringify(info.text));
-assert(/Abschnitt:/.test(info.text) && /Nordseite/.test(info.text),
-  'Auswahl-Info nennt den Abschnitt');
+assert(/Achse:/.test(info.text) && /Nordseite/.test(info.text),
+  'Auswahl-Info nennt die Achse');
 
 // gemischte Auswahl
 info = await page.evaluate(() => {
@@ -105,8 +105,8 @@ info = await page.evaluate(() => {
   renderAll(); flushRender();
   return document.getElementById('selectionInfo').textContent;
 });
-assert(/Abschnitte:/.test(info) && /Nordseite/.test(info) && /Ostseite/.test(info) && /Ohne Abschnitt/.test(info),
-  'gemischte Auswahl listet alle beteiligten Abschnitte + „Ohne Abschnitt"');
+assert(/Achsen:/.test(info) && /Nordseite/.test(info) && /Ostseite/.test(info) && /Ohne Achse/.test(info),
+  'gemischte Auswahl listet alle beteiligten Achsen + „Ohne Achse"');
 assert(/gemischte Zuordnung/.test(info), 'gemischte Zuordnung wird ausgewiesen');
 
 // ── Persistenz: Speichern/Laden + Undo ─────────────────────────────────────

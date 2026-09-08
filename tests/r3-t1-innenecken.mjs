@@ -260,21 +260,22 @@ const pdf = await page.evaluate(async () => {
   return {
     texte: window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2])),
     achsen: aufmassAchsen().map(a => ({ name: a.name, flaeche: a.m.flaeche })),
-    regeln: aufmassRuleText()
+    pos1: pdfAufmassDaten().map(g => ({ name: g.name, summe: g.pos1.summe }))
   };
 });
+const fmtDe = n => (Math.round(n * 100) / 100).toString().replace('.', ',');
 const pdfTxt = pdf.texte.join('\n');
 // Jede Achse hat ihren eigenen Block auf dem Aufmaßblatt.
-pdf.achsen.forEach(a => assert(pdf.texte.some(t => t.includes(a.name)),
+pdf.achsen.forEach(a => assert(pdf.texte.some(t => t.toUpperCase().includes(a.name.toUpperCase())),
   `das PDF führt „${a.name}" als eigenen Block`));
-// Und die ausgewiesene Fläche ist die mit korrigierter Achslänge gerechnete.
-const flaechenPdf = pdf.texte.map((t, i) => [t, pdf.texte[i - 1]])
-  .filter(([, vor]) => vor === 'Gerüstfläche')
-  .map(([t]) => parseFloat(t.replace(/\./g, '').replace(',', '.')));
-pdf.achsen.forEach(a => assert(flaechenPdf.some(f => Math.abs(f - a.flaeche) < 0.02),
-  `„${a.name}": ${a.flaeche} m² stehen so im PDF (aus der korrigierten Achslänge)`));
-assert(/Innenecke ± 0,73 m/.test(pdf.regeln) && pdfTxt.includes('Grundlage:'),
-  'das PDF benennt die Innenecken-Regel als Grundlage');
+// Die Bruttofläche jeder Achse (Position 1) steht so im PDF.
+pdf.pos1.forEach(g => assert(pdf.texte.some(t => t === fmtDe(g.summe) + ' m²'),
+  `„${g.name}": ${g.summe} m² stehen als Position 1 im PDF`));
+// Seit Runde 7 steht KEIN Regeltext nach ATV DIN 18451 mehr im PDF. Die
+// Korrekturlogik rechnet unverändert im Hintergrund weiter – nachweisbar an
+// den Achslängen oben, nicht mehr an einer abgedruckten Fußnote.
+assert(!/Grundlage:/.test(pdfTxt) && !/DIN\s?18451/.test(pdfTxt),
+  'kein DIN-18451-Text mehr im PDF – die Korrektur rechnet trotzdem weiter');
 
 assert(ctx.logs.filter(l => l.startsWith('[pageerror]')).length === 0,
   'keine JS-Fehler: ' + ctx.logs.filter(l => l.startsWith('[pageerror]')).join(' | '));

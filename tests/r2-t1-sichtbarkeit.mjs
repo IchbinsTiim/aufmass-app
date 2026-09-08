@@ -153,7 +153,9 @@ assert(tAll.includes('Ostseite') && tVis.includes('Ostseite'),
 // Gesamtaufstellung – die Kennzahlen-Fußzeile auf jedem Blatt ist mit der
 // Vereinfachung des Dokuments entfallen.
 const flaeche = txt => {
-  const m = [...txt.matchAll(/Gerüstfläche\n([\d.,]+)\nm²/g)]
+  // Die Gesamtsumme am Ende von Blatt 2: „Gerüstfläche (gesamt)" gefolgt vom
+  // Wert mit Einheit.
+  const m = [...txt.matchAll(/Gerüstfläche \(gesamt\)\n([\d.,]+) m²/g)]
     .map(x => parseFloat(x[1].replace(/\./g, '').replace(',', '.')));
   return m.length ? Math.max(...m) : null;
 };

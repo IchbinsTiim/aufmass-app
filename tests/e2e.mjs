@@ -17,39 +17,53 @@ await page.click('#werkzeugBtn');
 await page.waitForSelector('#werkzeugPanel.offen');
 assert(await page.evaluate(() => werkzeugOffen), 'Werkzeug-Menü öffnet über den Pfeil-Knopf');
 
-// Abschnitt über die Oberfläche anlegen (prompt beantworten)
-page.on('dialog', d => d.accept('Nordseite'));
-await page.click('.absch-add-btn');
+// Achse anlegen: EIN Tipp auf den festen Knopf in der Werkzeugleiste.
+await page.click('#addAchseBtn');
 await page.waitForTimeout(250);
-assert(await page.evaluate(() => state.abschnitte.length === 1 && state.abschnitte[0].name === 'Nordseite'),
-  'Abschnitt über die Oberfläche angelegt');
+assert(await page.evaluate(() => state.abschnitte.length === 1 && state.abschnitte[0].name === 'Achse A'),
+  '„+ Achse" legt in einem Schritt eine Achse an');
 
-// Mehrfachauswahl einschalten und im Plan zwei Felder antippen
-await page.click('.bulk-toggle-btn');
-await page.waitForTimeout(200);
-for (const i of [0, 1]) {
+/* Mehrfachauswahl entsteht aus der Geste – es gibt keinen Modus-Knopf mehr.
+   Langes Tippen auf das erste Feld startet sie, ein normaler Tipp auf das
+   zweite nimmt es dazu. */
+const feldPunkt = idx => page.evaluate(i => {
   // Bildschirmposition der Feldmitte aus der Kamera ableiten (Eckstücke sind
   // ebenfalls Polygone und dürfen hier nicht getroffen werden).
-  const p = await page.evaluate(idx => {
-    const el = computeLayout().filter(e => e.type === 'bay')[idx];
-    const vp = viewportRect();
-    return { x: vp.left + vp.w / 2 + (el.cx - camera.cx) * camera.scale,
-             y: vp.top  + vp.h / 2 + (el.cy - camera.cy) * camera.scale };
-  }, i);
-  await page.mouse.click(p.x, p.y);
-  await page.waitForTimeout(150);
-}
-assert(await page.evaluate(() => bulkSelected.size === 2), 'zwei Felder direkt im Plan angehakt');
+  const el = computeLayout().filter(e => e.type === 'bay')[i];
+  const vp = viewportRect();
+  return { x: vp.left + vp.w / 2 + (el.cx - camera.cx) * camera.scale,
+           y: vp.top  + vp.h / 2 + (el.cy - camera.cy) * camera.scale };
+}, idx);
 
-// Achse/Abschnitt der Auswahl zuweisen – die Chips stehen im Achsen-Block
+const pLang = await feldPunkt(0);
+await page.mouse.move(pLang.x, pLang.y);
+await page.mouse.down();
+await page.waitForTimeout(700);
+await page.mouse.up();
+await page.waitForTimeout(200);
+assert(await page.evaluate(() => bulkMode && bulkSelected.size === 1),
+  'langes Tippen auf ein Feld startet die Mehrfachauswahl');
+
+const p2 = await feldPunkt(1);
+await page.mouse.click(p2.x, p2.y);
+await page.waitForTimeout(200);
+assert(await page.evaluate(() => bulkSelected.size === 2), 'ein weiterer Tipp nimmt das nächste Feld dazu');
+
+// Sobald mehr als ein Feld ausgewählt ist, steht die Kontextleiste oben.
+assert(await page.evaluate(() => {
+  const bar = document.getElementById('mehrfachBar');
+  return bar && !bar.classList.contains('hidden') && /2 Felder/.test(bar.textContent);
+}), 'die Kontextleiste am oberen Rand nennt die Anzahl');
+
+// Achse der Auswahl zuweisen – die Chips stehen im Achsen-Block
 await page.evaluate(() => [...document.querySelectorAll('#abschnittBar .bulk-pos-chip')]
-  .find(c => c.textContent === 'Nordseite').click());
+  .find(c => c.textContent === 'Achse A').click());
 await page.waitForTimeout(250);
 assert(await page.evaluate(() => allBaysFlat().filter(b => b.abschnittId).length === 2),
-  'Abschnitt auf die Auswahl übertragen');
+  'Achse auf die Auswahl übertragen');
 
 const info = await page.textContent('#selectionInfo');
-assert(/2 Felder ausgewählt/.test(info) && /Nordseite/.test(info),
+assert(/2 Felder ausgewählt/.test(info) && /Achse A/.test(info),
   'Anzeige oben links: ' + info.replace(/\s+/g, ' '));
 
 // Auswahl überlebt das Zuklappen des Menüs (das Menü ist nur die Oberfläche)
@@ -62,9 +76,12 @@ await page.waitForSelector('#werkzeugPanel.offen');
 assert(await page.evaluate(() => bulkSelected.size === 2),
   'nach dem Wiederaufklappen ist dieselbe Auswahl markiert');
 
-// Mehrfachauswahl beenden, Feld antippen, drehen
-await page.click('.bulk-toggle-btn');
+// Mehrfachauswahl über die Kontextleiste beenden, Feld antippen, drehen
+await page.evaluate(() => [...document.querySelectorAll('#mehrfachBar .mf-btn')]
+  .find(b => /Auswahl aufheben/.test(b.title)).click());
 await page.waitForTimeout(200);
+assert(await page.evaluate(() => !bulkMode && bulkSelected.size === 0),
+  '„Auswahl aufheben" beendet die Mehrfachauswahl');
 const p0 = await page.evaluate(() => {
   const el = computeLayout().filter(e => e.type === 'bay')[0];
   const vp = viewportRect();
@@ -81,12 +98,12 @@ await page.waitForTimeout(200);
 const after = await page.evaluate(() => Math.round(secAngle(state.sections[selectedSi])));
 assert(after === (before + 90) % 360, `90°-Knopf dreht sofort (${before}° → ${after}°)`);
 
-// Abschnitt im Bearbeiten-Sheet setzen
+// Achse im Bearbeiten-Sheet setzen
 await page.evaluate(() => [...document.querySelectorAll('.absch-chip')]
-  .find(c => c.textContent === 'Nordseite').click());
+  .find(c => c.textContent === 'Achse A').click());
 await page.waitForTimeout(200);
 assert(await page.evaluate(() => !!abschnittById(state.sections[selectedSi].bays[0].abschnittId)),
-  'Abschnitt im Bearbeiten-Sheet zugewiesen');
+  'Achse im Bearbeiten-Sheet zugewiesen');
 await page.evaluate(() => closeSheet());
 await page.waitForTimeout(350);
 
