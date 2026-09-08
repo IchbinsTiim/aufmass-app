@@ -156,6 +156,44 @@ bedient anschließend Bordbrett, Konsole, Dachfang, Undo/Redo, Magnet, Drehen,
 Projekt-Blatt und PDF ausschließlich über die Oberfläche des Handy-Modus –
 also über die Knöpfe, die dort ins Menü umgezogen sind.
 
+Runde 11 (Handy-Fassung):
+
+```bash
+node tests/r11-handy.mjs           # Erkennung (Handy / Tablet / Desktop),
+                                   # Navigationsleiste unten statt Umschalter-
+                                   # Pille, Sprungleiste und Faltkarten der
+                                   # Projektakte, Umzug von „Speichern"/„PDF"
+                                   # in die feste Leiste und zurück, drei
+                                   # Handy-Größen nachgemessen, Zeichenfläche
+```
+
+`r11` nimmt die Handy-Fassung (`mobile.css` / `mobile.js`) ab. Sie greift nur
+unterhalb von 720 px Breite bzw. 460 px Höhe – deshalb laufen die 17 übrigen
+Testdateien, die auf breiten Bildschirmen messen, unverändert durch.
+
+Geprüft wird nicht das Aussehen, sondern dass nichts verschwindet:
+
+* **Erkennung** – 390×844 und 844×390 laufen in der Handy-Fassung, 820×1180
+  (iPad) und 1280×900 (Desktop) unverändert in der bisherigen.
+* **Navigation** – drei Ziele, je ≥ 44 px, am unteren Rand; Antippen wechselt
+  wirklich das Modul. In der Zeichnung tritt die Leiste ab; der Pfeil oben
+  links führt zurück, danach steht sie sofort wieder da.
+* **Projektakte** – alle zehn Abschnitte sind über die Sprungleiste
+  erreichbar; ein Sprung klappt sein Ziel auf, das Feld trägt seinen Wert,
+  Eingeben greift, die Faltung überlebt das Neuladen.
+* **Aktionsleiste** – 》Speichern《 und 》PDF《 stehen unten und sind
+  nachweislich **dieselben** Knöpfe (`querySelectorAll('#saveProjectBtn')
+  .length === 1`); Speichern schreibt den geänderten Wert wirklich weg; auf
+  1280 px stehen beide wieder in der Aktionskarte, in der alten Reihenfolge.
+* **Bildschirme** – auf 390, 360 und 320 px werden Startbildschirm,
+  Projektübersicht, Projektakte und Zeichnungsübersicht nachgemessen: kein
+  Querlauf, kein Bedienelement außerhalb des Bildschirms, keines unter 40 px.
+  Die Projektakte wird dafür **vollständig aufgeklappt** – die Faltung darf
+  keinen Fehler verstecken.
+* **Zeichenfläche** – die Werkzeugleiste beginnt bei 0 px (die Pille ist weg),
+  die Zeichenfläche misst 737 statt 597 px, und bei offenem Werkzeug-Menü
+  bleiben weiterhin ≥ 140 px frei.
+
 `r9` prüft ausdrücklich, dass gelöschte Zeichnungen nach einem Reload nicht
 wieder auftauchen und dass keine verwaisten Datensätze zurückbleiben: die
 Projektfotos (IndexedDB) fallen mit der Zeichnung weg – aber erst nach Ablauf
