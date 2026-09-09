@@ -753,3 +753,104 @@ body[data-modul="2d"] #viewerPanel ::selection { background: rgba(76, 201, 240, 
   body[data-modul="2d"] .tb-btn.primaer .tb-txt { display: inline; }
   body[data-modul="2d"] .tb-titel { flex: 1 1 80px; min-width: 70px; }
 }
+
+/* ===========================================================================
+   Runde 7 – dieselben Bauteile in der Oberflächen-Ebene
+   ---------------------------------------------------------------------------
+   Farben und Radien kommen aus den Design-Tokens, damit die neuen Elemente
+   dieselbe Sprache sprechen wie der Rest der Suite.
+   =========================================================================== */
+
+body[data-modul="2d"] .tb-menue-btn {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  min-height: var(--touch);
+}
+body[data-modul="2d"] .tb-menue-btn:hover { background: rgba(255, 255, 255, .13); }
+
+body[data-modul="2d"] .feldliste-griff {
+  background: rgba(14, 22, 38, .92);
+  border-right: 1px solid var(--hairline);
+  color: var(--muted);
+}
+body[data-modul="2d"] .feldliste-griff:hover { background: rgba(255, 255, 255, .08); color: var(--text); }
+
+body[data-modul="2d"] .mehrfach-bar {
+  background: rgba(14, 22, 38, .94);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+}
+body[data-modul="2d"] .mf-zahl {
+  background: var(--accent-weich);
+  border: 1px solid var(--accent-rand);
+  border-radius: var(--r-control);
+  color: var(--accent-2d);
+  font-family: var(--font-mono);
+}
+body[data-modul="2d"] .mf-btn {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  min-height: var(--touch);
+}
+body[data-modul="2d"] .mf-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .13); }
+
+body[data-modul="2d"] .auswahl-rahmen {
+  border-color: var(--accent-2d);
+  background: var(--accent-weich);
+}
+
+body[data-modul="2d"] .wz-klapp {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+}
+body[data-modul="2d"] .wz-griff { background: var(--hairline); }
+
+body[data-modul="2d"] .wz-wert,
+body[data-modul="2d"] .bauteil-karte {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+  color: var(--text);
+}
+body[data-modul="2d"] .bauteil-karte.aktiv {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--text);
+}
+body[data-modul="2d"] .bk-haken { color: var(--accent-2d); }
+body[data-modul="2d"] .bk-wert  { color: var(--muted); }
+body[data-modul="2d"] .bauteil-karte.aktiv .bk-wert { color: var(--accent-2d); }
+
+body[data-modul="2d"] .wz-dir-btn,
+body[data-modul="2d"] .wz-preset {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  min-height: var(--touch);
+}
+body[data-modul="2d"] .wz-dir-btn.active,
+body[data-modul="2d"] .wz-preset.active {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent-2d);
+}
+body[data-modul="2d"] .wz-eingabe,
+body[data-modul="2d"] .bb-lage-inp {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+body[data-modul="2d"] .bb-lage-add {
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--muted);
+}

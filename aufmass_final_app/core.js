@@ -38,7 +38,10 @@ const GK = {
   // Die WAHL des Nutzers: „auto" (Bildschirm entscheidet), „handy", „tablet".
   ansichtsmodus:        'geruest.2d.ansichtsmodus',
   // Werkzeug-Menü offen/zu – bleibt über Neuladen hinweg erhalten.
-  werkzeugMenue:        'geruest.2d.werkzeugMenue'
+  werkzeugMenue:        'geruest.2d.werkzeugMenue',
+  // Feldübersicht am linken Rand ein-/ausgeklappt – bleibt über Sitzung und
+  // Projektwechsel hinweg erhalten.
+  feldliste:            'geruest.2d.feldliste'
 };
 
 // Alte Schlüssel → neue Schlüssel. Beim ersten Start nach dem Zusammenführen

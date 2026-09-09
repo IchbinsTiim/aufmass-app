@@ -15,11 +15,11 @@
 
   <!-- Reihenfolge zählt: core = Tokens & gemeinsame Bausteine, dann die beiden
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
-  <link rel="stylesheet" href="core.css?v=20260908" />
-  <link rel="stylesheet" href="style.css?v=20260908" />
-  <link rel="stylesheet" href="viewer2d.css?v=20260908" />
-  <link rel="stylesheet" href="shell.css?v=20260908" />
-  <link rel="stylesheet" href="theme.css?v=20260908" />
+  <link rel="stylesheet" href="core.css?v=20260908b" />
+  <link rel="stylesheet" href="style.css?v=20260908b" />
+  <link rel="stylesheet" href="viewer2d.css?v=20260908b" />
+  <link rel="stylesheet" href="shell.css?v=20260908b" />
+  <link rel="stylesheet" href="theme.css?v=20260908b" />
 </head>
 <body data-modul="hub">
 
@@ -524,11 +524,26 @@
         <input type="text" id="projectName" class="tb-name"
                placeholder="Zeichnung benennen…" aria-label="Name der Zeichnung"
                autocomplete="off" spellcheck="false" />
+        <!-- Hauptmenü hinter dem Projektnamen: Gerüsttiefe, Vorlagen,
+             Zeichnung wechseln, Datei. Früher der Knopf „Projekt" mitten in
+             der Werkzeugleiste – dort kostete er einen Platz, den das
+             Zeichnen besser braucht. -->
+        <button type="button" id="tdMenuBtn" class="tb-menue-btn" aria-haspopup="dialog"
+                title="Menü: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei"
+                aria-label="Hauptmenü">
+          <span aria-hidden="true">⌄</span>
+        </button>
       </div>
 
       <div class="tb-tools">
-        <button type="button" id="addSectionBtn" class="tb-btn primaer" title="Feld hinzufügen">
+        <button type="button" id="addSectionBtn" class="tb-btn primaer wichtig" title="Feld hinzufügen">
           <span class="tb-ico" aria-hidden="true">＋</span><span class="tb-txt">Feld</span>
+        </button>
+        <!-- Eine Achse anzulegen ist die zweithäufigste Handlung nach „Feld
+             setzen" – deshalb steht sie fest in der Leiste und nicht im
+             Werkzeug-Panel zwischen zwanzig Chips. -->
+        <button type="button" id="addAchseBtn" class="tb-btn wichtig" title="Neue Achse anlegen (ausgewählte Felder wandern gleich hinein)">
+          <span class="tb-ico" aria-hidden="true">＋</span><span class="tb-txt">Achse</span>
         </button>
 
         <span class="tb-trenner" aria-hidden="true"></span>
@@ -551,30 +566,25 @@
                 title="Magnet: An – Felder rasten aneinander ein">
           <span class="tb-ico" aria-hidden="true">🧲</span><span class="tb-txt">Magnet</span>
         </button>
-        <button type="button" id="bordbrettBtn" class="tb-btn" aria-pressed="false"
-                title="Bordbrett: Außenkanten antippen oder überstreichen">
+        <button type="button" id="bordbrettBtn" class="tb-btn wichtig" aria-pressed="false"
+                title="Bordbrett: Linie auf der Feldkante ziehen oder Kante antippen">
           <span class="tb-ico" aria-hidden="true">▤</span><span class="tb-txt">Bordbrett</span>
         </button>
 
         <span class="tb-trenner" id="tbTrennerProjekt" aria-hidden="true"></span>
 
-        <button type="button" id="tdMenuBtn" class="tb-btn" aria-haspopup="dialog"
-                title="Projekt: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei">
-          <span class="tb-ico" aria-hidden="true">▦</span><span class="tb-txt">Projekt</span>
-        </button>
         <button type="button" id="td-exportPdfBtn" class="tb-btn primaer" title="PDF erzeugen">
           <span class="tb-ico" aria-hidden="true">⤓</span><span class="tb-txt">PDF</span>
         </button>
 
         <span class="tb-trenner" id="tbTrennerWerkzeug" aria-hidden="true"></span>
 
-        <!-- Der Pfeil öffnet das Werkzeug-Menü: Auswahl, Sammelbearbeitung,
-             Achsen/Abschnitte, Positionen und die Ansicht (Handy-Modus).
-             Er bleibt bewusst der LETZTE Knopf der Leiste – dort sucht man
-             ein „mehr". Ein zweiter Tipp schließt das Menü wieder. -->
+        <!-- Der Pfeil öffnet das Werkzeug-Panel: Auswahl, Abmessungen,
+             Zusatzbauteile, Aktionen. Er bleibt bewusst der LETZTE Knopf der
+             Leiste – dort sucht man ein „mehr". -->
         <button type="button" id="werkzeugBtn" class="tb-btn werkzeug-btn"
                 aria-expanded="false" aria-controls="werkzeugPanel"
-                title="Werkzeuge: Auswahl, Höhe, Achsen, Positionen, Ansicht">
+                title="Werkzeuge: Auswahl, Abmessungen, Zusatzbauteile, Aktionen">
           <span class="tb-ico wz-pfeil" aria-hidden="true">›</span><span class="tb-txt">Werkzeuge</span>
           <span class="wz-badge hidden" id="werkzeugBadge" aria-hidden="true"></span>
         </button>
@@ -600,12 +610,27 @@
         <div id="sectionsContainer"></div>
         <p id="noSectionsHint" class="hint">Tippen Sie auf „Feld hinzufügen“ oder wählen Sie eine Vorlage.</p>
       </aside>
+      <!-- Schmaler Griff am Rand der Feldliste: ein Tipp klappt sie ein bzw.
+           aus, ein Wisch nach links/rechts tut dasselbe. Eingeklappt bleibt
+           nur dieser Streifen stehen – die volle Zeichenfläche gehört dann
+           der Zeichnung. Der Zustand überlebt Sitzung und Projektwechsel. -->
+      <button type="button" id="feldlisteGriff" class="feldliste-griff"
+              aria-controls="sidePanel" aria-expanded="true"
+              title="Feldübersicht ein-/ausklappen" aria-label="Feldübersicht ein-/ausklappen">
+        <span class="fg-chevron" aria-hidden="true">‹</span>
+      </button>
 
       <!-- Right: SVG canvas -->
       <div id="viewerPanel">
         <!-- Auswahl-Info oben links: zeigt bei Mehrfachauswahl, welchen
              Abschnitten die markierten Felder zugeordnet sind. -->
         <div id="selectionInfo" class="selection-info hidden"></div>
+        <!-- Kontextsensitive Aktionsleiste: erscheint, sobald mehr als ein
+             Feld ausgewählt ist. Sie sitzt direkt am oberen Rand der
+             Zeichenfläche – nicht im Werkzeug-Panel –, weil die Auswahl im
+             Plan passiert und die Aktion dort hingehört, wo hingeschaut wird. -->
+        <div id="mehrfachBar" class="mehrfach-bar hidden" role="toolbar"
+             aria-label="Aktionen für die ausgewählten Felder"></div>
         <svg id="planSvg" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <pattern id="svgGrid" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
@@ -628,11 +653,11 @@
         </div>
         <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
 
-        <!-- Bedienleiste im Bordbrett-Modus. Bleibt stehen, solange markiert
+        <!-- Bedienleiste im Bordbrett-Modus. Bleibt stehen, solange gezeichnet
              wird – ein Toast wäre nach zwei Sekunden weg. -->
         <div id="bordbrettBar" class="bordbrett-bar hidden">
           <span id="bordbrettBarInfo" class="bordbrett-bar-info">Bordbrett 0,00 m</span>
-          <span class="bordbrett-bar-hint">Außenkante antippen oder mit dem Finger darüberstreichen. Nochmal tippen entfernt sie.</span>
+          <span class="bordbrett-bar-hint">Auf der Feldkante ziehen – Anfang und Ende dürfen mitten im Feld liegen. Eine Kante antippen belegt sie ganz, ein Tipp auf die Linie öffnet Länge, Lagen und Achse.</span>
           <div class="bordbrett-bar-actions">
             <button id="bordbrettLeerenBtn" type="button" class="secondary">Alle entfernen</button>
             <button id="bordbrettFertigBtn" type="button" class="primary">Fertig</button>
@@ -655,16 +680,23 @@
            keine zweite Auswahl- oder Achsenverwaltung.
            ══════════════════════════════════════════════════════════════ -->
       <aside id="werkzeugPanel" aria-label="Werkzeuge">
+        <!-- Sticky-Kopf: Titel + Schließen. Er scrollt nicht mit, damit der
+             Weg zurück nie gesucht werden muss. Der Griff links davon nimmt
+             die Wischgeste nach rechts entgegen. -->
         <div class="wz-kopf">
+          <span class="wz-griff" aria-hidden="true"></span>
           <span class="wz-titel">Werkzeuge</span>
           <button type="button" id="werkzeugCloseBtn" class="wz-close"
-                  title="Werkzeug-Menü schließen" aria-label="Werkzeug-Menü schließen">✕</button>
+                  title="Werkzeug-Panel schließen" aria-label="Werkzeug-Panel schließen">✕</button>
         </div>
         <div class="wz-inhalt">
           <div id="wzAuswahl"    class="wz-gruppe"></div>
-          <!-- Im Handy-Modus ziehen Bordbrett, Projekt und PDF aus der
-               Werkzeugleiste hierher um – dieselben Knöpfe, nur an einem
-               Ort, an dem sie nicht aus dem Bildschirm laufen. -->
+          <div id="wzMasse"      class="wz-gruppe"></div>
+          <div id="wzBauteile"   class="wz-gruppe"></div>
+          <div id="bulkBar"      class="wz-gruppe"></div>
+          <!-- Im Handy-Modus ziehen Bordbrett und PDF aus der Werkzeugleiste
+               hierher um – dieselben Knöpfe, nur an einem Ort, an dem sie
+               nicht aus dem Bildschirm laufen. -->
           <div id="wzAktionen" class="wz-gruppe hidden">
             <div class="wz-kopfzeile">
               <span class="wz-kopf-ico" aria-hidden="true">⚙</span>
@@ -672,7 +704,6 @@
             </div>
             <div id="wzAktionenSlot" class="wz-aktionen-slot"></div>
           </div>
-          <div id="bulkBar"      class="wz-gruppe"></div>
           <div id="abschnittBar" class="wz-gruppe"></div>
           <!-- Im Handy-Modus zieht die Feldliste (#sidePanel) hier ein,
                weil die Seitenleiste dort entfällt. Ein Umhängen desselben
@@ -760,9 +791,9 @@
   <div id="toastEl" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="core.js?v=20260908"></script>
-  <script src="script.js?v=20260908"></script>
-  <script src="viewer2d.js?v=20260908"></script>
-  <script src="shell.js?v=20260908"></script>
+  <script src="core.js?v=20260908b"></script>
+  <script src="script.js?v=20260908b"></script>
+  <script src="viewer2d.js?v=20260908b"></script>
+  <script src="shell.js?v=20260908b"></script>
 </body>
 </html>

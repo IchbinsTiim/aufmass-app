@@ -33,9 +33,24 @@ await page.waitForSelector('#werkzeugPanel.offen');
 // ── 2. Die geforderten Menüpunkte sind vorhanden ──────────────────────────
 const gruppen = await page.evaluate(() =>
   [...document.querySelectorAll('#werkzeugPanel .wz-kopf-txt')].map(e => e.textContent));
-['AUSWAHL', 'BEARBEITEN', 'ACHSEN / ABSCHNITTE', 'ANSICHT'].forEach(g => {
+['AUSWAHL', 'ABMESSUNGEN', 'ZUSATZBAUTEILE', 'AKTIONEN', 'ACHSEN', 'ANSICHT'].forEach(g => {
   assert(gruppen.some(x => x.toUpperCase().includes(g)), `Menügruppe „${g}" vorhanden`);
 });
+// Die vier Kernsektionen stehen in genau dieser Reihenfolge ganz oben.
+assert(gruppen.slice(0, 4).map(x => x.toUpperCase()).join('|')
+       === 'AUSWAHL|ABMESSUNGEN|ZUSATZBAUTEILE|AKTIONEN',
+  `Reihenfolge der Sektionen: ${gruppen.slice(0, 4).join(' · ')}`);
+
+// Jede Sektion lässt sich einzeln einklappen.
+const klapp = await page.evaluate(() => {
+  const gruppe = document.getElementById('wzBauteile');
+  const btn = gruppe.querySelector('.wz-klapp');
+  btn.click();
+  const zu = gruppe.classList.contains('wz-zu');
+  btn.click();
+  return { zu, wiederAuf: !gruppe.classList.contains('wz-zu') };
+});
+assert(klapp.zu && klapp.wiederAuf, 'jede Sektion lässt sich einzeln ein- und ausklappen');
 
 // ── 3. Felder anlegen und einzeln auswählen ───────────────────────────────
 await seedFields(page, 6);
@@ -57,12 +72,21 @@ assert(await page.evaluate(() => document.getElementById('bulkBar').textContent.
 await page.evaluate(() => closeSheet());
 await page.waitForTimeout(300);
 
-// ── 4. Mehrfachauswahl aktivieren und fünf Felder markieren ───────────────
-await page.click('.bulk-toggle-btn');
-await page.waitForTimeout(150);
-assert(await page.evaluate(() => bulkMode), 'Mehrfachauswahl über das Menü aktiviert');
+/* ── 4. Mehrfachauswahl per Geste, fünf Felder markieren ──────────────────
+   Es gibt keinen Modus-Knopf mehr: langes Tippen auf ein Feld startet die
+   Auswahl, jeder weitere Tipp nimmt eines dazu.                          */
+const langdruck = async (pg, punkt) => {
+  await pg.mouse.move(punkt.x, punkt.y);
+  await pg.mouse.down();
+  await pg.waitForTimeout(700);
+  await pg.mouse.up();
+  await pg.waitForTimeout(200);
+};
+await langdruck(page, await feldMitte(0));
+assert(await page.evaluate(() => bulkMode && bulkSelected.size === 1),
+  'langes Tippen auf ein Feld startet die Mehrfachauswahl');
 
-for (const i of [0, 1, 2, 3, 4]) {
+for (const i of [1, 2, 3, 4]) {
   const p = await feldMitte(i);
   await page.mouse.click(p.x, p.y);
   await page.waitForTimeout(80);
@@ -93,15 +117,14 @@ assert(hoehen.slice(0, 5).every(([l, r]) => l === 9.4 && r === 9.4),
 assert(hoehen[5][0] == null && hoehen[5][1] == null,
   'das nicht ausgewählte Feld bleibt unangetastet');
 
-// ── 6. Gemeinsame Achse zuweisen ──────────────────────────────────────────
-page.on('dialog', d => d.accept('Achse B'));
-await page.click('#abschnittBar .absch-new-chip');
+// ── 6. Gemeinsame Achse zuweisen – EIN Tipp auf „+ Achse" in der Leiste ──
+await page.click('#addAchseBtn');
 await page.waitForTimeout(250);
 const achse = await page.evaluate(() => {
   const a = abschnitteList()[0];
   return { name: a && a.name, zugeordnet: allBaysFlat().filter(b => b.abschnittId === (a && a.id)).length };
 });
-assert(achse.name === 'Achse B' && achse.zugeordnet === 5,
+assert(achse.name === 'Achse A' && achse.zugeordnet === 5,
   `fünf Felder der Achse „${achse.name}" zugewiesen`);
 
 // Die aktive Achse ist in der Liste ausgewiesen – nicht nur farblich.
@@ -111,12 +134,25 @@ assert(await page.evaluate(() =>
 
 // Zuordnung ist am Feld selbst ablesbar (Anzeige oben links).
 const info = await page.textContent('#selectionInfo');
-assert(/5 Felder ausgewählt/.test(info) && /Achse B/.test(info),
+assert(/5 Felder ausgewählt/.test(info) && /Achse A/.test(info),
   'Anzeige oben links nennt Anzahl und Achse: ' + info.replace(/\s+/g, ' '));
 
+// Kontextleiste am oberen Rand: Anzahl + die geforderten Aktionen.
+const kontext = await page.evaluate(() => {
+  const bar = document.getElementById('mehrfachBar');
+  return { sichtbar: !bar.classList.contains('hidden'),
+           zahl: bar.querySelector('.mf-zahl').textContent,
+           knoepfe: [...bar.querySelectorAll('.mf-btn .mf-txt')].map(t => t.textContent) };
+});
+assert(kontext.sichtbar && /5 Felder/.test(kontext.zahl),
+  `die Kontextleiste nennt die Anzahl („${kontext.zahl}")`);
+['Höhe', 'Zusatzbauteile', 'Kopieren', 'Einfügen', 'Löschen', 'Auswahl aufheben']
+  .forEach(k => assert(kontext.knoepfe.includes(k),
+    `die Kontextleiste bietet „${k}" (${kontext.knoepfe.join(', ')})`));
+
 // ── 7. Gemeinsame Position zuweisen ───────────────────────────────────────
-await page.evaluate(() => [...document.querySelectorAll('#bulkBar .bulk-pos-chip')]
-  .find(c => c.textContent === 'Innengeländer').click());
+await page.evaluate(() => [...document.querySelectorAll('#wzBauteile .bauteil-karte')]
+  .find(c => c.querySelector('.bk-name').textContent === 'Innengeländer').click());
 await page.waitForSelector('#bottomSheet', { timeout: 3000 });
 await page.evaluate(() => document.querySelector('#bottomSheet .sheet-ok').click());
 await page.waitForTimeout(300);
@@ -135,7 +171,7 @@ assert(await page.evaluate(() => bulkSelected.size === 5),
 // Auswahl über eine Achse.
 await page.evaluate(() => { bulkSelected.clear(); renderAll(); flushRender(); });
 await page.evaluate(() => [...document.querySelectorAll('#wzAuswahl .wz-achs-chip')]
-  .find(c => c.textContent.startsWith('Achse B')).click());
+  .find(c => c.textContent.startsWith('Achse A')).click());
 await page.waitForTimeout(200);
 assert(await page.evaluate(() => bulkSelected.size === 5),
   'alle Felder einer Achse lassen sich in einem Zug auswählen');
@@ -155,13 +191,17 @@ assert(await page.evaluate(() =>
 await page.evaluate(() => [...document.querySelectorAll('#wzAuswahl .wz-aktion')]
   .find(b => b.textContent.includes('Auswahl aufheben')).click());
 await page.waitForTimeout(150);
-assert(await page.evaluate(() => bulkMode && bulkSelected.size === 0),
-  '„Auswahl aufheben" leert die Auswahl, ohne den Modus zu verlassen');
+// Seit Runde 7 gibt es keinen Auswahl-MODUS mehr, den man verlassen könnte:
+// „Auswahl aufheben" beendet die Mehrfachauswahl vollständig. Der Weg zurück
+// ist ein langes Tippen im Plan – kein Knopf in einer Leiste.
+assert(await page.evaluate(() => !bulkMode && bulkSelected.size === 0),
+  '„Auswahl aufheben" leert die Auswahl');
 await page.evaluate(() => [...document.querySelectorAll('#wzAuswahl .wz-aktion')]
   .find(b => b.textContent.includes('Alle Felder auswählen')).click());
 await page.waitForTimeout(150);
 assert(await page.evaluate(() => bulkSelected.size === 6), '„Alle Felder auswählen" markiert alle sechs');
-await page.click('.bulk-toggle-btn');
+await page.evaluate(() => [...document.querySelectorAll('#mehrfachBar .mf-btn')]
+  .find(b => /Auswahl aufheben/.test(b.title)).click());
 await page.waitForTimeout(150);
 assert(await page.evaluate(() => !bulkMode && bulkSelected.size === 0), 'Mehrfachauswahl beendet');
 
@@ -193,7 +233,7 @@ const pdf = await page.evaluate(async () => {
   return (window.__pdfSaved.calls || [])
     .filter(c => c[0] === 'text').map(c => String(c[2])).join(' | ');
 });
-assert(/Achse B/.test(pdf), 'das PDF weist die Achse aus');
+assert(/ACHSE A/i.test(pdf), 'das PDF weist die Achse aus');
 assert(/Innengeländer/i.test(pdf), 'das PDF weist die gemeinsam gesetzte Position aus');
 assert(/9,40|9,4/.test(pdf), 'das PDF rechnet mit der gemeinsam gesetzten Höhe');
 
@@ -207,7 +247,7 @@ assert(await page.evaluate(() => document.body.dataset.mode === 'iphone'),
 assert(await page.evaluate(() => document.getElementById('sidePanel').closest('#werkzeugPanel') !== null),
   'im Handy-Modus zieht die Feldliste ins Menü (dieselbe Liste, kein Klon)');
 assert(await page.evaluate(() => document.getElementById('td-exportPdfBtn').closest('#wzAktionen') !== null),
-  'PDF, Projekt und Bordbrett liegen im Handy-Modus im Menü statt in der Leiste');
+  'PDF und Bordbrett liegen im Handy-Modus im Menü statt in der Leiste');
 
 await page.evaluate(() => [...document.querySelectorAll('#wzAnsicht .wz-segment-btn')]
   .find(b => b.dataset.ansicht === 'tablet').click());
@@ -309,26 +349,29 @@ await hpage.click('#wzAktionenSlot #bordbrettBtn');
 await hpage.waitForTimeout(250);
 assert(await hpage.evaluate(() => bordbrettModus), 'Bordbrett-Modus startet aus dem Menü');
 await hpage.evaluate(() => { const b = allBaysFlat()[0]; setzeBordbrettKante(b.id, 2, true); renderAll(); flushRender(); });
-assert(await hpage.evaluate(() => bordbrettKantenListe().length === 1), 'Bordbrett-Kante gesetzt');
+assert(await hpage.evaluate(() => bordbrettLinien().length === 1), 'Bordbrett-Linie gesetzt');
 await hpage.evaluate(() => beendeBordbrettModus());
 await hpage.waitForTimeout(200);
 
 // Mehrfachauswahl beendet Bordbrett-Modus
 await hpage.evaluate(() => starteBordbrettModus());
 await hpage.waitForTimeout(150);
-await hpage.click('.bulk-toggle-btn');
+await hpage.evaluate(() => { starteMehrfachMitFeld(allBaysFlat()[0]); });
 await hpage.waitForTimeout(200);
 assert(await hpage.evaluate(() => bulkMode && !bordbrettModus),
   'Mehrfachauswahl beendet den Bordbrett-Modus (ein Tipp = eine Bedeutung)');
 
-// Konsole + Dachfang über die Mehrfachauswahl
+// Konsole + Dachfang über die Mehrfachauswahl – beide über ihr Einstellblatt
 await hpage.evaluate(() => { allBaysFlat().forEach(b => bulkSelected.add(b.id)); renderAll(); flushRender(); });
-await hpage.evaluate(() => document.querySelector('#bulkBar .bulk-kons-add-btn').click());
-await hpage.waitForTimeout(200);
+await hpage.evaluate(() => [...document.querySelectorAll('#wzBauteile .bauteil-karte')]
+  .find(c => c.querySelector('.bk-name').textContent === 'Konsole').click());
+await hpage.waitForSelector('#bottomSheet');
+await hpage.evaluate(() => document.querySelector('#bottomSheet .sheet-ok').click());
+await hpage.waitForTimeout(250);
 assert(await hpage.evaluate(() => allBaysFlat().every(b => b.positions.some(p => p.cat === 'konsole'))),
   'Konsole auf alle Felder');
-await hpage.evaluate(() => [...document.querySelectorAll('#bulkBar .bulk-pos-chip')]
-  .find(c => c.textContent === 'Dachfang').click());
+await hpage.evaluate(() => [...document.querySelectorAll('#wzBauteile .bauteil-karte')]
+  .find(c => c.querySelector('.bk-name').textContent === 'Dachfang').click());
 await hpage.waitForSelector('#bottomSheet');
 await hpage.evaluate(() => document.querySelector('#bottomSheet .sheet-ok').click());
 await hpage.waitForTimeout(250);
@@ -363,9 +406,10 @@ assert(await hpage.evaluate(() => Math.round(secAngle(state.sections[0]))) === (
   'Feld drehen');
 
 // Projekt-Blatt und PDF aus dem Menü
-await hpage.click('#wzAktionenSlot #tdMenuBtn');
+await hpage.click('#tdMenuBtn');
 await hpage.waitForSelector('#bottomSheet');
-assert(await hpage.$('#scaffDepth') !== null, 'Projekt-Blatt öffnet aus dem Menü (Gerüsttiefe darin)');
+assert(await hpage.$('#scaffDepth') !== null,
+  'das Hauptmenü hinter dem Projektnamen öffnet (Gerüsttiefe darin)');
 await hpage.evaluate(() => closeSheet());
 await hpage.waitForTimeout(350);
 await hpage.click('#wzAktionenSlot #td-exportPdfBtn');
@@ -401,7 +445,7 @@ for (const [name, w, h] of [
   await seedFields(c.page, 8);
   await c.page.click('#werkzeugBtn');
   await c.page.waitForSelector('#werkzeugPanel.offen');
-  await c.page.click('.bulk-toggle-btn');
+  await c.page.evaluate(() => { bulkMode = true; renderAll(); flushRender(); });
   await c.page.waitForTimeout(150);
 
   const mitte = idx => c.page.evaluate(i => {

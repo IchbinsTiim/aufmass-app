@@ -21,7 +21,7 @@ console.log('AUFGABE 3 – PDF-Export\n');
 async function build(n, { abschnitte = true, notes = 0, theme = 'farbe', bordbrett = false } = {}) {
   return page.evaluate(async ([count, withAbsch, noteCount, themeName, bb]) => {
     state.sections = []; _sId = 0; _bId = 0; _aId = 0; state.abschnitte = [];
-    state.bordbrettKanten = []; state.ecken = {};
+    state.bordbrettLinien = []; state.ecken = {};
     state.project = 'Testprojekt Musterstraße';
     const names = ['Nordseite', 'Ostseite', 'Südseite', 'Westseite'];
     const abs = withAbsch ? names.map(nm => addAbschnitt(nm)) : [];
@@ -58,7 +58,7 @@ function byPage(saved) {
 }
 
 const istPlanseite = t => t.some(x => /Maßstab ca\. 1:\d+/.test(x));
-const istAufmass   = t => t.includes('Bezeichnung') && t.includes('Einheit');
+const istAufmass   = t => t.includes('Feld') && t.includes('Fläche (m²)');
 
 // ── 1. Normales Gerüst (eine Achse): genau zwei Seiten ────────────────────
 let saved = await build(6, { abschnitte: false, bordbrett: true });
@@ -82,23 +82,26 @@ assert(pages[1].some(x => x === 'A1') && pages[1].some(x => x === '2,57')
     && pages[1].some(x => /^h 8,50/.test(x)),
   'die Zeichnung zeigt Feldbezeichnung, Feldlänge und Höhe');
 assert(pages[1].some(x => x === 'Konsole') && pages[1].some(x => x === 'Netz')
-    && pages[1].some(x => x === 'Bordbrett'),
+    && pages[1].some(x => x === 'Bordbrett (Aufmaßlänge)'),
   'unter der Zeichnung steht eine Legende der verwendeten Positionsarten');
 
-// ── 2. Aufmaß: Pos. / Bezeichnung / Menge / Einheit ───────────────────────
+// ── 2. Aufmaß: Feld / Länge / Höhe / Fläche / Bemerkung ───────────────────
 const auf = pages[2];
-['Pos.', 'Bezeichnung', 'Menge', 'Einheit'].forEach(sp =>
+['Feld', 'Länge (m)', 'Höhe (m)', 'Fläche (m²)', 'Bemerkung'].forEach(sp =>
   assert(auf.includes(sp), `die Aufmaßtabelle hat die Spalte „${sp}"`));
-assert(auf.includes('Gerüstfläche') && auf.includes('m²'), 'die Gerüstfläche ist eine Position');
-assert(auf.includes('Bordbrett'), 'das Bordbrett ist eine Position');
-assert(!auf.includes('0,00'), 'keine Position mit der Menge 0,00');
-assert(!auf.includes('Gesamt'),
-  'bei einer einzigen Achse steht die Aufstellung nicht zweimal auf dem Blatt');
+assert(auf.some(x => /^Position 1 – Gerüstfläche/.test(x)),
+  'Position 1 weist die gesamte Gerüstfläche aus');
+assert(auf.some(x => /^Position 2 – Positionierte Gerüstfläche/.test(x)),
+  'Position 2 weist die positionierte Gerüstfläche (Aufmaß) aus');
+assert(!auf.some(x => x.trim() === 'Bordbrett'),
+  'das Bordbrett ist keine eigene Position mehr');
+assert(!auf.some(x => /DIN\s?18451|Grundlage:/.test(x)),
+  'kein Regeltext nach ATV DIN 18451 auf dem Blatt');
 
 // ── 3. Mehrere Achsen teilen sich EINE Aufmaßseite ────────────────────────
 const mehrAchsen = await page.evaluate(async () => {
   state.sections = []; _sId = 0; _bId = 0; _aId = 0; state.abschnitte = [];
-  state.bordbrettKanten = []; state.ecken = {};
+  state.bordbrettLinien = []; state.ecken = {};
   state.project = 'Drei Achsen';
   const lauf = (winkel, n, x, y) => {
     for (let i = 0; i < n; i++) {
@@ -119,12 +122,18 @@ const mehrAchsen = await page.evaluate(async () => {
 });
 const mPages = byPage(mehrAchsen);
 const aufmassSeiten = Object.entries(mPages).filter(([, t]) => istAufmass(t)).map(([p]) => +p);
-assert(aufmassSeiten.length === 1,
-  `drei Achsen stehen auf ${aufmassSeiten.length} Aufmaßseite (nicht auf je einer)`);
-const achsBloecke = mPages[aufmassSeiten[0]].filter(x => /^Achse /.test(x));
+// Seit Runde 7 steht jedes Feld mit Länge, Höhe und Fläche in der Tabelle –
+// das braucht mehr Platz als die frühere Mengenliste. Entscheidend bleibt:
+// eine Achse bekommt nicht allein deshalb ein eigenes Blatt, weil sie eine
+// Achse ist. Elf Felder in drei Achsen passen auf höchstens zwei Blätter.
+assert(aufmassSeiten.length <= 2,
+  `drei Achsen stehen auf ${aufmassSeiten.length} Aufmaßseiten (nicht auf je einer)`);
+const achsText = aufmassSeiten.flatMap(nr => mPages[nr]);
+const achsBloecke = [...new Set(achsText.filter(x => /^ACHSE /.test(x))
+  .map(x => x.replace(' (FORTSETZUNG)', '')))];
 assert(achsBloecke.length === 3,
-  `alle drei Achsen sind eigene Blöcke auf derselben Seite: ${achsBloecke.join(', ')}`);
-assert(mPages[aufmassSeiten[0]].includes('Gesamt'),
+  `alle drei Achsen sind eigene Blöcke: ${achsBloecke.join(', ')}`);
+assert(achsText.some(x => /^GESAMT ÜBER ALLE ACHSEN$/.test(x)),
   'die Gesamtaufstellung steht darunter, nicht auf einem eigenen Blatt');
 
 // ── 4. Großes Gerüst: Zeichnung auf mehrere Blätter, gleicher Maßstab ─────
@@ -175,17 +184,17 @@ pages = byPage(await build(20));
 const mitAbsch = Object.values(pages).flat();
 ['Nordseite', 'Ostseite', 'Südseite', 'Westseite'].forEach(nm =>
   assert(mitAbsch.includes(nm), `Abschnitt „${nm}" hat einen eigenen Block`));
-assert(!mitAbsch.some(x => /^Achse /.test(x)),
+assert(!mitAbsch.some(x => /^ACHSE /.test(x)),
   'mit Abschnitten wird nicht zusätzlich nach Achsen gegliedert');
 
 const ohneAbsch = Object.values(byPage(await build(10, { abschnitte: false }))).flat();
-assert(ohneAbsch.some(x => /^Achse /.test(x)),
+assert(ohneAbsch.some(x => /^ACHSE /.test(x)),
   'ohne Abschnitte gliedert das Aufmaß nach Achsen');
 
 // ── 7. Tabellenumbruch wiederholt den Spaltenkopf ─────────────────────────
 const umbruch = await page.evaluate(async () => {
   state.sections = []; _sId = 0; _bId = 0; _aId = 0; state.abschnitte = [];
-  state.bordbrettKanten = []; state.ecken = {};
+  state.bordbrettLinien = []; state.ecken = {};
   state.project = 'Viele Abschnitte';
   // 26 Abschnitte × je 2 Zeilen sprengen eine Aufmaßseite sicher.
   const abs = [];
@@ -205,8 +214,8 @@ const umbruch = await page.evaluate(async () => {
 const uPages = byPage(umbruch);
 const uAufmass = Object.entries(uPages).filter(([, t]) => istAufmass(t)).map(([p]) => +p);
 assert(uAufmass.length >= 2, `die volle Tabelle bricht auf ${uAufmass.length} Seiten um`);
-assert(uAufmass.every(p => uPages[p].includes('Pos.') && uPages[p].includes('Bezeichnung')
-                        && uPages[p].includes('Menge') && uPages[p].includes('Einheit')),
+assert(uAufmass.every(p => uPages[p].includes('Feld') && uPages[p].includes('Länge (m)')
+                        && uPages[p].includes('Höhe (m)') && uPages[p].includes('Fläche (m²)')),
   'nach dem Umbruch wird der Spaltenkopf wiederholt');
 
 // ── 8. Notizen nur, wenn welche erfasst sind ──────────────────────────────
