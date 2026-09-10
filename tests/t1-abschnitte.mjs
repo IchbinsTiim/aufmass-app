@@ -73,7 +73,10 @@ assert(afterDelete.before === afterDelete.after && afterDelete.after === 6,
 assert(afterDelete.sections === 1 && afterDelete.orphan === 4,
   'Felder des gelöschten Abschnitts gelten als „ohne Abschnitt"');
 
-// ── Anzeige oben links bei Mehrfachauswahl ─────────────────────────────────
+// ── Anzeige oben MITTIG bei Mehrfachauswahl ────────────────────────────────
+// Seit Runde 8 sind die Overlays auf feste, kollisionsfreie Zonen verteilt:
+// Achslabel am Objekt im Canvas, Auswahl-Anzeige oben mittig als schmale
+// Pille, Aktionsleiste unten.
 await page.evaluate(() => {
   state.abschnitte = []; _aId = 0;
   allBaysFlat().forEach(b => { b.abschnittId = null; });
@@ -91,10 +94,12 @@ let info = await page.evaluate(() => {
   const r = el.getBoundingClientRect();
   const panel = document.getElementById('viewerPanel').getBoundingClientRect();
   return { hidden: el.classList.contains('hidden'), text: el.textContent,
-           dx: Math.round(r.left - panel.left), dy: Math.round(r.top - panel.top) };
+           dy: Math.round(r.top - panel.top),
+           versatz: Math.round(Math.abs((r.left + r.width / 2) - (panel.left + panel.width / 2))) };
 });
 assert(!info.hidden, 'Auswahl-Info ist bei Mehrfachauswahl sichtbar');
-assert(info.dx < 40 && info.dy < 40, `Auswahl-Info sitzt oben links (Δ ${info.dx}/${info.dy} px)`);
+assert(info.versatz < 12 && info.dy < 40,
+  `Auswahl-Info sitzt oben mittig (${info.versatz} px aus der Mitte, ${info.dy} px von oben)`);
 assert(/2 Felder ausgewählt/.test(info.text), 'Auswahl-Info nennt die Anzahl: ' + JSON.stringify(info.text));
 assert(/Achse:/.test(info.text) && /Nordseite/.test(info.text),
   'Auswahl-Info nennt die Achse');

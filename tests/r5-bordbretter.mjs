@@ -226,10 +226,12 @@ assert(Math.abs(achsen.gesamt - achsen.summeTeile) < 0.005 && Math.abs(achsen.ge
 assert(/17,99 m/.test(achsen.readout),
   `die Werkzeugleiste zeigt die Menge mit: „${achsen.readout}"`);
 
-/* ── 11. Bordbrett im PDF: keine eigene Position mehr ─────────────────────
+/* ── 11. Bordbrett im PDF: weder Position noch Skizze ─────────────────────
    Seit Runde 7 wird das Bordbrett NICHT mehr in laufenden Metern abgerechnet.
-   Es ist ausschließlich die Grundlage der Aufmaßlänge und taucht deshalb nur
-   noch als „Aufmaßlänge" über Position 2 auf.                            */
+   Seit Runde 8 wird es auch nicht mehr GEZEICHNET: es ist ausschließlich
+   Eingabehilfsmittel der Zeichenfläche. Was bleibt, ist seine Rechenwirkung –
+   die Aufmaßlänge und die daraus positionierte Gerüstfläche in der Metazeile
+   des Achsblocks.                                                        */
 const pdf = await page.evaluate(async () => {
   state.project = 'Bordbrett-Nachweis';
   window.__pdfSaved = null;
@@ -241,8 +243,10 @@ assert(!pdf.texte.some(x => x.trim() === 'Bordbrett'),
   'das Bordbrett steht nicht mehr als eigene Position im Aufmaß');
 assert(/Aufmaßlänge 7,71 m/.test(pdf.alle) && /Aufmaßlänge 10,28 m/.test(pdf.alle),
   'stattdessen trägt jede Achse ihre Aufmaßlänge aus der Bordbrettlinie');
-assert(/Position 2 – Positionierte Gerüstfläche/.test(pdf.alle),
-  'die Aufmaßfläche steht als Position 2 im PDF');
+assert(/davon positioniert: [\d,]+ m²/.test(pdf.alle),
+  'die positionierte Gerüstfläche steht in der Metazeile des Achsblocks');
+assert(!pdf.texte.some(x => /^Position [12] –/.test(x)),
+  'die frühere Auflistung mit Position 1 / Position 2 ist entfallen');
 
 // ── 12. Kanten gelöschter Felder verschwinden mit ihnen ───────────────────
 const aufgeraeumt = await page.evaluate(() => {

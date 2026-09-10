@@ -1,15 +1,21 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Aufgabe 3 – PDF-Export
 
-   Das Dokument besteht aus zwei Dingen: der Zeichnung und dem Aufmaß.
+   Das Dokument besteht aus zwei Dingen: der Skizze und dem Aufmaß.
    Geprüft wird genau das – und dass zusätzliche Blätter nur dort entstehen,
    wo sie gebraucht werden:
 
-     • ein normales Gerüst  →  Seite 1 Zeichnung, Seite 2 Aufmaß
+     • ein normales Gerüst  →  Seite 1 Skizze, Seite 2 Aufmaß
      • mehrere Achsen       →  alle auf derselben Aufmaßseite, solange Platz ist
-     • sehr großes Gerüst   →  Zeichnung auf mehrere Blätter, gleicher Maßstab
+     • sehr großes Gerüst   →  Skizze auf mehrere Blätter, gleicher Maßstab
      • Tabellenumbruch      →  Spaltenkopf wird wiederholt
      • keine Nullzeilen, keine doppelten Angaben, keine Zierseiten
+
+   Seit Runde 8 hat das Aufmaßblatt EINE Ebene: je Achse ein Kopfbalken mit
+   Kennzahlen und darunter EINE Positionstabelle (Farbfeld · Position ·
+   Anzahl · Menge · lfd. Meter). Feldweise Auflistungen und die Zwischen-
+   überschriften „Position 1/2" sind entfallen; das Bordbrett steht weder in
+   der Skizze noch als Position.
    ══════════════════════════════════════════════════════════════════════════ */
 import { open, assert } from './harness.mjs';
 
@@ -58,13 +64,16 @@ function byPage(saved) {
 }
 
 const istPlanseite = t => t.some(x => /Maßstab ca\. 1:\d+/.test(x));
-const istAufmass   = t => t.includes('Feld') && t.includes('Fläche (m²)');
+// Eine Aufmaßseite erkennt man am Kopfbalken eines Achsblocks: rechts stehen
+// dort seine Kennzahlen „n Felder · x m · y m²".
+const KENNZAHLEN   = /^\d+ Feld(?:er)?\s+·\s+[\d.,]+ m\s+·\s+[\d.,]+ m²$/;
+const istAufmass   = t => t.some(x => KENNZAHLEN.test(x));
 
 // ── 1. Normales Gerüst (eine Achse): genau zwei Seiten ────────────────────
 let saved = await build(6, { abschnitte: false, bordbrett: true });
 let pages = byPage(saved);
 assert(saved.pages === 2, `ein normales Gerüst ergibt genau ${saved.pages} Seiten (Soll 2)`);
-assert(istPlanseite(pages[1]) && !istAufmass(pages[1]), 'Seite 1 zeigt die Zeichnung');
+assert(istPlanseite(pages[1]) && !istAufmass(pages[1]), 'Seite 1 zeigt die Skizze');
 assert(istAufmass(pages[2]) && !istPlanseite(pages[2]), 'Seite 2 zeigt das Aufmaß');
 
 // Kopfzeile: Projekt, Datum, Gerüsttiefe – auf jeder Seite, sonst nichts.
@@ -81,18 +90,25 @@ assert(Object.values(pages).every(t => t.some(x => /^Seite \d+ von \d+$/.test(x)
 assert(pages[1].some(x => x === 'A1') && pages[1].some(x => x === '2,57')
     && pages[1].some(x => /^h 8,50/.test(x)),
   'die Zeichnung zeigt Feldbezeichnung, Feldlänge und Höhe');
-assert(pages[1].some(x => x === 'Konsole') && pages[1].some(x => x === 'Netz')
-    && pages[1].some(x => x === 'Bordbrett (Aufmaßlänge)'),
-  'unter der Zeichnung steht eine Legende der verwendeten Positionsarten');
+assert(pages[1].some(x => x === 'Konsole') && pages[1].some(x => x === 'Netz'),
+  'unter der Skizze steht eine Legende der verwendeten Positionsarten');
+assert(!pages[1].some(x => /Bordbrett/.test(x)),
+  'das Bordbrett steht nicht in der Skizze – es ist reines Eingabehilfsmittel');
 
-// ── 2. Aufmaß: Feld / Länge / Höhe / Fläche / Bemerkung ───────────────────
+// ── 2. Aufmaß: EINE Ebene je Achse ────────────────────────────────────────
 const auf = pages[2];
-['Feld', 'Länge (m)', 'Höhe (m)', 'Fläche (m²)', 'Bemerkung'].forEach(sp =>
-  assert(auf.includes(sp), `die Aufmaßtabelle hat die Spalte „${sp}"`));
-assert(auf.some(x => /^Position 1 – Gerüstfläche/.test(x)),
-  'Position 1 weist die gesamte Gerüstfläche aus');
-assert(auf.some(x => /^Position 2 – Positionierte Gerüstfläche/.test(x)),
-  'Position 2 weist die positionierte Gerüstfläche (Aufmaß) aus');
+['Position', 'Anzahl', 'Menge', 'lfd. Meter'].forEach(sp =>
+  assert(auf.includes(sp), `die Positionstabelle hat die Spalte „${sp}"`));
+assert(!auf.includes('Bemerkung'),
+  'die Spalte „Bemerkung" der feldweisen Auflistung ist entfallen');
+assert(auf.some(x => KENNZAHLEN.test(x)),
+  'der Kopfbalken nennt Feldzahl, Länge und Gerüstfläche der Achse');
+assert(auf.some(x => /^GESAMT · ALLE SEITEN$/.test(x)),
+  'der Abschlussblock heißt „Gesamt · alle Seiten"');
+assert(!auf.some(x => /^Position [12] –/.test(x)),
+  'die Zwischenüberschriften „Position 1/2" sind entfallen');
+assert(!auf.some(x => x === 'Feld' || x === 'Fläche (m²)'),
+  'es gibt keine feldweise Auflistung mit Einzelflächen mehr');
 assert(!auf.some(x => x.trim() === 'Bordbrett'),
   'das Bordbrett ist keine eigene Position mehr');
 assert(!auf.some(x => /DIN\s?18451|Grundlage:/.test(x)),
@@ -122,18 +138,17 @@ const mehrAchsen = await page.evaluate(async () => {
 });
 const mPages = byPage(mehrAchsen);
 const aufmassSeiten = Object.entries(mPages).filter(([, t]) => istAufmass(t)).map(([p]) => +p);
-// Seit Runde 7 steht jedes Feld mit Länge, Höhe und Fläche in der Tabelle –
-// das braucht mehr Platz als die frühere Mengenliste. Entscheidend bleibt:
-// eine Achse bekommt nicht allein deshalb ein eigenes Blatt, weil sie eine
-// Achse ist. Elf Felder in drei Achsen passen auf höchstens zwei Blätter.
-assert(aufmassSeiten.length <= 2,
-  `drei Achsen stehen auf ${aufmassSeiten.length} Aufmaßseiten (nicht auf je einer)`);
+// Mit EINER Ebene je Achse ist das Aufmaß kurz: drei Achsen passen auf ein
+// einziges Blatt. Entscheidend bleibt: eine Achse bekommt nicht allein
+// deshalb ein eigenes Blatt, weil sie eine Achse ist.
+assert(aufmassSeiten.length === 1,
+  `drei Achsen stehen auf ${aufmassSeiten.length} Aufmaßseite (nicht auf je einer)`);
 const achsText = aufmassSeiten.flatMap(nr => mPages[nr]);
 const achsBloecke = [...new Set(achsText.filter(x => /^ACHSE /.test(x))
   .map(x => x.replace(' (FORTSETZUNG)', '')))];
 assert(achsBloecke.length === 3,
   `alle drei Achsen sind eigene Blöcke: ${achsBloecke.join(', ')}`);
-assert(achsText.some(x => /^GESAMT ÜBER ALLE ACHSEN$/.test(x)),
+assert(achsText.some(x => /^GESAMT · ALLE SEITEN$/.test(x)),
   'die Gesamtaufstellung steht darunter, nicht auf einem eigenen Blatt');
 
 // ── 4. Großes Gerüst: Zeichnung auf mehrere Blätter, gleicher Maßstab ─────
@@ -141,12 +156,12 @@ saved = await build(90);
 pages = byPage(saved);
 const planPages = Object.entries(pages).filter(([, t]) => istPlanseite(t)).map(([p]) => +p);
 assert(planPages.length >= 3, `großer Plan wird auf ${planPages.length} Planblätter verteilt`);
-assert(planPages.every(p => /Blatt \d+ von \d+/.test(pages[p].join('\n'))),
-  'jedes Planblatt ist als „Blatt x von y" gekennzeichnet');
+assert(planPages.every(p => /Skizze \d+ von \d+/.test(pages[p].join('\n'))),
+  'jedes Planblatt ist als „Skizze x von y" gekennzeichnet');
 assert(planPages.every(p => pages[p].some(x => /Felder A\d+ – A\d+|Feld A\d+/.test(x))),
   'jedes Planblatt nennt die Felder, die es zeigt');
 assert(planPages.every(p => pages[p].some(x => /^LAGE IM GESAMTPLAN/.test(x))),
-  'jedes Planblatt zeigt seine Lage im Gesamtplan');
+  'jedes Planblatt zeigt seine Lage im Gesamtplan (Übersichts-Thumbnail)');
 const scaleTexts = [...new Set(Object.values(pages).flat()
   .map(x => (x.match(/Maßstab ca\. 1:\d+/) || [])[0]).filter(Boolean))];
 assert(scaleTexts.length === 1, `alle Planblätter haben denselben Maßstab (${scaleTexts[0]})`);
@@ -179,17 +194,20 @@ assert(split.cut === 0, 'kein Feld wird am Blattrand angeschnitten');
 assert(split.uniformWindows === 1, 'alle Planblätter zeigen einen gleich großen Ausschnitt');
 assert(split.ghosts, 'Anschluss-Felder der Nachbarblätter werden als Kontext mitgeführt');
 
-// ── 6. Gliederung: Abschnitte, sonst Achsen ───────────────────────────────
+// ── 6. Gliederung: angelegte Achsen, sonst die geometrischen Wände ────────
+// Der Kopfbalken trägt den vom Nutzer vergebenen Namen, davor die laufende
+// Nummer: „ACHSE 2 · OSTSEITE".
 pages = byPage(await build(20));
 const mitAbsch = Object.values(pages).flat();
-['Nordseite', 'Ostseite', 'Südseite', 'Westseite'].forEach(nm =>
-  assert(mitAbsch.includes(nm), `Abschnitt „${nm}" hat einen eigenen Block`));
-assert(!mitAbsch.some(x => /^ACHSE /.test(x)),
-  'mit Abschnitten wird nicht zusätzlich nach Achsen gegliedert');
+['Nordseite', 'Ostseite', 'Südseite', 'Westseite'].forEach((nm, i) =>
+  assert(mitAbsch.some(x => x === `ACHSE ${i + 1} · ${nm.toUpperCase()}`),
+    `Achse „${nm}" hat einen eigenen Block mit ihrer Nummer`));
+assert(!mitAbsch.some(x => /^ACHSE [A-Z]\d/.test(x)),
+  'mit angelegten Achsen wird nicht zusätzlich nach den geometrischen Wänden gegliedert');
 
 const ohneAbsch = Object.values(byPage(await build(10, { abschnitte: false }))).flat();
-assert(ohneAbsch.some(x => /^ACHSE /.test(x)),
-  'ohne Abschnitte gliedert das Aufmaß nach Achsen');
+assert(ohneAbsch.some(x => /^ACHSE [A-Z]\d/.test(x)),
+  'ohne angelegte Achsen gliedert das Aufmaß nach den geometrischen Wänden');
 
 // ── 7. Tabellenumbruch wiederholt den Spaltenkopf ─────────────────────────
 const umbruch = await page.evaluate(async () => {
@@ -214,9 +232,21 @@ const umbruch = await page.evaluate(async () => {
 const uPages = byPage(umbruch);
 const uAufmass = Object.entries(uPages).filter(([, t]) => istAufmass(t)).map(([p]) => +p);
 assert(uAufmass.length >= 2, `die volle Tabelle bricht auf ${uAufmass.length} Seiten um`);
-assert(uAufmass.every(p => uPages[p].includes('Feld') && uPages[p].includes('Länge (m)')
-                        && uPages[p].includes('Höhe (m)') && uPages[p].includes('Fläche (m²)')),
+assert(uAufmass.every(p => uPages[p].includes('Position') && uPages[p].includes('Anzahl')
+                        && uPages[p].includes('Menge') && uPages[p].includes('lfd. Meter')),
   'nach dem Umbruch wird der Spaltenkopf wiederholt');
+
+// Ein Achsblock wird NIE über zwei Seiten getrennt: kein Kopfbalken steht als
+// letzte Zeile eines Blattes ohne seine Tabelle.
+const getrennt = uAufmass.filter(p => {
+  const t = uPages[p];
+  const letzterBalken = t.map((x, i) => /^ACHSE /.test(x) ? i : -1).filter(i => i >= 0).pop();
+  return letzterBalken != null && letzterBalken >= 0
+      && !t.slice(letzterBalken).includes('lfd. Meter')
+      && !t.slice(letzterBalken).some(x => /Keine Zusatzbauteile/.test(x));
+});
+assert(getrennt.length === 0,
+  `kein Achsblock wird über zwei Seiten getrennt (Seiten: ${getrennt.join(', ') || 'keine'})`);
 
 // ── 8. Notizen nur, wenn welche erfasst sind ──────────────────────────────
 const ohneNotizen = Object.values(byPage(await build(8))).flat();
