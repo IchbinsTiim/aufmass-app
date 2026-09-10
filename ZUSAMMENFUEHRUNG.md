@@ -121,45 +121,82 @@ zusammengeführten App geprüft.
 
 **Hauptleiste** – nur, was beim Zeichnen selbst ständig gebraucht wird
 
+```
+[←] Projektname [⌄]  |  + Feld  |  + Achse  |  ↶ ↷  |  Alle  |  Magnet  |  Bordbrett  |  PDF  |  Werkzeuge  |  [Fläche m²] [Bordbrett m]
+```
+
 | Funktion | |
 |---|---|
 | Rücksprung, Name der Zeichnung | ✅ |
+| **Hauptmenü** hinter dem Projektnamen: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei | ✅ |
 | Feld hinzufügen | ✅ |
+| **Achse hinzufügen** – ein Tipp, keine Rückfrage | ✅ |
 | Rückgängig / Wiederholen (Stapel, 60 Schritte) | ✅ |
 | Alle Felder anzeigen · Magnet | ✅ |
 | Bordbrett | ✅ |
-| Projekt (Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei speichern/laden) | ✅ |
 | PDF | ✅ |
-| **Werkzeuge (Pfeil-Knopf)** – klappt das Werkzeug-Menü auf und zu | ✅ |
+| **Werkzeuge (Pfeil-Knopf)** – klappt das Werkzeug-Panel auf und zu | ✅ |
 | Gesamtfläche, Bordbrett-Summe, Hinweis-Zähler | ✅ |
 
-Im Handy-Modus ziehen **Bordbrett, Projekt und PDF** ins Werkzeug-Menü um –
-dieselben Knöpfe, nur an einem Ort, an dem sie nicht aus dem Bildschirm laufen.
-Es gibt keine zweite PDF- oder Projekt-Taste.
+Der frühere Knopf **„Projekt"** ist aus der Leiste verschwunden; seine Inhalte
+liegen unverändert im Hauptmenü oben links. Der Knopf **„Mehrere auswählen"**
+ist ersatzlos entfallen – die Mehrfachauswahl entsteht jetzt aus der Geste
+(siehe *Zeichenfläche*).
 
-**Werkzeug-Menü** – aufklappbar, geschlossen kostet es keine Zeichenfläche
+Bei schmalerem Viewport fallen sekundäre Knöpfe auf ihr Symbol zusammen;
+**„+ Feld", „+ Achse" und „Bordbrett" behalten immer ihr Wort**. Reicht die
+Breite nicht, bricht die Leiste in eine zweite Zeile um – kein Knopf wird
+weggescrollt und keiner schrumpft unter 44 px.
 
-| Block | Funktion | |
+Im Handy-Modus ziehen **Bordbrett und PDF** ins Werkzeug-Panel um – dieselben
+Knöpfe, nur an einem Ort, an dem sie nicht aus dem Bildschirm laufen. Es gibt
+keine zweite PDF-Taste.
+
+**Werkzeug-Panel** – rechts angedockt, feste Breite 360 pt, sauber scrollbar
+
+Sticky-Kopf mit Titel „Werkzeuge", Griff und Schließen-X; darunter der
+Scrollbereich mit oberem und unterem Sicherheitsabstand. Ein Wisch nach rechts
+auf dem Kopf schließt es. **Jede Sektion ist einzeln einklappbar** (der
+Zustand steht in `geruest.2d.wzSektionen`). Angedockt überdeckt es die
+Zeichnung nicht – die schiebt sich beim Öffnen nach links.
+
+| Sektion | Funktion | |
 |---|---|---|
-| Auswahl | Mehrfachauswahl ein-/ausschalten, Zähler „x von y" | ✅ |
-| Auswahl | Alle Felder auswählen · Auswahl aufheben | ✅ |
-| Auswahl | ganze Achse auswählen · alle Felder einer Position auswählen | ✅ |
-| Auswahl | bei Einzelauswahl: „Feld bearbeiten" | ✅ |
-| Bearbeiten | Höhe links/rechts setzen, „="-Kopplung, Höhe aus Auswahl übernehmen | ✅ |
-| Bearbeiten | Eigenschaften/Kategorien (Innengeländer, Netz, Dachfang, Treppenturm …) | ✅ |
-| Bearbeiten | Konsole (Typ, Lagen oder Meter) auf die Auswahl | ✅ |
-| Bearbeiten | Position kopieren · Höhe kopieren · auf Auswahl anwenden (Umfang wählbar) | ✅ |
-| Bearbeiten | Vorlage auf Auswahl anwenden · Auswahl spiegeln | ✅ |
+| **1 Auswahl** | Zähler, welche Felder aktiv sind, Richtung N/O/S/W, Länge, Höhe | ✅ |
+| Auswahl | Alle Felder auswählen · Auswahl aufheben · bei Einzelauswahl „Feld bearbeiten" | ✅ |
+| Auswahl | ganze Achse auswählen · alle Felder eines Bauteils auswählen | ✅ |
+| **2 Abmessungen** | Feldlänge (Schnellwahl + freie Eingabe) | ✅ |
+| Abmessungen | Höhe links/rechts, „="-Kopplung, Höhe aus Auswahl übernehmen | ✅ |
+| Abmessungen | Gerüsttiefe der ganzen Zeichnung | ✅ |
+| **3 Zusatzbauteile** | alle Bauteile als gleich große Karten im 2-spaltigen Raster | ✅ |
+| Zusatzbauteile | Farbe kodiert den ZUSTAND (aktiv/inaktiv), nicht den Typ | ✅ |
+| Zusatzbauteile | aktive Karten mit Häkchen und Wert als Untertitel („Konsole 0,30 · 4 Lagen · 10,28 m") | ✅ |
+| Zusatzbauteile | jede Karte öffnet ihr Einstellblatt für Länge bzw. Lagen – auch die Konsole | ✅ |
+| **4 Aktionen** | Kopieren · Einfügen (Umfang wählbar) · Duplizieren · Löschen | ✅ |
+| Aktionen | Vorlage auf Auswahl anwenden · Auswahl spiegeln | ✅ |
 | Achsen | Achse anlegen, umbenennen, löschen, ein-/ausblenden, Zähler, Farbe | ✅ |
 | Achsen | Achse für die Auswahl zuweisen bzw. entfernen, aktive Achse markiert | ✅ |
 | Felder | die Feldliste (im Handy-Modus; sonst links) | ✅ |
 | Ansicht | Automatisch / Handy / Tablet | ✅ |
 
-Alle Blöcke steuern dieselbe Kernlogik an (`bulkMode`/`bulkSelected`,
-`state.abschnitte`, `POSITIONS`). Das Menü ist reine Oberfläche: Zuklappen
-ändert weder den Auswahlmodus noch die markierten Felder.
+Alle Sektionen steuern dieselbe Kernlogik an (`bulkMode`/`bulkSelected`,
+`state.abschnitte`, `POSITIONS`). Das Panel ist reine Oberfläche: Zuklappen
+ändert weder die Auswahl noch die markierten Felder.
 
-**Feldliste** (links; im Handy-Modus im Werkzeug-Menü)
+**Achse und Abschnitt sind EIN Ding.** Es gab nie zwei Objekte – nur zwei
+Namen für dasselbe (`state.abschnitte`): der Knopf hieß „+ Achse", der Dialog
+fragte nach dem „Namen der Achse / des Abschnitts", die Chips sagten „Ohne
+Abschnitt". Nach außen heißt es jetzt durchgängig **Achse**. Der interne
+Begriff `achsenListe()` bleibt davon unberührt: das ist die aus der Geometrie
+abgeleitete Wand (Kette gleich gerichteter Felder), kein Bedienelement.
+
+**Feldliste** (links; im Handy-Modus im Werkzeug-Panel)
+
+Sie lässt sich **ein- und ausklappen**: über den schmalen Griff (28 px) mit
+Chevron am Rand oder per Wisch – nach links klappt ein, nach rechts aus.
+Eingeklappt bleibt nur der Streifen stehen, die volle Zeichenfläche gehört der
+Zeichnung. Der Zustand steht in `geruest.2d.feldliste` und überlebt damit
+Sitzung und Projektwechsel.
 
 | Funktion | |
 |---|---|
@@ -174,7 +211,11 @@ Alle Blöcke steuern dieselbe Kernlogik an (`bulkMode`/`bulkSelected`,
 | Funktion | |
 |---|---|
 | Feld antippen → Bearbeiten-Sheet | ✅ |
+| **Langes Tippen auf ein Feld** startet die Mehrfachauswahl | ✅ |
+| **Zwei Finger ruhig aufliegen lassen** → Auswahlrahmen aufziehen | ✅ |
+| Langes Tippen auf leere Fläche → derselbe Rahmen mit einem Finger | ✅ |
 | Feld antippen in der Mehrfachauswahl → an-/abhaken | ✅ |
+| Ab zwei ausgewählten Feldern: Aktionsleiste am OBEREN RAND der Zeichenfläche mit Anzahl, Höhe, Zusatzbauteilen, Kopieren, Einfügen, Löschen, Auswahl aufheben | ✅ |
 | In der Mehrfachauswahl entfallen „+"-Knöpfe und Drehgriff: jeder Tipp gehört der Auswahl | ✅ |
 | Kein Neuaufbau des SVG, solange ein Finger aufliegt – sonst geht der Tipp verloren | ✅ |
 | Ausgewähltes Feld: kräftiger Ring in fester Bildschirmstärke + Leuchten | ✅ |
@@ -184,7 +225,8 @@ Alle Blöcke steuern dieselbe Kernlogik an (`bulkMode`/`bulkSelected`,
 | Blaue „+"-Knöpfe links/rechts: Feld anfügen | ✅ |
 | Pan, Pinch-Zoom, Mausrad/Trackpad-Zoom, Doppeltipp-Zoom | ✅ |
 | Auswahl-Info oben links (Anzahl + beteiligte Achsen) | ✅ |
-| Maßstabsleiste, Eck-Symbole, Bordbrett-Kanten | ✅ |
+| Maßstabsleiste, Eck-Symbole, Bordbrettlinien mit Anfassern | ✅ |
+| Gebäudeecken als markierte Fangpunkte („Ecke") | ✅ |
 | „Alle anzeigen" passt in den FREIEN Teil ein, nicht unter das offene Menü | ✅ |
 | Leerhinweis mit „Feld hinzufügen" | ✅ |
 
@@ -212,9 +254,43 @@ schmalen Fenster war, blieb danach überall im Handy-Modus.
 | Feld hinzufügen (Richtung, Standardlängen, −/+, freie Länge) | ✅ |
 | Feld bearbeiten (Richtung, Länge, Drehung mit Regler und 90/180/270, Achse, Höhen, Positionen, Notiz, Kopieren/Einfügen, Favoriten, Löschen) | ✅ |
 | Ecken-Sheet: Umlauf je Seite festlegen | ✅ |
-| Projekt-Sheet: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei | ✅ |
+| Hauptmenü-Sheet: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei | ✅ |
 | Mehrfach-Positionen-Sheet (Menge/Lagen einmal für die ganze Auswahl) | ✅ |
+| Konsolen-Sheet für die Auswahl (Breite, Abrechnung, Lagen bzw. Meter) | ✅ |
+| Zusatzbauteil-Sheet aus der Kontextleiste (Karten-Raster) | ✅ |
+| Höhen-Sheet aus der Kontextleiste | ✅ |
+| **Bordbrett-Sheet: Aufmaßlänge, Lagen anlegen/ändern/löschen, Achszuordnung** | ✅ |
 | PDF-Sheet: Farbe / Schwarz-Weiß, ausgeblendete Achsen einbeziehen | ✅ |
+
+**Bordbrett** – nicht nur ein Bauteil, sondern die Aufmaßlänge einer Seite
+
+| Funktion | |
+|---|---|
+| Linie auf der Feldkante ziehen; Anfang und Ende dürfen **mitten im Feld** liegen | ✅ |
+| Länge live in Metern während des Ziehens | ✅ |
+| Magnetisches Einrasten an Feldkanten, Feldmitten, Eckpunkten und **Gebäudeecken** – mit kleiner Toleranz übersteuerbar | ✅ |
+| Feineingabe der Länge über ein Zahlenfeld | ✅ |
+| Beide Endpunkte über Anfasser nachträglich verschiebbar | ✅ |
+| Eine Kante antippen belegt sie ganz (wie bisher), nochmal antippen entfernt sie | ✅ |
+| Antippen der Linie öffnet den Editor: Länge, Lagen, Achszuordnung | ✅ |
+| **Mehrere Lagen** je Linie: anlegen, ändern, einzeln löschen; jede Lage mit eigener Länge | ✅ |
+| Kennzahl oben rechts summiert über alle Lagen aller Linien | ✅ |
+| Eine geometrische Kante zählt höchstens einmal (geteilte Stirnkanten) | ✅ |
+
+**Eckensituation.** Läuft eine Achse auf eine Gebäudeecke zu, darf ihr
+Bordbrett **exakt an der Ecke** enden – am Schnittpunkt der beiden
+Gebäudeseiten, nicht an der äußeren Feldkante davor. Zwei Fälle:
+
+* Zwischen den Achsen sitzt ein **Eckstück** (computeLayout bildet es
+  ohnehin): dessen Kanten gehören zum Bordbrett-Kantennetz, die Linie läuft
+  über sie bis an die Ecke. Die Ecklänge fällt beim angrenzenden Feld an.
+* Ein Feld steht **quer über der Ecke** (der Fall aus dem Beispielfoto): dann
+  gibt es kein Eckstück, aber die Ecke bleibt der Schnittpunkt der beiden
+  äußeren Achslinien. Die Linie läuft über die Kante des Eckfeldes bis dorthin,
+  und das Eckfeld wird **anteilig geteilt**: der Teil vor der Ecke gehört zur
+  ersten Achse (mit der Höhe DIESES Feldes), der Rest zur anschließenden. Die
+  anschließende Achse bekommt ihre eigene Bordbrettlinie und damit ihre eigene
+  Aufmaßlänge.
 
 **Rechnen (ATV DIN 18451)**
 
@@ -223,20 +299,66 @@ schmalen Fenster war, blieb danach überall im Handy-Modus.
 | Achsmaß, Feldaufschlag, Mindestmaße | ✅ nachgerechnet |
 | Außenecke **+ Gerüsttiefe**, Innenecke **− Gerüsttiefe** (dynamisch, keine Konstante) | ✅ nachgerechnet |
 | Ecke auch bei zwei Feldern mit gemeinsamem Anfangs-/Endpunkt | ✅ |
-| Bordbretter-Linie wirkt auf jede berührte Achse, Eckenrollen automatisch | ✅ |
+| Bordbrettlinie wirkt auf jede berührte Achse, Eckenrollen automatisch | ✅ |
 | Aufmaß je Gerüsthöhe getrennt zusammengefasst | ✅ |
 | Gesamtfläche, Warnungen bei unvollständigen Feldern | ✅ |
 
+Die Regeln rechnen im Hintergrund weiter, **werden aber nicht mehr
+abgedruckt** und nicht mehr im PDF-Dialog eingestellt (siehe unten).
+
 **PDF-Export**
+
+Blatt 1 (Zeichnung) bleibt in Aufbau und Funktion. Blatt 2 ist neu.
 
 | Bestandteil | |
 |---|---|
-| Kopf- und Fußzeile auf jedem Blatt, Legende | ✅ |
+| Kopf- und Fußzeile auf jedem Blatt („Seite X von Y"), Legende | ✅ |
+| Kopfbereich mit Projektname, Datum, Bauvorhaben, Gerüsttiefe | ✅ |
 | Übersichtskarte (Locator) ohne Überlagerungen | ✅ |
 | Blatteinteilung: möglichst wenige Blätter, Leserichtung, Maßstabsstufen 11 → 9 → 8 mm/m | ✅ |
 | Plan-Beschriftungen ohne Überlappung, nicht in Kopf/Fuß/Legende | ✅ |
-| Positions- und Aufmaßtabellen, Fotos | ✅ |
-| Drei Layouts (Technisch, Kontrast, Monochrom), Auswahl wird gemerkt | ✅ |
+| Zwei Ausgaben (Farbe, Schwarz-Weiß), Auswahl wird gemerkt | ✅ |
+
+**Was ersatzlos entfallen ist**
+
+| entfernt | Begründung |
+|---|---|
+| Regeltext nach ATV DIN 18451 („Grundlage: …") | die Korrekturlogik rechnet weiter, sie wird nur nicht mehr abgedruckt |
+| Auswahlmöglichkeiten am Ende des PDF-Dialogs (Eck-/Feldzuschlag, Innenecke) | lieferten durchgehend falsche Werte; erst raus, später sauber neu |
+| Position „Bordbrett" in laufenden Metern | das Bordbrett wird nicht abgerechnet, es ist die Grundlage der Aufmaßlänge |
+
+**Blatt 2 – zwei Flächen je Achse**
+
+```
+ACHSE A                                              4 Felder     ← Kopfband (Akzentfarbe)
+│ Position 1 – Gerüstfläche (gesamt)     Feldlänge × Feldhöhe     ← Zwischenüberschrift
+│ Feld   Länge (m)  Höhe (m)  Fläche (m²)  Bemerkung              ← Spaltenkopf
+│ A1        2,57      8,20        21,07                           ← Zebra-Streifen
+│ …
+│ Summe Gerüstfläche (gesamt)                    84,28 m²         ← hervorgehoben
+│ Position 2 – Positionierte Gerüstfläche   Aufmaßlänge 11,01 m
+│ A1        2,57      8,20        21,07
+│ A5        0,73      6,00         4,38   anteilig                ← geteiltes Eckfeld
+│ Summe Positionierte Gerüstfläche (Aufmaß)      88,66 m²
+GESAMT ÜBER ALLE ACHSEN
+```
+
+* **Position 1** ist die ungekürzte Bruttofläche: Summe über alle Felder aus
+  Feldlänge × Feldhöhe.
+* **Position 2** ist die abzurechnende Fläche aus der Bordbrettlinie:
+  Aufmaßlänge × Höhe des Abschnitts. Bei **einer** Höhe eine Zeile, bei
+  **mehreren** Höhen feldweise aufgeschlüsselt – jedes Feld mit genau dem
+  Längenanteil, den die Linie über ihm abdeckt.
+* Alle Längen und Flächen auf zwei Nachkommastellen, Einheiten immer dabei.
+* Zusatzbauteile (Konsole, Netz …) stehen darunter – sie sind Mengen, keine
+  Flächen.
+
+**Gestaltung.** Eine Akzentfarbe für Kopfbänder und Summen, ein zweiter
+neutraler Ton für den Zeilenwechsel (Zebra), Grau für Hilfsangaben. Farbe ist
+nie alleiniger Bedeutungsträger: Kopfbänder sind zusätzlich fett und invers,
+Summen fett mit Oberlinie, Bemerkungen klein und grau. In der Schwarz-Weiß-
+Ausgabe werden alle Farben über `pdfCol()` auf neutrale Grautöne gestaucht –
+das Blatt bleibt in Graustufen und auf A4 lesbar.
 
 **Zeichnungsübersicht (`#/2d/projekte`)**
 
@@ -329,7 +451,22 @@ haben keine Vorgänger und beginnen leer:
 | Schlüssel | Inhalt |
 |---|---|
 | `geruest.2d.ansichtsmodus` | die Wahl des Nutzers: `auto` (Vorgabe) · `handy` · `tablet` |
-| `geruest.2d.werkzeugMenue` | Werkzeug-Menü offen (`1`) oder zu (`0`) |
+| `geruest.2d.werkzeugMenue` | Werkzeug-Panel offen (`1`) oder zu (`0`) |
+| `geruest.2d.feldliste` | Feldübersicht links ausgeklappt (`1`, Vorgabe) oder eingeklappt (`0`) |
+| `geruest.2d.wzSektionen` | welche Sektionen des Werkzeug-Panels eingeklappt sind |
+
+**Bordbretter in der Zeichnung.** Das Datenmodell ist gewachsen; ältere
+Zeichnungen werden beim Laden EINMAL überführt, verlustfrei und ohne Zutun:
+
+| Fassung | Feld | Übernahme |
+|---|---|---|
+| ältestes | `state.bordbretter` – frei gezeichnete Linien | alle Kanten, die vollständig unter der Linie liegen, werden markiert |
+| bisher | `state.bordbrettKanten` – markierte ganze Kanten | gleich liegende Kanten werden entdoppelt und zu ZUSAMMENHÄNGENDEN Ketten verbunden |
+| jetzt | `state.bordbrettLinien` – Linien mit Lagen | `{ id, stuecke: [{ b, k, t0, t1 }], lagen: [{ id, laenge }], achsId }` |
+
+Aus vier nebeneinanderliegenden Kanten wird so EINE Linie mit einer
+Aufmaßlänge statt vier Einzelstücken. Die Längen bleiben dabei exakt erhalten –
+es geht kein Meter verloren.
 
 Die Projekt-Fotos liegen unverändert in der IndexedDB-Datenbank `av2d_photos_db`
 (siehe § 6).
@@ -343,7 +480,18 @@ npm install playwright
 node tests/<datei>.mjs
 ```
 
-**17 Testdateien, 557 Prüfungen, alle grün.** Davon prüft `r10-werkzeugmenue`
+**19 Testdateien, alle grün.** Neu ist `r12-runde7`: es geht die Abnahmeliste
+dieser Runde Punkt für Punkt durch – Soll-Belegung der Werkzeugleiste, das
+Hauptmenü hinter dem Projektnamen, „+ Achse" in einem Schritt, ein einziger
+Begriff für Achse/Abschnitt, die vier Sektionen des Werkzeug-Panels samt
+gleich großer Bauteil-Karten, die ein-/ausklappbare Feldübersicht mit
+gemerktem Zustand, mehrere Bordbrettlagen, ein Bordbrett mit freiem Anfang und
+Ende, den Eckfall aus dem Beispielfoto (Bordbrett endet an der Gebäudeecke,
+Eckfeld anteilig geteilt, anschließende Achse mit eigener Aufmaßlänge) und das
+neue Blatt 2 – bis hin zum Nachweis, dass die Schwarz-Weiß-Ausgabe
+ausschließlich neutrale Grautöne verwendet.
+
+`r10-werkzeugmenue` prüft
 die Werkzeug-Menü-Überarbeitung: den Pfeil-Knopf, die Mehrfachauswahl über den
 Plan (fünf Felder → gemeinsame Höhe 9,40 m → Achse → Position), das Fortbestehen
 der Auswahl über das Zuklappen hinweg, Speichern/Laden, das PDF und den

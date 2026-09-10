@@ -25,7 +25,7 @@ await page.evaluate(() => {
   window.__reset = () => {
     state.sections = []; _sId = 0; _bId = 0; _aId = 0;
     state.abschnitte = []; state.hideUnassigned = false;
-    state.aufmass = null; state.ecken = {}; state.bordbrettKanten = [];
+    state.aufmass = null; state.ecken = {}; state.bordbrettLinien = [];
     state.depth = 0.73;
   };
   window.__run = (x0, y0, winkel, n, len = 2.57, flip = false) => {
@@ -265,7 +265,6 @@ const umlauf = await bau(() => {
   renderAll(); flushRender();
   out.beide = aufmassAchsen().map(a => a.m.laenge);
   out.rollen = aufmassAchsen().map(a => a.rollen.join('/'));
-  out.regel = aufmassRuleText();
   // Der pauschale Eckzuschlag darf dieselbe Ecke nicht ein zweites Mal zählen.
   aufmassRules().eckzuschlag.aktiv = true;
   out.mitPauschale = computeAufmass(visibleBaysFlat()).laenge;
@@ -279,8 +278,10 @@ assert(Math.abs(umlauf.beide[0] - 8.44) < 0.005 && Math.abs(umlauf.beide[1] - 8.
   `an der Ecke festgelegt: beide Seiten + 0,73 m → ${umlauf.beide.join(' / ')} m (Soll 8,44)`);
 assert(umlauf.rollen.every(r => /um die Außenecke/.test(r)),
   'die Rolle steht je Achse in der Aufmaß-Aufstellung');
-assert(/um die Ecke/.test(umlauf.regel),
-  'die Festlegung erscheint als Grundlage im PDF');
+// Der frühere Regeltext im PDF ist entfallen (Runde 7). Nachweisbar bleibt
+// die Festlegung an der Rolle je Achse und an den korrigierten Achslängen.
+assert(umlauf.rollen.length === 2,
+  'beide Achsen führen ihre Rolle an der Ecke');
 assert(Math.abs(umlauf.mitPauschale - (6 * 2.57 + 2 * 0.73)) < 0.01,
   'der pauschale Eckzuschlag zählt eine bereits erfasste Ecke nicht doppelt');
 assert(Math.abs(umlauf.ohne[0] - 7.71) < 0.005,
@@ -320,17 +321,18 @@ const doppelt = await bau(() => {
   __reset();
   __run(0, 0, 0, 3);
   renderAll(); flushRender();
-  state.bordbrettKanten = [];
+  state.bordbrettLinien = [];
   const bays = allBaysFlat();
   setzeBordbrettKante(bays[0].id, 1, true);   // Stirnkante am Ende von Feld 1
   const einfach = bordbrettGesamt();
   setzeBordbrettKante(bays[1].id, 3, true);   // dieselbe Strecke, von Feld 2 aus
   return { einfach: +einfach.toFixed(2), zweifach: +bordbrettGesamt().toFixed(2),
-           eintraege: state.bordbrettKanten.length, tiefe: state.depth };
+           eintraege: state.bordbrettLinien.reduce((n, l) => n + l.stuecke.length, 0),
+           tiefe: state.depth };
 });
 assert(Math.abs(doppelt.einfach - doppelt.tiefe) < 0.005,
   `eine Stirnkante ist so lang wie das Gerüst tief (${doppelt.einfach} m)`);
-assert(doppelt.eintraege === 2 && Math.abs(doppelt.zweifach - doppelt.einfach) < 0.005,
+assert(doppelt.eintraege === 1 && Math.abs(doppelt.zweifach - doppelt.einfach) < 0.005,
   'dieselbe Kante von beiden Feldern markiert zählt trotzdem nur einmal');
 
 const errs = ctx.logs.filter(l => l.startsWith('[pageerror]'));

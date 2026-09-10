@@ -80,6 +80,37 @@ node tests/r5-bordbretter.mjs      # Bordbrett als markierte Gerüstkante: Menge
                                    # Aufmaß je Achse, Altdaten-Übernahme
 ```
 
+Runde 7:
+
+```bash
+node tests/r12-runde7.mjs          # Abnahmeliste der Runde 7: Werkzeugleiste,
+                                   # Mehrfachauswahl per Geste, Werkzeug-Panel,
+                                   # Feldübersicht, Bordbrett (Lagen, freie
+                                   # Enden, Gebäudeecke), PDF-Blatt 2
+```
+
+`r12` geht die Abnahmeliste der Runde ab: die Soll-Belegung der Werkzeugleiste
+(kein „Projekt", kein „Mehrere auswählen", „+ Achse" fest dabei), das Hauptmenü
+hinter dem Projektnamen, den einheitlichen Begriff „Achse", die vier Sektionen
+des Werkzeug-Panels mit gleich großen Bauteil-Karten, die ein- und ausklappbare
+Feldübersicht samt gemerktem Zustand, mehrere Bordbrettlagen, ein Bordbrett mit
+Anfang und Ende mitten im Feld sowie den Eckfall aus dem Beispielfoto: vier
+Felder nach Osten, das fünfte quer über der Ecke nach Süden. Erwartet wird
+`4 × 2,57 + 0,73 = 11,01 m` für die obere Achse (nicht 10,28 m an der Feldkante
+von A4), ein anteilig geteiltes Eckfeld mit SEINER Höhe und eine eigene
+Aufmaßlänge für die anschließende Achse. Zum Schluss das PDF: kein
+DIN-18451-Text, keine Auswahlmöglichkeiten am Ende, keine Bordbrett-Position,
+dafür je Achse Position 1 (Gerüstfläche gesamt) und Position 2 (positionierte
+Gerüstfläche) mit Feld · Länge · Höhe · Fläche · Bemerkung – und in der
+Schwarz-Weiß-Ausgabe ausschließlich neutrale Grautöne.
+
+**Hinweis zum Bordbrett.** Seit Runde 7 ist ein Bordbrett eine LINIE
+(`state.bordbrettLinien`) aus Kantenstücken `{ b, k, t0, t1 }` mit mehreren
+Lagen, nicht mehr eine Liste ganzer Kanten (`state.bordbrettKanten`). Ältere
+Zeichnungen werden beim Laden einmal überführt; `setzeBordbrettKante()` und
+`bordbrettGesamt()` gibt es unverändert weiter, sie arbeiten nur auf dem
+neuen Modell.
+
 `r5` rechnet die Abnahmefälle nach: ein Feld 2,57 × 0,73 ergibt 2,57 m an der
 langen Kante, 3,30 m mit einer kurzen Seite dazu und 6,60 m im vollen Umlauf;
 drei Felder nebeneinander an der Unterseite 7,71 m. Ein um 90° gedrehtes Feld

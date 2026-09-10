@@ -38,10 +38,13 @@ await page.evaluate(() => {
   renderAll(); flushRender();
 });
 
+/* Die Zusatzbauteile stehen im Werkzeug-Panel seit Runde 7 als gleich große
+   Karten in einem 2-spaltigen Raster (.bauteil-karte). Ein Tipp öffnet – wie
+   gefordert – das Fenster für Länge bzw. Lagen. */
 const sheetOpened = await page.evaluate(() => {
-  const chip = [...document.querySelectorAll('.bulk-pos-chip')]
-    .find(c => c.textContent === 'Innengeländer');
-  chip.click();
+  const karte = [...document.querySelectorAll('.bauteil-karte')]
+    .find(c => c.querySelector('.bk-name').textContent === 'Innengeländer');
+  karte.click();
   const sheet = document.getElementById('bottomSheet');
   return {
     open: !!sheet,
@@ -89,19 +92,19 @@ assert(applied.untouched === 0, 'nicht ausgewählte Felder bleiben unberührt');
 
 // Erneutes Antippen entfernt das Bauteil wieder bei allen ausgewählten Feldern
 const removed = await page.evaluate(() => {
-  const chip = [...document.querySelectorAll('.bulk-pos-chip')]
-    .find(c => c.textContent === 'Innengeländer');
-  chip.click();
+  const karte = [...document.querySelectorAll('.bauteil-karte')]
+    .find(c => c.querySelector('.bk-name').textContent === 'Innengeländer');
+  karte.querySelector('.bk-weg').click();
   flushRender();
   return allBaysFlat().filter(b => b.positions.some(p => p.cat === 'innengelaender')).length;
 });
-assert(removed === 0, 'sind alle bestückt, entfernt ein weiterer Klick das Bauteil wieder');
+assert(removed === 0, 'das ✕ auf der Karte entfernt das Bauteil bei allen ausgewählten Feldern');
 
 // Meter-Einheit ohne eigenen Wert = Feldlänge je Feld
 const meterMode = await page.evaluate(() => {
-  const chip = [...document.querySelectorAll('.bulk-pos-chip')]
-    .find(c => c.textContent === 'Dachfang');
-  chip.click();
+  const karte = [...document.querySelectorAll('.bauteil-karte')]
+    .find(c => c.querySelector('.bk-name').textContent === 'Dachfang');
+  karte.click();
   const sheet = document.getElementById('bottomSheet');
   const hint = sheet.querySelector('.bulk-pos-qty-hint').textContent;
   sheet.querySelector('.sheet-ok').click();

@@ -3264,3 +3264,491 @@ body[data-modul="2d"] .wz-schalter-txt {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===========================================================================
+   Runde 7 – Oberfläche fürs iPad
+   ---------------------------------------------------------------------------
+   Alles Neue aus dieser Runde an einer Stelle: Hauptmenü in der Titelzeile,
+   ein-/ausklappbare Feldübersicht, Kontextleiste der Mehrfachauswahl,
+   Auswahlrahmen, Sektionen im Werkzeug-Panel, Bauteil-Karten und der
+   Bordbrett-Editor. Alle Trefferflächen mindestens 44 × 44 pt, keine
+   Funktion hängt an einem Hover.
+   =========================================================================== */
+
+/* ── Hauptmenü hinter dem Projektnamen ──────────────────────────────────── */
+body[data-modul="2d"] .tb-menue-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  border: 1px solid #4a4a4a;
+  border-radius: 11px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .tb-menue-btn:hover { background: #383838; }
+body[data-modul="2d"] .tb-menue-btn:active { transform: scale(.96); }
+
+/* Schmale Geräte (iPad hochkant und alles darunter): die Leiste bricht in
+   ZWEI Zeilen um – Name und Kennzahlen oben, die Werkzeuge darunter über die
+   volle Breite. So bleibt jeder Knopf sichtbar und mindestens 44 px groß,
+   statt aus dem Bild zu laufen oder auf 30 px zu schrumpfen. */
+@media (max-width: 1100px) {
+  body[data-modul="2d"] #toolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    min-height: 0;
+    padding: 5px 8px 7px;
+  }
+  body[data-modul="2d"] .tb-titel { order: 1; flex: 1 1 8rem; }
+  body[data-modul="2d"] .tb-werte { order: 2; }
+  body[data-modul="2d"] .tb-tools {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: space-between;
+    gap: 4px;
+    /* Reicht auch die zweite Zeile nicht (Handy hochkant), rutschen die
+       letzten Knöpfe in eine dritte – sichtbar bleibt jeder, und keiner
+       schrumpft unter seine 44-px-Trefferfläche. */
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  /* Trennstriche kosten Platz, den die Knöpfe brauchen. */
+  body[data-modul="2d"] .tb-trenner { display: none; }
+}
+
+/* „+ Feld", „+ Achse" und „Bordbrett" behalten IMMER ihr Wort – sie sind die
+   drei Handgriffe, die man auf dem Gerüst blind treffen können muss. Alle
+   anderen dürfen auf ihr Symbol zusammenfallen. */
+@media (max-width: 1200px) {
+  body[data-modul="2d"] .tb-btn.wichtig .tb-txt { display: inline; }
+  body[data-modul="2d"] .tb-btn.wichtig { padding: 0 12px; }
+}
+body[data-modul="2d"][data-mode="iphone"] .tb-btn.wichtig .tb-txt { display: inline; }
+body[data-modul="2d"][data-mode="iphone"] .tb-btn.wichtig { padding: 0 10px; }
+
+/* ── Feldübersicht ein-/ausklappen ──────────────────────────────────────── */
+body[data-modul="2d"] .feldliste-griff {
+  flex: 0 0 auto;
+  width: 28px;
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-right: 1px solid #434343;
+  background: #1f1f1f;
+  color: #9fb1c4;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .feldliste-griff:hover { background: #2a2a2a; color: #e8edf3; }
+body[data-modul="2d"] .feldliste-griff .fg-chevron { pointer-events: none; }
+
+/* Eingeklappt bleibt nur der Streifen stehen – die Liste selbst behält ihren
+   kompletten Inhalt, sie ist nur nicht zu sehen. */
+body[data-modul="2d"].feldliste-zu #sidePanel { display: none; }
+
+/* ── Auswahlrahmen (Zwei-Finger / langes Tippen) ────────────────────────── */
+body[data-modul="2d"] .auswahl-rahmen {
+  position: absolute;
+  z-index: 6;
+  border: 2px dashed #4cc9f0;
+  border-radius: 6px;
+  background: rgba(76, 201, 240, .12);
+  pointer-events: none;
+}
+body[data-modul="2d"] .auswahl-rahmen.hidden { display: none; }
+
+/* ── Kontextleiste der Mehrfachauswahl ──────────────────────────────────── */
+body[data-modul="2d"] .mehrfach-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 6px 8px;
+  border: 1px solid #3d4044;
+  border-radius: 14px;
+  background: rgba(24, 30, 40, .95);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+body[data-modul="2d"] .mehrfach-bar::-webkit-scrollbar { display: none; }
+body[data-modul="2d"] .mehrfach-bar.hidden { display: none; }
+
+body[data-modul="2d"] .mf-zahl {
+  flex: 0 0 auto;
+  padding: 0 10px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 11px;
+  background: rgba(76, 201, 240, .16);
+  border: 1px solid rgba(76, 201, 240, .42);
+  color: #9fe3ff;
+  font-size: .84rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+body[data-modul="2d"] .mf-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 11px;
+  border: 1px solid #4a4a4a;
+  border-radius: 11px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: .82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+body[data-modul="2d"] .mf-btn:hover:not(:disabled) { background: #383838; }
+body[data-modul="2d"] .mf-btn:active:not(:disabled) { transform: scale(.96); }
+body[data-modul="2d"] .mf-btn:disabled { opacity: .38; cursor: not-allowed; }
+body[data-modul="2d"] .mf-btn .mf-ico { font-size: 1rem; line-height: 1; }
+body[data-modul="2d"] .mf-btn.mf-gefahr {
+  border-color: rgba(255, 107, 107, .55);
+  color: #ffb3b3;
+}
+@media (max-width: 900px) {
+  body[data-modul="2d"] .mf-btn .mf-txt { display: none; }
+  body[data-modul="2d"] .mf-btn { padding: 0; }
+}
+
+/* ── Werkzeug-Panel: Breite, Griff, einklappbare Sektionen ──────────────── */
+body[data-modul="2d"] #werkzeugPanel {
+  flex: 0 0 360px;
+  width: 360px;
+}
+body[data-modul="2d"] .wz-kopf {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  touch-action: pan-y;
+}
+body[data-modul="2d"] .wz-griff {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 26px;
+  border-radius: 999px;
+  background: #4a4a4a;
+  margin-right: 2px;
+}
+/* Oben und unten Sicherheitsabstand: nichts darf am Rand abgeschnitten
+   wirken, auch nicht beim Überscrollen. */
+body[data-modul="2d"] .wz-inhalt {
+  padding: 0.75rem 0.6rem 2.2rem;
+  scroll-padding-top: 0.75rem;
+}
+
+body[data-modul="2d"] .wz-kopf-klappbar {
+  cursor: pointer;
+  min-height: 44px;
+  margin: -0.15rem 0;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .wz-klapp {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #3d4044;
+  border-radius: 11px;
+  background: #2c2c2c;
+  color: #cbd4dd;
+  font-size: .95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+body[data-modul="2d"] .wz-klapp:hover { background: #383838; }
+/* Eingeklappt: alles außer der Kopfzeile verschwindet. */
+body[data-modul="2d"] .wz-gruppe.wz-zu > *:not(.wz-kopfzeile) { display: none; }
+body[data-modul="2d"] .wz-gruppe.wz-zu { padding-bottom: 0.5rem; }
+
+/* Auswahl-/Wertezeilen */
+body[data-modul="2d"] .wz-auswahl-namen {
+  font-variant-numeric: tabular-nums;
+}
+body[data-modul="2d"] .wz-werte-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+body[data-modul="2d"] .wz-wert {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #3d4044;
+  border-radius: 10px;
+  background: #191919;
+}
+body[data-modul="2d"] .wz-wert-lbl {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8ea6bd;
+}
+body[data-modul="2d"] .wz-wert-val {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #eaf0f6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Richtung N/O/S/W */
+body[data-modul="2d"] .wz-dir-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.3rem;
+}
+body[data-modul="2d"] .wz-dir-btn {
+  min-height: 44px;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+body[data-modul="2d"] .wz-dir-btn.active {
+  background: #10496f;
+  border-color: #2f8fd0;
+  color: #cfe8fb;
+}
+
+/* Maß-Schnellwahl */
+body[data-modul="2d"] .wz-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+body[data-modul="2d"] .wz-preset {
+  flex: 1 1 4.2rem;
+  min-height: 44px;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: #2c2c2c;
+  color: #e8edf3;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+body[data-modul="2d"] .wz-preset.active {
+  background: #10496f;
+  border-color: #2f8fd0;
+  color: #cfe8fb;
+}
+body[data-modul="2d"] .wz-eingabe-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+body[data-modul="2d"] .wz-eingabe {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: #191919;
+  color: #eaf0f6;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+body[data-modul="2d"] .wz-eingabe-unit { color: #8ea6bd; font-size: 0.85rem; font-weight: 700; }
+
+body[data-modul="2d"] .wz-aktion-gefahr {
+  border-color: rgba(255, 107, 107, .5) !important;
+  color: #ffb3b3 !important;
+}
+
+/* ── Bauteil-Karten: gleich groß, 2-spaltig, Farbe = Zustand ────────────── */
+body[data-modul="2d"] .bauteil-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Alle Zeilen gleich hoch: ein zweizeiliger Bauteilname darf die Karte
+     nicht größer machen als ihre Nachbarn – gleiche Karte, gleiche Größe. */
+  grid-auto-rows: 1fr;
+  gap: 0.4rem;
+}
+body[data-modul="2d"] .bauteil-karte {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.25rem;
+  min-height: 62px;
+  padding: 0.5rem 1.7rem 0.5rem 0.55rem;
+  border: 1px solid #3d4044;
+  border-radius: 12px;
+  background: #191919;
+  color: #dbe3ec;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body[data-modul="2d"] .bauteil-karte:hover { background: #232323; }
+body[data-modul="2d"] .bauteil-karte:active { transform: scale(.98); }
+/* Aktiv/inaktiv – NICHT der Bauteiltyp – bestimmt die Farbe. */
+body[data-modul="2d"] .bauteil-karte.aktiv {
+  background: #10496f;
+  border-color: #2f8fd0;
+  color: #eaf6ff;
+}
+body[data-modul="2d"] .bauteil-karte.teilweise {
+  border-color: #2f8fd0;
+  border-style: dashed;
+}
+body[data-modul="2d"] .bk-kopf {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+body[data-modul="2d"] .bk-haken {
+  flex: 0 0 auto;
+  width: 1.05rem;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #7fd4ff;
+}
+body[data-modul="2d"] .bk-name {
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+body[data-modul="2d"] .bk-wert {
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #93a4b6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+body[data-modul="2d"] .bauteil-karte.aktiv .bk-wert { color: #b9dcf3; }
+body[data-modul="2d"] .bk-weg {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .28);
+  color: #ffb3b3;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+body[data-modul="2d"] .bk-weg:hover { background: rgba(255, 107, 107, .28); }
+
+/* ── Bordbrett-Editor ───────────────────────────────────────────────────── */
+body[data-modul="2d"] .bb-lagen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+body[data-modul="2d"] .bb-lage {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+body[data-modul="2d"] .bb-lage-nr {
+  flex: 0 0 4.6rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #8ea6bd;
+}
+body[data-modul="2d"] .bb-lage-inp {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: #191919;
+  color: #eaf0f6;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+body[data-modul="2d"] .bb-lage-unit { color: #8ea6bd; font-size: 0.85rem; font-weight: 700; }
+body[data-modul="2d"] .bb-lage-weg {
+  flex: 0 0 auto;
+  width: 44px;
+  min-height: 44px;
+  border: 1px solid rgba(255, 107, 107, .45);
+  border-radius: 10px;
+  background: #2c2c2c;
+  color: #ffb3b3;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+body[data-modul="2d"] .bb-lage-weg:disabled { opacity: .35; cursor: not-allowed; }
+body[data-modul="2d"] .bb-lage-add {
+  min-height: 44px;
+  border: 1px dashed #4a4a4a;
+  border-radius: 10px;
+  background: transparent;
+  color: #cbd4dd;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+body[data-modul="2d"] .bb-lage-add:hover { background: rgba(255, 255, 255, .06); }
+body[data-modul="2d"] .bb-summe {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #e8590c;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sehr kleine Bildschirme (320 × 568 und ähnlich): dort braucht die
+   Werkzeugleiste eine Zeile mehr, weil „+ Feld", „+ Achse" und „Bordbrett"
+   ihr Wort behalten. Damit trotzdem eine brauchbare Zeichenfläche übrig
+   bleibt, fährt das Menü-Blatt entsprechend weniger weit hoch. */
+@media (max-height: 700px) {
+  body[data-modul="2d"][data-mode="iphone"] #werkzeugPanel.offen {
+    height: 38vh;
+    max-height: 300px;
+  }
+  @supports (height: 1dvh) {
+    body[data-modul="2d"][data-mode="iphone"] #werkzeugPanel.offen { height: 38dvh; }
+  }
+}

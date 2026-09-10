@@ -21,9 +21,12 @@
     setFontSize(v) { this._fontSize = v; return this; }
     getFontSize() { return this._fontSize; }
     getTextWidth(s) { return String(s).length * this._fontSize * 0.28; }
-    setTextColor() { return this; }
-    setFillColor() { return this; }
-    setDrawColor() { return this; }
+    // Farben werden mitprotokolliert: nur so lässt sich nachweisen, dass das
+    // Aufmaßblatt farbig gestaltet ist UND in der Schwarz-Weiß-Ausgabe
+    // ausschließlich neutrale Grautöne verwendet.
+    setTextColor(...a) { this._rec('setTextColor', ...a); return this; }
+    setFillColor(...a) { this._rec('setFillColor', ...a); return this; }
+    setDrawColor(...a) { this._rec('setDrawColor', ...a); return this; }
     setLineWidth() { return this; }
     setLineDashPattern() { return this; }
     setGState() { return this; }

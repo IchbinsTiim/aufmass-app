@@ -26,7 +26,7 @@ console.log('RUNDE 5 – Bordbrett\n');
 const bau = (n, winkel = 0, len = 2.57, tiefe = 0.73) => page.evaluate(([n, w, len, t]) => {
   state.sections = []; _sId = 0; _bId = 0;
   state.depth = t;
-  state.bordbrettKanten = [];
+  state.bordbrettLinien = [];
   state.ecken = {};
   let x = 0, y = 0;
   for (let i = 0; i < n; i++) {
@@ -73,7 +73,7 @@ assert(Math.abs(m - 7.71) < 0.005, `Test 4 – drei Felder à 2,57 m: ${m} m (So
 
 // ── 5. Gedrehtes Feld: die Kante behält ihre echte Länge ──────────────────
 const gedreht = await page.evaluate(() => {
-  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettKanten = [];
+  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettLinien = [];
   const s = mkSection('E', 0, 0);
   s.bays.push(mkBay(2.57));
   state.sections.push(s);
@@ -98,7 +98,7 @@ assert(Math.abs(gedreht.menge - 2.57) < 0.005,
 
 // ── 6. Dieselbe Kante zweimal ─────────────────────────────────────────────
 const zweimal = await page.evaluate(() => {
-  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettKanten = [];
+  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettLinien = [];
   for (let i = 0; i < 2; i++) {
     const s = mkSection('E', i * 257, 0); setSectionAngle(s, 0);
     s.bays.push(mkBay(2.57)); state.sections.push(s);
@@ -109,16 +109,19 @@ const zweimal = await page.evaluate(() => {
   const einmal = +bordbrettGesamt().toFixed(2);
   setzeBordbrettKante(b[1].id, 3, true);       // … vom Nachbarfeld aus nochmal
   return { einmal, zweimal: +bordbrettGesamt().toFixed(2),
-           eintraege: state.bordbrettKanten.length };
+           eintraege: state.bordbrettLinien.reduce((n, l) => n + l.stuecke.length, 0) };
 });
 assert(Math.abs(zweimal.einmal - 0.73) < 0.005,
   `die gemeinsame Stirnkante misst ${zweimal.einmal} m`);
-assert(zweimal.eintraege === 2 && Math.abs(zweimal.zweimal - 0.73) < 0.005,
-  `Test 6 – zweimal markiert, einmal gezählt: ${zweimal.zweimal} m`);
+// Im Linien-Modell wird die zweite Markierung derselben Strecke gar nicht
+// erst angelegt – gezählt wird die Kante damit weiterhin genau einmal.
+assert(zweimal.eintraege === 1 && Math.abs(zweimal.zweimal - 0.73) < 0.005,
+  `Test 6 – zweimal markiert, einmal gezählt: ${zweimal.zweimal} m `
+  + `(${zweimal.eintraege} Kantenstück)`);
 
 // ── 7. Innenkanten zählen NICHT von selbst ────────────────────────────────
 const nurMarkiert = await page.evaluate(() => {
-  state.bordbrettKanten = [];
+  state.bordbrettLinien = [];
   renderAll(); flushRender();
   return +bordbrettGesamt().toFixed(2);
 });
@@ -127,7 +130,7 @@ assert(nurMarkiert === 0,
 
 // ── 8. Bedienung: Tippen setzt, nochmal Tippen entfernt ───────────────────
 const bedienung = await page.evaluate(() => {
-  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettKanten = [];
+  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettLinien = [];
   const s = mkSection('E', 0, 0); setSectionAngle(s, 0);
   s.bays.push(mkBay(2.57)); state.sections.push(s);
   renderAll(); flushRender();
@@ -135,15 +138,15 @@ const bedienung = await page.evaluate(() => {
   const el = computeLayout().find(e => e.type === 'bay');
   const [p, q] = bayKante(el, 2);              // äußere Längskante
   const mitte = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
-  const treffer = bordbrettKanteUnter(mitte);
-  drag = { type: 'bordbrett', op: 'an', geaendert: 0 };
-  bordbrettStreichen(mitte);
+  const treffer = bordbrettPunktUnter(mitte, bayElsById());
+  // Ein Tipp (ohne Ziehen) belegt die ganze Kante …
+  setzeBordbrettKante(treffer.b, treffer.k, true);
+  renderAll(); flushRender();
   const gesetzt = +bordbrettGesamt().toFixed(2);
-  // Nochmal darüber – jetzt in der Gegenrichtung, wie beim zweiten Tipp.
-  drag = { type: 'bordbrett', op: 'ab', geaendert: 0 };
-  bordbrettStreichen(mitte);
+  // … ein zweiter nimmt sie wieder weg.
+  setzeBordbrettKante(treffer.b, treffer.k, false);
+  renderAll(); flushRender();
   const entfernt = +bordbrettGesamt().toFixed(2);
-  drag = null;
   const bar = document.getElementById('bordbrettBar');
   const sichtbar = bar && !bar.classList.contains('hidden');
   beendeBordbrettModus();
@@ -159,7 +162,7 @@ assert(bedienung.sichtbar && bedienung.barZu,
 
 // ── 9. Wischen über mehrere Felder ────────────────────────────────────────
 const wischen = await page.evaluate(() => {
-  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettKanten = [];
+  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettLinien = [];
   for (let i = 0; i < 3; i++) {
     const s = mkSection('E', i * 257, 0); setSectionAngle(s, 0);
     s.bays.push(mkBay(2.57)); state.sections.push(s);
@@ -170,21 +173,29 @@ const wischen = await page.evaluate(() => {
   // Ein Strich entlang der äußeren Längskante über alle drei Felder – von
   // Kantenmitte zu Kantenmitte, so wie ein Finger tatsächlich streicht.
   const mitte = el => { const [p, q] = bayKante(el, 2); return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }; };
-  const von = mitte(els[0]), bis = mitte(els[2]);
-  drag = { type: 'bordbrett', op: 'an', geaendert: 0 };
+  const ecke  = (el, i) => ({ x: el.pts[i].x, y: el.pts[i].y });
+  // Von der linken Außenecke des ersten bis zur rechten Außenecke des dritten
+  // Feldes – also genau über die äußere Längskante aller drei Felder.
+  const von = ecke(els[0], 3), bis = ecke(els[2], 2);
+  const byId = bayElsById();
+  const anker = bordbrettPunktUnter(von, byId);
+  const neu = mkBordbrettLinie([{ b: anker.b, k: anker.k, t0: anker.t, t1: anker.t }]);
+  bordbrettLinien().push(neu);
+  drag = { type: 'bordbrettNeu', linie: neu, anker, graph: kantenGraph(byId), byId, gezogen: false };
   for (let t = 0; t <= 1.0001; t += 0.02) {
-    bordbrettStreichen({ x: von.x + (bis.x - von.x) * t, y: von.y + (bis.y - von.y) * t });
+    bordbrettZiehen({ x: von.x + (bis.x - von.x) * t, y: von.y + (bis.y - von.y) * t });
   }
-  drag = null;
+  beendeBordbrettZug();
   beendeBordbrettModus();
-  return { menge: +bordbrettGesamt().toFixed(2), kanten: state.bordbrettKanten.length };
+  return { menge: +bordbrettGesamt().toFixed(2),
+           kanten: state.bordbrettLinien.reduce((n, l) => n + l.stuecke.length, 0) };
 });
 assert(wischen.kanten === 3 && Math.abs(wischen.menge - 7.71) < 0.005,
   `ein Strich über drei Felder markiert alle drei Kanten: ${wischen.menge} m (Soll 7,71)`);
 
 // ── 10. Aufmaß je Achse, Gesamtsumme stimmt ───────────────────────────────
 const achsen = await page.evaluate(() => {
-  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettKanten = [];
+  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettLinien = [];
   const lauf = (winkel, n, x, y) => {
     for (let i = 0; i < n; i++) {
       const s = mkSection('E', x, y); setSectionAngle(s, winkel);
@@ -215,18 +226,23 @@ assert(Math.abs(achsen.gesamt - achsen.summeTeile) < 0.005 && Math.abs(achsen.ge
 assert(/17,99 m/.test(achsen.readout),
   `die Werkzeugleiste zeigt die Menge mit: „${achsen.readout}"`);
 
-// ── 11. Bordbrett im Aufmaß (PDF) ─────────────────────────────────────────
+/* ── 11. Bordbrett im PDF: keine eigene Position mehr ─────────────────────
+   Seit Runde 7 wird das Bordbrett NICHT mehr in laufenden Metern abgerechnet.
+   Es ist ausschließlich die Grundlage der Aufmaßlänge und taucht deshalb nur
+   noch als „Aufmaßlänge" über Position 2 auf.                            */
 const pdf = await page.evaluate(async () => {
   state.project = 'Bordbrett-Nachweis';
   window.__pdfSaved = null;
   await buildPdf('farbe');
   const t = window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2]));
-  const mengeNach = bez => t.map((x, i) => [x, t[i - 1]]).filter(([, v]) => v === bez).map(([x]) => x);
-  return { alle: t.join('\n'), bordbrett: mengeNach('Bordbrett') };
+  return { alle: t.join('\n'), texte: t };
 });
-assert(pdf.alle.includes('Bordbrett'), 'das Aufmaß im PDF führt die Position „Bordbrett"');
-assert(pdf.bordbrett.includes('7,71') && pdf.bordbrett.includes('10,28') && pdf.bordbrett.includes('17,99'),
-  `je Achse und in der Gesamtsumme (${pdf.bordbrett.join(' / ')} m)`);
+assert(!pdf.texte.some(x => x.trim() === 'Bordbrett'),
+  'das Bordbrett steht nicht mehr als eigene Position im Aufmaß');
+assert(/Aufmaßlänge 7,71 m/.test(pdf.alle) && /Aufmaßlänge 10,28 m/.test(pdf.alle),
+  'stattdessen trägt jede Achse ihre Aufmaßlänge aus der Bordbrettlinie');
+assert(/Position 2 – Positionierte Gerüstfläche/.test(pdf.alle),
+  'die Aufmaßfläche steht als Position 2 im PDF');
 
 // ── 12. Kanten gelöschter Felder verschwinden mit ihnen ───────────────────
 const aufgeraeumt = await page.evaluate(() => {
@@ -235,7 +251,7 @@ const aufgeraeumt = await page.evaluate(() => {
   normalizeState();
   renderAll(); flushRender();
   return { vorher, nachher: +bordbrettGesamt().toFixed(2),
-           eintraege: state.bordbrettKanten.length };
+           eintraege: state.bordbrettLinien.reduce((n, l) => n + l.stuecke.length, 0) };
 });
 assert(aufgeraeumt.eintraege === 4 && Math.abs(aufgeraeumt.nachher - 10.28) < 0.005,
   `gelöschte Felder nehmen ihre Bordbretter mit (${aufgeraeumt.vorher} → ${aufgeraeumt.nachher} m)`);
@@ -244,15 +260,16 @@ assert(aufgeraeumt.eintraege === 4 && Math.abs(aufgeraeumt.nachher - 10.28) < 0.
 const rund = await page.evaluate(() => {
   const json = JSON.stringify({ version: 3, state, _sId, _bId });
   const vorher = +bordbrettGesamt().toFixed(2);
-  state.bordbrettKanten = [];                  // „App neu geladen"
+  state.bordbrettLinien = [];                  // „App neu geladen"
   const d = JSON.parse(json);
-  state.bordbrettKanten = d.state.bordbrettKanten;
+  state.bordbrettLinien = d.state.bordbrettLinien;
   normalizeState(); renderAll(); flushRender();
   const geladen = +bordbrettGesamt().toFixed(2);
 
   // Undo: eine Kante wegnehmen und zurückholen
   finalizeUndoSnapshot();
-  setzeBordbrettKante(state.bordbrettKanten[0].b, state.bordbrettKanten[0].k, false);
+  const st0 = state.bordbrettLinien[0].stuecke[0];
+  setzeBordbrettKante(st0.b, st0.k, false);
   renderAll(); flushRender();
   finalizeUndoSnapshot();
   const nachAenderung = +bordbrettGesamt().toFixed(2);
@@ -269,7 +286,7 @@ assert(rund.nachAenderung < rund.vorher && rund.nachUndo === rund.vorher,
 // Sie muss sich beim Öffnen in markierte Kanten übersetzen, sonst stünde eine
 // bestehende Zeichnung plötzlich ohne Bordbretter da.
 const migriert = await page.evaluate(() => {
-  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettKanten = [];
+  state.sections = []; _sId = 0; _bId = 0; state.depth = 0.73; state.bordbrettLinien = [];
   for (let i = 0; i < 3; i++) {
     const s = mkSection('E', i * 257, 0); setSectionAngle(s, 0);
     s.bays.push(mkBay(2.57)); state.sections.push(s);
@@ -285,7 +302,7 @@ const migriert = await page.evaluate(() => {
   normalizeState();
   renderAll(); flushRender();
   return { menge: +bordbrettGesamt().toFixed(2),
-           kanten: state.bordbrettKanten.length,
+           kanten: state.bordbrettLinien.reduce((n, l) => n + l.stuecke.length, 0),
            altFeldWeg: state.bordbretter === undefined };
 });
 assert(migriert.kanten === 3 && Math.abs(migriert.menge - 7.71) < 0.005,

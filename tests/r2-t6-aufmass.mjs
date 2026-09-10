@@ -154,68 +154,51 @@ const persisted = await page.evaluate(() => {
 assert(persisted.aktiv && persisted.wert === 0.73 && persisted.modus === 'wand' && persisted.eck,
   'die eingestellten Aufmaßregeln überleben Speichern/Laden');
 
-/* ── PDF: Mengen nach denselben Regeln, Grundlage benannt ──────────────────
-   Die frühere Spaltentabelle „Achsmaß | Innenecke | Eckzuschlag | Feldzuschlag
-   | Aufmaßlänge" ist mit der Vereinfachung des Dokuments entfallen; auf dem
-   Blatt steht jetzt die Mengenermittlung selbst (Pos./Bezeichnung/Menge/
-   Einheit). Geprüft wird deshalb, dass die ausgewiesene Menge GENAU die nach
-   den eingestellten Regeln gerechnete ist – und dass die Regeln auf dem Blatt
-   benannt sind, damit die Zahl nachvollziehbar bleibt.                      */
+/* ── PDF: kein Regeltext mehr, aber dieselbe Rechnung ─────────────────────
+   Seit Runde 7 steht KEIN Text nach ATV DIN 18451 mehr im PDF und es gibt
+   auch keine Auswahlmöglichkeiten am Ende des Export-Dialogs. Die Korrektur-
+   logik rechnet unverändert im Hintergrund weiter – nachgewiesen an den
+   Werten, die computeAufmass() liefert, und an der Bruttofläche, die als
+   Position 1 im PDF steht.                                                 */
 const pdfInfo = await page.evaluate(async () => {
   window.__pdfSaved = null;
   await buildPdf('farbe');
   return {
     texte: window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2])),
-    regeln: aufmassRuleText(),
-    gesamt: computeAufmass(visibleBaysFlat())
+    gesamt: computeAufmass(visibleBaysFlat()),
+    pos1: pdfAufmassDaten().reduce((s, g) => s + g.pos1.summe, 0)
   };
 });
 const joined = pdfInfo.texte.join('\n');
-assert(joined.includes('Grundlage:') && /Achsmaße der Gerüstkonstruktion/.test(joined),
-  'PDF nennt das Achsmaß als Grundlage');
-assert(/Außenecke beidseitig \+ [\d,]+ m \(La = L \+ L1\)/.test(pdfInfo.regeln),
-  'PDF nennt die Eckregel La = L + L1');
-assert(/Aufschlag 0,73 m je Wand/.test(pdfInfo.regeln),
-  'PDF nennt den konfigurierten Aufschlagswert');
-// Die Gerüstfläche des Gesamtblocks ist die nach allen Regeln gerechnete.
-const flaechen = pdfInfo.texte.map((t, i) => [t, pdfInfo.texte[i - 1]])
-  .filter(([, vor]) => vor === 'Gerüstfläche')
-  .map(([t]) => parseFloat(t.replace(/\./g, '').replace(',', '.')));
-assert(flaechen.some(f => Math.abs(f - pdfInfo.gesamt.flaeche) < 0.02),
-  `PDF weist die nach den Regeln gerechnete Fläche aus (${pdfInfo.gesamt.flaeche} m²)`);
+assert(!/Grundlage:/.test(joined) && !/DIN\s?18451/.test(joined)
+    && !/Achsmaße der Gerüstkonstruktion/.test(joined),
+  'im PDF steht kein Regeltext nach ATV DIN 18451 mehr');
+const fmtDe = n => (Math.round(n * 100) / 100).toString().replace('.', ',');
+assert(pdfInfo.texte.includes(fmtDe(pdfInfo.pos1) + ' m²'),
+  `die Gesamt-Gerüstfläche steht im PDF (${fmtDe(pdfInfo.pos1)} m²)`);
 assert(pdfInfo.gesamt.ecken > 0 && pdfInfo.gesamt.felder > 0,
-  `Eck- und Feldzuschlag gehen in diese Zahl ein (${pdfInfo.gesamt.ecken} Ecken, `
-  + `${pdfInfo.gesamt.felder} Feldaufschläge)`);
+  `Eck- und Feldzuschlag rechnen weiterhin im Hintergrund `
+  + `(${pdfInfo.gesamt.ecken} Ecken, ${pdfInfo.gesamt.felder} Feldaufschläge)`);
 
-// ── Bedienung: alle Parameter sind im PDF-Dialog einstellbar ───────────────
+// ── Der Export-Dialog trägt die Auswahlmöglichkeiten nicht mehr ───────────
 const dialog = await page.evaluate(() => {
-  state.aufmass = null;                      // Auslieferungszustand
   openPdfSheet();
   const sheet = document.getElementById('bottomSheet');
-  const rows  = [...sheet.querySelectorAll('.pdf-opt-row')];
-  const eck   = rows.find(r => /Außenecken/.test(r.textContent));
-  const feld  = rows.find(r => /Aufschlag/.test(r.textContent));
-  const before = { eckCfg: sheet.querySelector('.aufmass-cfg-row').style.display,
-                   feldCfg: sheet.querySelector('.aufmass-cfg-block').style.display };
-  eck.querySelector('input').click();
-  feld.querySelector('input').click();
-  // Aufschlag auf 0,73 m und Wirkungsbereich „je Feld" stellen
-  const presets = [...sheet.querySelectorAll('.aufmass-preset')];
-  presets.find(b => b.textContent === '0,73 m').click();
-  presets.find(b => b.textContent === 'je Feld').click();
-  const summary = sheet.querySelector('.aufmass-summary').textContent;
-  const r = aufmassRules();
+  const txt   = sheet.textContent;
+  const out = {
+    optRows:   sheet.querySelectorAll('.pdf-opt-row').length,
+    settings:  !!sheet.querySelector('.aufmass-settings'),
+    presets:   sheet.querySelectorAll('.aufmass-preset').length,
+    din:       /DIN\s?18451/.test(txt),
+    hatLayout: sheet.querySelectorAll('.pdf-theme-card').length
+  };
   closeSheet();
-  return { before, summary,
-           eck: r.eckzuschlag.aktiv, feld: r.feldzuschlag.aktiv,
-           wert: r.feldzuschlag.wert, modus: r.feldzuschlag.modus };
+  return out;
 });
-assert(dialog.before.eckCfg === 'none' && dialog.before.feldCfg === 'none',
-  'die Detaileinstellungen erscheinen erst, wenn die Regel eingeschaltet wird');
-assert(dialog.eck && dialog.feld && dialog.wert === 0.73 && dialog.modus === 'feld',
-  'Wert und Wirkungsbereich lassen sich im Dialog frei einstellen');
-assert(/Achsmaß/.test(dialog.summary) && /Aufmaß/.test(dialog.summary),
-  `der Dialog zeigt das Ergebnis sofort: „${dialog.summary}"`);
+assert(!dialog.settings && dialog.presets === 0 && !dialog.din,
+  'die Auswahlmöglichkeiten am Ende des PDF-Dialogs sind ersatzlos entfallen');
+assert(dialog.hatLayout === 2,
+  'die Wahl der Ausgabe (Farbe / Schwarz-Weiß) bleibt erhalten');
 
 // ── Der eingestellte Wert wirkt NICHT auf die Zeichnung ────────────────────
 assert(await page.evaluate(() => {
