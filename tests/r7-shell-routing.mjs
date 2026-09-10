@@ -7,7 +7,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { assert } from './harness.mjs';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'aufmass_final_app');
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'legacy-app');
 const STUB = path.join(path.dirname(new URL(import.meta.url).pathname), 'jspdf-stub.js');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
@@ -19,7 +19,11 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/__fonts.css') {
     res.writeHead(200, { 'Content-Type': 'text/css' }); res.end('/* keine Webschriften */'); return;
   }
-  const p = path.join(ROOT, decodeURIComponent(url.pathname));
+  // Die App verweist auf ihre Dateien unter `/app/…` – so liefert sie der
+  // geschützte Route Handler der Next.js-Hülle aus. Der Testserver bildet
+  // dieselbe Adresse auf den Ordner ab.
+  const _pfad = decodeURIComponent(url.pathname).replace(/^\/app(\/|$)/, '/');
+  const p = path.join(ROOT, _pfad);
   if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
   let body = fs.readFileSync(p);
   if (p.endsWith('.html')) {

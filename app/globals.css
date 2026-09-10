@@ -1,0 +1,393 @@
+/*
+ * Hülle der Anwendung: Anmeldung, Startseite, Abmelden.
+ *
+ * Die Farben und Formen sind dieselben wie in der Aufmaß-App
+ * (legacy-app/core.css) – bewusst hier noch einmal notiert und nicht von
+ * dort importiert: die App-Stylesheets werden nur an angemeldete Benutzer
+ * ausgeliefert, die Anmeldeseite braucht sie aber davor.
+ */
+:root {
+  --bg-deep: #0e1626;
+  --surface: #16213a;
+  --surface-hoch: #1c2a48;
+  --surface-tief: #111b2e;
+  --text: #f2f6ff;
+  --muted: #9fb3c8;
+  --muted-schwach: #6e819a;
+  --accent-aufmass: #ffc93c;
+  --accent-2d: #4cc9f0;
+  --accent-kontrast: #0e1626;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-stark: rgba(255, 255, 255, 0.16);
+  --r-karte: 20px;
+  --r-control: 12px;
+  --touch: 44px;
+  --font-display: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-text: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Blueprint-Raster wie auf dem Startbildschirm der App. */
+.auth-seite {
+  position: relative;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px calc(32px + env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+.auth-seite::before {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(rgba(76, 201, 240, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 201, 240, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 72%);
+  pointer-events: none;
+}
+
+.auth-seite::after {
+  content: '';
+  position: absolute;
+  top: -30vh;
+  left: 50%;
+  width: 90vw;
+  max-width: 900px;
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(76, 201, 240, 0.16), transparent 62%);
+  pointer-events: none;
+}
+
+.auth-inhalt {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+}
+
+.auth-marke {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.auth-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth-logo-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-2d), var(--accent-aufmass));
+  box-shadow: 0 0 0 1px var(--hairline-stark), 0 8px 24px rgba(76, 201, 240, 0.28);
+}
+
+.auth-logo-x { color: var(--accent-2d); }
+
+.auth-eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-schwach);
+}
+
+.auth-sub {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.auth-fuss {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-schwach);
+  text-align: center;
+}
+
+.auth-fuss a { color: var(--accent-2d); }
+
+/* Knopf im Stil der App – für die Startseite ohne eingebettetes Formular. */
+.auth-knopf {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  padding: 0 28px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--accent-2d);
+  color: var(--accent-kontrast);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.auth-knopf--leise {
+  background: transparent;
+  border: 1px solid var(--hairline-stark);
+  color: var(--text);
+}
+
+/* Kontoseite */
+.konto-karte {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  background: var(--surface);
+}
+
+.konto-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.konto-text strong {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.konto-text span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Formulare der Hülle (Einladungscode, Kontoerstellung) */
+.auth-formular {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  padding: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.46);
+}
+
+.auth-feld {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth-feld em {
+  font-style: normal;
+  color: var(--muted-schwach);
+}
+
+.auth-feld-paar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 380px) {
+  .auth-feld-paar { grid-template-columns: 1fr; }
+}
+
+.auth-eingabe {
+  min-height: var(--touch);
+  padding: 0 14px;
+  border: 1px solid var(--hairline-stark);
+  border-radius: var(--r-control);
+  background: var(--surface-tief);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* unter 16 px zoomt iOS beim Antippen hinein */
+}
+
+.auth-eingabe:focus {
+  outline: 2px solid var(--accent-2d);
+  outline-offset: 1px;
+}
+
+.auth-eingabe--code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.auth-meldung {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-control);
+  background: rgba(255, 107, 107, 0.12);
+  color: #ffb3b3;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.auth-bestaetigt {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-control);
+  background: rgba(61, 220, 151, 0.12);
+  color: #8ff0c4;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auth-knopf[disabled] { opacity: 0.6; cursor: default; }
+
+/* Einladungsverwaltung (Admin) */
+.admin-seite {
+  min-height: 100dvh;
+  padding: 28px 20px calc(28px + env(safe-area-inset-bottom));
+  background: var(--bg-deep);
+}
+
+.admin-wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-kopf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-kopf h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+}
+
+.admin-karte {
+  padding: 18px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  background: var(--surface);
+}
+
+.admin-neuer-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid rgba(61, 220, 151, 0.4);
+  border-radius: var(--r-karte);
+  background: rgba(61, 220, 151, 0.1);
+}
+
+.admin-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 24px;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  user-select: all;
+}
+
+.admin-tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-tabelle th,
+.admin-tabelle td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.admin-tabelle th { color: var(--muted-schwach); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+
+.admin-rollen {
+  overflow-x: auto;
+}
+
+.admin-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--r-pille, 999px);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.admin-status--aktiv       { background: rgba(76, 201, 240, .16);  color: #9fe4fa; }
+.admin-status--verwendet   { background: rgba(255, 255, 255, .08); color: var(--muted); }
+.admin-status--abgelaufen  { background: rgba(255, 180, 84, .16);  color: #ffcd8a; }
+.admin-status--widerrufen  { background: rgba(255, 107, 107, .16); color: #ffb3b3; }
+.admin-status--wird_eingeloest { background: rgba(255, 201, 60, .16); color: #ffe19a; }
+
+.admin-form-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.admin-form-zeile .auth-feld { flex: 1 1 160px; }
+
+.admin-knopf-klein {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--hairline-stark);
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-hinweis {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
