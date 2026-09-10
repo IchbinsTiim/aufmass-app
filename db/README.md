@@ -1,6 +1,6 @@
 # db/schema.sql
 
-Postgres-Schema für die AufmaßX-Einladungscodes (Neon).
+Postgres-Schema für AufmaßX (Neon): Einladungscodes und Cloud-Projekte.
 
 ## Ausführen
 
@@ -23,14 +23,16 @@ gelaufen ist – alle 46 Tests bestanden.
 - `einladungscodes` – Einmal-Einladungscodes (Hash, Rolle, Status, Ablauf).
 - `einladung_versuche` – Fehlversuche beim Einlösen, Grundlage der Sperre
   nach zu vielen Fehleingaben.
+- `cloud_projekte` – Die gesamte Projektakte (einschließlich der
+  Aufmaßzeichnung) eines Eigentümers, mit Versionsnummer gegen versehentliches
+  Überschreiben bei paralleler Bearbeitung.
+- `cloud_projekt_freigaben` – Mitarbeiterfreigaben pro Projekt, jeweils mit
+  Lese- oder Bearbeitungsrecht.
+- `cloud_ordner` – Persönliche Ordner des Eigentümers.
 
 ## Was hier bewusst NICHT enthalten ist
 
-Firma/Tenant, Benutzer, Projekte, Projektzuweisungen und Dokumente gibt es
-in diesem Schema nicht. Benutzer verwaltet Clerk, nicht Postgres. Projekte
-liegen laut `MIGRATION.md` (Abschnitt 9) weiterhin im Browser
-(`localStorage`/`IndexedDB`) – eine Cloud-Datenbank dafür ist explizit noch
-nicht gebaut. Es gibt im gesamten Repository keinen Code, der eine dieser
-Tabellen abfragt oder erwartet. Tabellen ohne einen einzigen lesenden oder
-schreibenden Aufrufer würden nur Struktur vortäuschen, die es nicht gibt –
-deshalb fehlen sie hier, bis der zugehörige Code existiert.
+Firma/Tenant und Benutzerprofile liegen weiterhin nicht in diesem Schema.
+Benutzer und ihre Rollen verwaltet Clerk. Die Cloud-Projektakte ist bewusst
+pro Clerk-Benutzer organisiert; eine Firmen-/Mandantenstruktur kann später
+ergänzt werden, falls sie benötigt wird.

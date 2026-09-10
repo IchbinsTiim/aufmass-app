@@ -793,16 +793,18 @@ function deleteProjectFromOverview(proj) {
 }
 
 function openProjectActionMenu(proj, anchorEl) {
-  openFloatingMenu(anchorEl, [
+  const items = [
     { label: 'Öffnen', onClick: () => requestOpenProject(proj) },
     { label: 'Öffnen mit…', onClick: () => requestOpenProjectMitAuswahl(proj) },
     { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
     { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
     { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
     { label: 'Status ändern…', onClick: () => openStatusMenu(proj, anchorEl) },
+    { label: 'Für Mitarbeiter freigeben…', onClick: () => window.CloudSpeicher?.freigeben(proj) },
     '---',
     { label: 'Löschen', danger: true, onClick: () => deleteProjectFromOverview(proj) }
-  ]);
+  ];
+  openFloatingMenu(anchorEl, items);
 }
 
 function createProjectCard(proj) {

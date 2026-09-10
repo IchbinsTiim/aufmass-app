@@ -468,6 +468,11 @@ body[data-modul="hub"] .mod-switcher { box-shadow: var(--schatten-s); }
 .hub-foot-btn:hover { color: var(--text); border-color: var(--hairline-stark); }
 .hub-foot-btn:active { transform: scale(.97); }
 
+.hub-cloud-status { white-space: nowrap; }
+.hub-cloud-status[data-status="ok"] { color: var(--erfolg); }
+.hub-cloud-status[data-status="fehler"] { color: #e9b261; }
+.hub-cloud-status[data-status="laeuft"] { color: var(--accent); }
+
 /* ── Handy ──────────────────────────────────────────────────────────────── */
 
 @media (max-width: 720px) {
