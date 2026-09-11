@@ -630,13 +630,17 @@
 
       <!-- Right: SVG canvas -->
       <div id="viewerPanel">
-        <!-- Auswahl-Info oben links: zeigt bei Mehrfachauswahl, welchen
-             Abschnitten die markierten Felder zugeordnet sind. -->
+        <!-- Auswahl-Anzeige: oben MITTIG als schmale Pille. Sie nennt die
+             genaue Zahl der ausgewählten Felder und ihre Achsen. Eigene,
+             feste Zone – das Achslabel steht am Objekt, die Aktionsleiste
+             unten; überlagern kann sich damit nichts. -->
         <div id="selectionInfo" class="selection-info hidden"></div>
-        <!-- Kontextsensitive Aktionsleiste: erscheint, sobald mehr als ein
-             Feld ausgewählt ist. Sie sitzt direkt am oberen Rand der
-             Zeichenfläche – nicht im Werkzeug-Panel –, weil die Auswahl im
-             Plan passiert und die Aktion dort hingehört, wo hingeschaut wird. -->
+        <!-- Kontextsensitive Aktionsleiste: erscheint, sobald ein Feld
+             ausgewählt ist. Sie sitzt am UNTEREN Rand der Zeichenfläche über
+             die volle Breite – auf dem iPad daumennah – und nicht im
+             Werkzeug-Panel, weil die Auswahl im Plan passiert und die Aktion
+             dort hingehört, wo hingeschaut wird. Verdeckt wird nichts: die
+             Zeichenfläche gibt ihr ihren Streifen ab. -->
         <div id="mehrfachBar" class="mehrfach-bar hidden" role="toolbar"
              aria-label="Aktionen für die ausgewählten Felder"></div>
         <svg id="planSvg" xmlns="http://www.w3.org/2000/svg">

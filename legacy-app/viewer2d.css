@@ -654,13 +654,21 @@ body[data-modul="2d"] #viewerPanel {
   background: #212121;
 }
 
-/* Die Zeichenfläche gibt der unteren Aktionsleiste ihren Platz ab, statt von
-   ihr überdeckt zu werden: --leiste-h setzt setLeistenHoehe(), der Zoom
-   bleibt dabei unangetastet. */
-body[data-modul="2d"] #viewerPanel { --leiste-h: 0px; }
+/* Die Zeichenfläche gibt den beiden unteren Leisten ihren Platz ab, statt von
+   ihnen überdeckt zu werden – der Zoom bleibt dabei unangetastet:
+
+     --leiste-h   Höhe der Aktionsleiste der Mehrfachauswahl (setLeistenHoehe)
+     --wz-h       Höhe des Werkzeug-Menüs, wenn es als Blatt von unten kommt
+                  (< 900 px, siehe setWzBlattHoehe). Angedockt rechts ist es
+                  0 – dort nimmt sich das Panel seine Breite ohnehin aus dem
+                  Fluss.
+
+   Die Aktionsleiste sitzt über dem Blatt, nicht darunter: sonst verschwänden
+   genau die Knöpfe, die zur laufenden Auswahl gehören. */
+body[data-modul="2d"] #viewerPanel { --leiste-h: 0px; --wz-h: 0px; }
 body[data-modul="2d"] #planSvg {
   width: 100%;
-  height: calc(100% - var(--leiste-h, 0px));
+  height: calc(100% - var(--leiste-h, 0px) - var(--wz-h, 0px));
   display: block;
 }
 
@@ -3507,7 +3515,7 @@ body[data-modul="2d"] .auswahl-rahmen.hidden { display: none; }
    wird um genau ihre Höhe kleiner (--leiste-h, siehe setLeistenHoehe). */
 body[data-modul="2d"] .mehrfach-bar {
   position: absolute;
-  bottom: 0;
+  bottom: var(--wz-h, 0px);
   left: 0;
   right: 0;
   z-index: 8;

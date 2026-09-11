@@ -227,6 +227,7 @@ Sitzung und Projektwechsel.
 | Langes Tippen auf leere Fläche → derselbe Rahmen mit einem Finger | ✅ |
 | Feld antippen in der Mehrfachauswahl → an-/abhaken (Toggle) | ✅ |
 | Auswahlrahmen nimmt DAZU – eine bestehende Auswahl bleibt erhalten | ✅ |
+| Auswahlrahmen nimmt jedes BERÜHRTE Feld mit, nicht nur die mit eingeschlossener Feldmitte | ✅ |
 | Auswahl bleibt nach einer Aktion stehen; geleert wird sie nur über „Auswahl aufheben" oder einen Tipp auf leere Fläche | ✅ |
 | Ab EINEM ausgewählten Feld: Aktionsleiste am UNTEREN RAND über die volle Breite mit Anzahl, Höhe, Zusatzbauteilen, Kopieren, Einfügen, Löschen, Auswahl aufheben | ✅ |
 | In der Mehrfachauswahl entfallen „+"-Knöpfe und Drehgriff: jeder Tipp gehört der Auswahl | ✅ |
@@ -267,7 +268,7 @@ sie auch über Zeichnungslinien lesbar bleiben.
 | Wahl „Handy" | immer Handy-Modus, auch auf dem iPad |
 | Wahl „Tablet" | nie Handy-Modus |
 | Handy-Modus | Werkzeugleiste zweizeilig, Seitenleiste aus, Menü als Blatt von unten |
-| Fenster ≤ 899 px | Menü als Blatt von unten statt angedockt |
+| Fenster ≤ 899 px | Menü als Blatt von unten statt angedockt – es reserviert seinen Streifen (`--wz-h`), die Zeichenfläche wird kleiner und die Aktionsleiste rückt darüber |
 | Fenster ≤ 520 px hoch | Menü seitlich angedockt statt von unten (liegendes Handy) |
 | Fenster < 1300 px, Menü offen | die Feldliste zieht ins Menü, damit die Zeichnung Platz behält |
 

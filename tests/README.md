@@ -272,6 +272,10 @@ node tests/r14-runde8.mjs   # Mehrfachauswahl als echte Menge, Achsen
   ausgewählt, ein viertes Tippen nimmt eines wieder heraus, ein Rahmen nimmt
   DAZU statt zu ersetzen, und nach einer Aktion (Innengeländer auf die drei)
   bleibt die Auswahl stehen. Die Anzeige nennt immer die exakte Zahl.
+  Zusätzlich wird der Rahmen an einem schmalen Streifen ENTLANG der Oberkante
+  dreier Felder geprüft: er berührt sie nur am Rand und schließt keine
+  Feldmitte ein – trotzdem kommen alle drei mit („alle berührten Felder").
+  Ein Rahmen neben dem Gerüst nimmt weiterhin nichts auf.
 * **Ä2 Achsen umbenennen** – eine Achse mit sieben Feldern, Mengen und
   Bordbrett wird umbenannt; Zuordnung, Bordbrett und Flächen bleiben
   unverändert, weil alles an der Achsen-ID hängt. Ein leerer Name fällt auf
@@ -279,7 +283,11 @@ node tests/r14-runde8.mjs   # Mehrfachauswahl als echte Menge, Achsen
 * **Ä3 Overlay-Zonen** – bei zwei ausgewählten Feldern und aufgeklapptem
   Werkzeug-Panel wird nachgemessen, dass sich Auswahl-Anzeige (oben mittig),
   Achslabel (am Objekt) und Aktionsleiste (unten, volle Breite) paarweise
-  NICHT überlappen und die Zeichenfläche über der Leiste endet.
+  NICHT überlappen und die Zeichenfläche über der Leiste endet. Dieselbe
+  Messung noch einmal bei 820 × 1100 (iPad hochkant): dort kommt das
+  Werkzeug-Menü als Blatt von unten – also dorthin, wo auch die Aktionsleiste
+  sitzt. Geprüft wird, dass die Leiste ÜBER dem Blatt steht und die
+  Zeichenfläche um dessen Höhe kleiner wird, statt verdeckt zu werden.
 * **Ä4 Farbe** – die Bordbrettlinie trägt die um 20 % abgedunkelte Achsfarbe,
   ohne Achszuordnung neutrales Grau.
 * **Ä5 Seite und Stützpunkte** – eine Linie über sieben Felder mit zwei
