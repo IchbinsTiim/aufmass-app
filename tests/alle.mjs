@@ -29,8 +29,10 @@ const DATEIEN = [
   'r9-2d-zeichnungen.mjs',
   'r10-werkzeugmenue.mjs',
   'r11-aufmass-hoehenkorrektur.mjs',
+  'r12-runde7.mjs',
   'r12-huelle-schutz.mjs',
-  'r13-einladungscodes.mjs'
+  'r13-einladungscodes.mjs',
+  'r14-runde8.mjs'
 ];
 
 const fehlgeschlagen = [];

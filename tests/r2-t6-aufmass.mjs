@@ -158,8 +158,8 @@ assert(persisted.aktiv && persisted.wert === 0.73 && persisted.modus === 'wand' 
    Seit Runde 7 steht KEIN Text nach ATV DIN 18451 mehr im PDF und es gibt
    auch keine Auswahlmöglichkeiten am Ende des Export-Dialogs. Die Korrektur-
    logik rechnet unverändert im Hintergrund weiter – nachgewiesen an den
-   Werten, die computeAufmass() liefert, und an der Bruttofläche, die als
-   Position 1 im PDF steht.                                                 */
+   Werten, die computeAufmass() liefert, und an der Gerüstfläche, die seit
+   Runde 8 in den Kennzahlen des Achsblocks steht.                          */
 const pdfInfo = await page.evaluate(async () => {
   window.__pdfSaved = null;
   await buildPdf('farbe');
@@ -174,8 +174,8 @@ assert(!/Grundlage:/.test(joined) && !/DIN\s?18451/.test(joined)
     && !/Achsmaße der Gerüstkonstruktion/.test(joined),
   'im PDF steht kein Regeltext nach ATV DIN 18451 mehr');
 const fmtDe = n => (Math.round(n * 100) / 100).toString().replace('.', ',');
-assert(pdfInfo.texte.includes(fmtDe(pdfInfo.pos1) + ' m²'),
-  `die Gesamt-Gerüstfläche steht im PDF (${fmtDe(pdfInfo.pos1)} m²)`);
+assert(pdfInfo.texte.some(t => t.includes('·') && t.endsWith(fmtDe(pdfInfo.pos1) + ' m²')),
+  `die Gesamt-Gerüstfläche steht in den Kennzahlen des PDF (${fmtDe(pdfInfo.pos1)} m²)`);
 assert(pdfInfo.gesamt.ecken > 0 && pdfInfo.gesamt.felder > 0,
   `Eck- und Feldzuschlag rechnen weiterhin im Hintergrund `
   + `(${pdfInfo.gesamt.ecken} Ecken, ${pdfInfo.gesamt.felder} Feldaufschläge)`);

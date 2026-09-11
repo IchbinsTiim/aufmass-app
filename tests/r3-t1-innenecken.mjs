@@ -268,9 +268,11 @@ const pdfTxt = pdf.texte.join('\n');
 // Jede Achse hat ihren eigenen Block auf dem Aufmaßblatt.
 pdf.achsen.forEach(a => assert(pdf.texte.some(t => t.toUpperCase().includes(a.name.toUpperCase())),
   `das PDF führt „${a.name}" als eigenen Block`));
-// Die Bruttofläche jeder Achse (Position 1) steht so im PDF.
-pdf.pos1.forEach(g => assert(pdf.texte.some(t => t === fmtDe(g.summe) + ' m²'),
-  `„${g.name}": ${g.summe} m² stehen als Position 1 im PDF`));
+// Die Gerüstfläche jeder Achse steht seit Runde 8 in den Kennzahlen ihres
+// Kopfbalkens („n Felder · x m · y m²") statt in einer eigenen Positionszeile.
+pdf.pos1.forEach(g => assert(
+  pdf.texte.some(t => t.includes('·') && t.endsWith(fmtDe(g.summe) + ' m²')),
+  `„${g.name}": ${g.summe} m² stehen in den Kennzahlen des Achsblocks`));
 // Seit Runde 7 steht KEIN Regeltext nach ATV DIN 18451 mehr im PDF. Die
 // Korrekturlogik rechnet unverändert im Hintergrund weiter – nachweisbar an
 // den Achslängen oben, nicht mehr an einer abgedruckten Fußnote.

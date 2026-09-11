@@ -375,27 +375,33 @@ assert(!/DIN\s?18451/.test(txt) && !/Grundlage:/.test(txt) && !/Achsmaße/.test(
   'kein DIN-18451-Text mehr im PDF');
 assert(!pdf.texte.some(t => t.trim() === 'Bordbrett'),
   'das Bordbrett ist keine eigene Position mehr');
+assert(!pdf.texte.some(t => /^Bordbrett/.test(t)),
+  'das Bordbrett steht seit Runde 8 auch nicht mehr in der Skizze bzw. Legende');
 assert(!/Aufmaßregeln/.test(txt), 'kein Regel-Hinweisblock mehr');
 
-/* ══ 10. PDF: zwei Flächen je Achse ═══════════════════════════════════════ */
+/* ══ 10. PDF: EINE Ebene je Achse (seit Runde 8) ══════════════════════════
+   Die beiden Flächen einer Achse gibt es unverändert – sie stehen nur nicht
+   mehr als zwei Positionsblöcke mit feldweiser Auflistung da, sondern im
+   Kopfbalken (Gesamt-Gerüstfläche) und in der Metazeile darunter (positio-
+   nierte Fläche samt Aufmaßlänge).                                        */
 
-assert(/Position 1 – Gerüstfläche \(gesamt\)/.test(txt),
-  'Position 1: Gerüstfläche (gesamt)');
-assert(/Position 2 – Positionierte Gerüstfläche \(Aufmaß\)/.test(txt),
-  'Position 2: positionierte Gerüstfläche (Aufmaß)');
-assert(pdf.texte.indexOf('Position 1 – Gerüstfläche (gesamt)')
-     < pdf.texte.indexOf('Position 2 – Positionierte Gerüstfläche (Aufmaß)'),
-  'Position 1 steht vor Position 2');
+assert(!pdf.texte.some(t => /^Position [12] –/.test(t)),
+  'die Zwischenüberschriften „Position 1/2" sind entfallen');
+assert(!pdf.texte.some(t => t === 'Feld' || t === 'Fläche (m²)' || t === 'Bemerkung'),
+  'die feldweise Auflistung mit Einzelflächen ist entfallen');
 assert(/Aufmaßlänge 11,01 m/.test(txt),
   'die Aufmaßlänge stammt aus der Bordbrettlinie');
-['Feld', 'Länge (m)', 'Höhe (m)', 'Fläche (m²)', 'Bemerkung'].forEach(sp =>
-  assert(pdf.texte.includes(sp), `Spalte „${sp}"`));
-assert(pdf.texte.includes('A5') && pdf.texte.includes('anteilig'),
-  'bei mehreren Höhen wird feldweise aufgeschlüsselt – inkl. angeschnittenem Feld');
-assert(pdf.texte.some(t => /^Summe Positionierte Gerüstfläche/.test(t)),
-  'am Ende des Abschnitts steht die aufsummierte Gesamtfläche');
-assert(pdf.texte.includes('GESAMT ÜBER ALLE ACHSEN'),
-  'Gesamtsumme über alle Achsen am Ende');
+assert(/davon positioniert: [\d,]+ m²/.test(txt),
+  'die positionierte Gerüstfläche steht in der Metazeile');
+assert(/Höhen: \d+ Feld(er)? à [\d,]+ m/.test(txt),
+  'unterschiedliche Höhen innerhalb einer Achse stehen in der Metazeile');
+// Ohne Zusatzbauteile bleibt die Tabelle leer – und sagt das auch.
+assert(pdf.texte.some(t => /Keine Zusatzbauteile erfasst/.test(t)),
+  'ohne Zusatzbauteile steht das ausdrücklich da (statt einer leeren Tabelle)');
+assert(pdf.texte.some(t => /^\d+ Feld(er)?\s+·\s+[\d.,]+ m\s+·\s+[\d.,]+ m²$/.test(t)),
+  'der Kopfbalken nennt Feldzahl, Achslänge und Gerüstfläche');
+assert(pdf.texte.includes('GESAMT · ALLE SEITEN'),
+  'Abschlussblock „Gesamt · alle Seiten" am Ende');
 
 // So wenige Abschnitte wie möglich, von links nach rechts gruppiert: die
 // fünf Felder ergeben ZWEI Achsen (nicht fünf), und die westliche steht oben.
@@ -405,13 +411,15 @@ assert(gliederung.length === 2,
   `fünf Felder ergeben ${gliederung.length} Abschnitte (nicht einen je Feld)`);
 assert(/A1/.test(gliederung[0].name),
   `von links nach rechts gruppiert: ${gliederung.map(g => g.name).join(' → ')}`);
-assert(pdf.texte.some(t => /^\d+(\.\d{3})*,\d{2} m²$/.test(t) || /^\d+,\d+ m²$/.test(t)),
-  'Flächen mit Einheit und zwei Nachkommastellen');
+assert(/[\d.,]+ m²/.test(txt), 'Flächen stehen mit ihrer Einheit im Blatt');
 
 /* ══ 11. Blatt 2: Farbe, Zebra, Graustufen ════════════════════════════════ */
 
-assert(pdf.fuellungen > 20 && pdf.rechtecke > 20,
-  `Blatt 2 ist flächig gestaltet (${pdf.fuellungen} Füllungen, ${pdf.rechtecke} Flächen)`);
+// Seit Runde 8 ist das Aufmaßblatt deutlich kürzer (eine Ebene statt vier),
+// also gibt es auch weniger Flächen. Es bleibt aber flächig gestaltet:
+// Kopfbalken, Achsfarbkante und Metazeile sind gefüllte Rechtecke.
+assert(pdf.fuellungen > 10 && pdf.rechtecke >= 6,
+  `das Aufmaßblatt ist flächig gestaltet (${pdf.fuellungen} Füllungen, ${pdf.rechtecke} Flächen)`);
 const grau = await page.evaluate(async () => {
   window.__pdfSaved = null;
   await buildPdf('monochrom');

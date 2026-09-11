@@ -149,13 +149,11 @@ assert(tVis.includes('ausgeblendet'),
 assert(tAll.includes('Ostseite') && tVis.includes('Ostseite'),
   'sichtbare Abschnitte sind in beiden Fällen enthalten');
 
-// Die Mengen folgen dem Export-Umfang. Nachgewiesen an der Gerüstfläche der
-// Gesamtaufstellung – die Kennzahlen-Fußzeile auf jedem Blatt ist mit der
-// Vereinfachung des Dokuments entfallen.
+// Die Mengen folgen dem Export-Umfang. Nachgewiesen an der Gerüstfläche im
+// Abschlussblock „Gesamt · alle Seiten" – seit Runde 8 stehen die Kennzahlen
+// im Kopfbalken des Blocks („n Felder · x m · y m²").
 const flaeche = txt => {
-  // Die Gesamtsumme am Ende von Blatt 2: „Gerüstfläche (gesamt)" gefolgt vom
-  // Wert mit Einheit.
-  const m = [...txt.matchAll(/Gerüstfläche \(gesamt\)\n([\d.,]+) m²/g)]
+  const m = [...txt.matchAll(/\d+ Felder\s+·\s+[\d.,]+ m\s+·\s+([\d.,]+) m²/g)]
     .map(x => parseFloat(x[1].replace(/\./g, '').replace(',', '.')));
   return m.length ? Math.max(...m) : null;
 };

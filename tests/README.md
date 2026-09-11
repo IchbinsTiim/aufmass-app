@@ -36,9 +36,9 @@ Seitenaufbau ohne echte PDF-Erzeugung nachvollziehen.
 ## Ausführen
 
 ```bash
-node tests/t1-abschnitte.mjs    # Abschnitte: anlegen/zuordnen/löschen, Anzeige oben links, Persistenz
+node tests/t1-abschnitte.mjs    # Achsen: anlegen/zuordnen/löschen, Anzeige oben mittig, Persistenz
 node tests/t2-rotation.mjs 80   # Auswahl/Drehen ohne Verzögerung, Renderaufwand (Argument = Feldanzahl)
-node tests/t3-pdf.mjs           # PDF: Seite 1 Zeichnung / Seite 2 Aufmaß, Blatteinteilung,
+node tests/t3-pdf.mjs           # PDF: Seite 1 Skizze / danach das Aufmaß, Blatteinteilung,
                                 #      Achsen auf einer Seite, Tabellenumbruch, zwei Ausgaben
 node tests/fitcheck.mjs         # geometrischer Nachweis: kein Blattinhalt ragt in Kopf-/Fußzeile
 node tests/e2e.mjs              # durchgängiger Ablauf über die Oberfläche (Vorlage → Abschnitt → Drehen → PDF)
@@ -99,17 +99,20 @@ Felder nach Osten, das fünfte quer über der Ecke nach Süden. Erwartet wird
 `4 × 2,57 + 0,73 = 11,01 m` für die obere Achse (nicht 10,28 m an der Feldkante
 von A4), ein anteilig geteiltes Eckfeld mit SEINER Höhe und eine eigene
 Aufmaßlänge für die anschließende Achse. Zum Schluss das PDF: kein
-DIN-18451-Text, keine Auswahlmöglichkeiten am Ende, keine Bordbrett-Position,
-dafür je Achse Position 1 (Gerüstfläche gesamt) und Position 2 (positionierte
-Gerüstfläche) mit Feld · Länge · Höhe · Fläche · Bemerkung – und in der
-Schwarz-Weiß-Ausgabe ausschließlich neutrale Grautöne.
+DIN-18451-Text, keine Auswahlmöglichkeiten am Ende, kein Bordbrett – und in der
+Schwarz-Weiß-Ausgabe ausschließlich neutrale Grautöne. Die beiden Flächen je
+Achse gibt es unverändert; seit Runde 8 stehen sie im Kopfbalken bzw. in der
+Metazeile statt in zwei Positionsblöcken mit feldweiser Auflistung.
 
 **Hinweis zum Bordbrett.** Seit Runde 7 ist ein Bordbrett eine LINIE
 (`state.bordbrettLinien`) aus Kantenstücken `{ b, k, t0, t1 }` mit mehreren
 Lagen, nicht mehr eine Liste ganzer Kanten (`state.bordbrettKanten`). Ältere
 Zeichnungen werden beim Laden einmal überführt; `setzeBordbrettKante()` und
 `bordbrettGesamt()` gibt es unverändert weiter, sie arbeiten nur auf dem
-neuen Modell.
+neuen Modell. Seit Runde 8 kommen zwei Felder dazu: `seite` ('links' |
+'rechts', einmal beim Anlegen bestimmt) und `punkte` (die Stützpunkte, aus
+denen die Kantenstücke geführt werden). Beide entstehen bei Altdaten beim
+Laden aus dem, was schon da ist – die Linie sieht danach exakt aus wie zuvor.
 
 `r5` rechnet die Abnahmefälle nach: ein Feld 2,57 × 0,73 ergibt 2,57 m an der
 langen Kante, 3,30 m mit einer kurzen Seite dazu und 6,60 m im vollen Umlauf;
@@ -252,6 +255,46 @@ zuvor – genau das prüft `r11-aufmass-hoehenkorrektur.mjs` mit.
 `r3-t1` rechnet das Referenzbeispiel nach: drei Felder à 2,57 m an einer
 Innenecke ergeben 2,57 + 2,57 + (2,57 − 0,73) = 6,98 m, die ausfüllende Achse
 2,57 + 0,73 = 3,30 m, eine unbeteiligte Achse unverändert 3 × 2,57 = 7,71 m.
+
+Runde 8 der Änderungsliste (2D-Aufmaß: Auswahl, Achsen, Bordbrett, PDF):
+
+```bash
+node tests/r14-runde8.mjs   # Mehrfachauswahl als echte Menge, Achsen
+                            # umbenennen, kollisionsfreie Overlay-Zonen,
+                            # Bordbrett in Achsfarbe, feste Bordbrett-Seite
+                            # mit Stützpunkten, PDF ohne Bordbrett, Aufmaß
+                            # mit EINER Ebene je Achse, wählbare Blattzahl
+```
+
+`r14` geht die acht Änderungen der Runde einzeln ab:
+
+* **Ä1 Mehrfachauswahl** – aus 21 Feldern werden genau drei nicht benachbarte
+  ausgewählt, ein viertes Tippen nimmt eines wieder heraus, ein Rahmen nimmt
+  DAZU statt zu ersetzen, und nach einer Aktion (Innengeländer auf die drei)
+  bleibt die Auswahl stehen. Die Anzeige nennt immer die exakte Zahl.
+* **Ä2 Achsen umbenennen** – eine Achse mit sieben Feldern, Mengen und
+  Bordbrett wird umbenannt; Zuordnung, Bordbrett und Flächen bleiben
+  unverändert, weil alles an der Achsen-ID hängt. Ein leerer Name fällt auf
+  „Achse {n}" zurück, doppelte Namen sind erlaubt und werden erkannt.
+* **Ä3 Overlay-Zonen** – bei zwei ausgewählten Feldern und aufgeklapptem
+  Werkzeug-Panel wird nachgemessen, dass sich Auswahl-Anzeige (oben mittig),
+  Achslabel (am Objekt) und Aktionsleiste (unten, volle Breite) paarweise
+  NICHT überlappen und die Zeichenfläche über der Leiste endet.
+* **Ä4 Farbe** – die Bordbrettlinie trägt die um 20 % abgedunkelte Achsfarbe,
+  ohne Achszuordnung neutrales Grau.
+* **Ä5 Seite und Stützpunkte** – eine Linie über sieben Felder mit zwei
+  Richtungswechseln bleibt nach Zeichnen, Zoomen, Speichern und erneutem
+  Öffnen durchgehend auf derselben Seite; „Seite wechseln" kippt die GANZE
+  Linie; ein Tipp auf die Linie setzt einen Stützpunkt, das Entfernen
+  verändert die Linie nicht.
+* **Ä6 + Ä8 PDF** – kein Bordbrett in Skizze, Legende und Positionsliste; je
+  Achse EIN Kopfbalken mit Name und Kennzahlen, darunter EINE Positionstabelle
+  (Farbfeld · Position · Anzahl · Menge · lfd. Meter), unterschiedliche Höhen
+  in einer schmalen Metazeile, zum Schluss „Gesamt · alle Seiten".
+* **Ä7 Blattzahl** – 1, 2, 3 Blätter und „Automatisch" im Export-Dialog; bei
+  jeder Wahl liegt jedes Feld auf genau einem Blatt und keines wird
+  angeschnitten, an jeder Schnittkante stehen rund 5 % Überlappung, und
+  „Automatisch" hält die Feldbeschriftung bei mindestens 6 pt.
 
 Runde 12 (Hülle: Zugangssperre der Next.js-Anwendung):
 

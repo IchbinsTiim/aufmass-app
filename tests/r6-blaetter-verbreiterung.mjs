@@ -118,8 +118,8 @@ const kopf = await bau(async () => {
   await buildPdf('farbe');
   return window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2]));
 });
-assert(kopf.some(t => /Blatt 1 von \d+ .*Felder A1 – A\d+/.test(t)),
-  `die Kopfzeile nennt die Felder des Blattes: „${kopf.find(t => /Blatt 1 von/.test(t)) || '–'}"`);
+assert(kopf.some(t => /Skizze 1 von \d+ .*Felder A1 – A\d+/.test(t)),
+  `die Kopfzeile nennt die Felder des Blattes: „${kopf.find(t => /Skizze 1 von/.test(t)) || '–'}"`);
 // Die frühere eigene Übersichtsseite ist entfallen – ein Blatt, das keine
 // Zeichnung zeigt, kostet nur Papier. Die Lage im Gesamtplan steht als kleine
 // Karte auf jedem Planblatt selbst.
