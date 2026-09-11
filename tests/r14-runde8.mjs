@@ -125,6 +125,58 @@ const lasso = await page.evaluate(() => {
 assert(lasso.nachher > lasso.vorher,
   `der Rahmen nimmt dazu, statt zu ersetzen (${lasso.vorher} → ${lasso.nachher})`);
 
+// „Alle BERÜHRTEN Felder": ein Gerüstfeld ist lang und schmal. Wer quer über
+// eine Reihe zieht, streift sie meist am Rand – über die Feldmitte gerechnet
+// bliebe so ein Rahmen leer, obwohl er sichtbar über den Feldern lag.
+const streif = await page.evaluate(() => {
+  const zuSchirm = w => {
+    const svg = document.getElementById('planSvg');
+    const r = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    return { x: r.left + (w.x - vb.x) / vb.width * r.width,
+             y: r.top  + (w.y - vb.y) / vb.height * r.height };
+  };
+  // Die laufende Auswahl der vorigen Prüfungen sichern – die folgenden Fälle
+  // bauen darauf auf.
+  const gesichert = [...bulkSelected];
+  const warModus  = bulkMode;
+  const els = computeLayout().filter(e => e.type === 'bay');
+  const kasten = liste => {
+    const ps = liste.flatMap(e => e.pts).map(zuSchirm);
+    return { minX: Math.min(...ps.map(p => p.x)), maxX: Math.max(...ps.map(p => p.x)),
+             minY: Math.min(...ps.map(p => p.y)), maxY: Math.max(...ps.map(p => p.y)) };
+  };
+  const drei = kasten(els.slice(0, 3));
+  const eins = kasten(els.slice(0, 1));
+  const hoehe = eins.maxY - eins.minY;
+
+  // Ein schmaler Streifen ENTLANG der Oberkante der ersten drei Felder: er
+  // berührt sie, schließt aber keine einzige Feldmitte ein.
+  bulkMode = false; bulkSelected.clear();
+  const y = eins.minY + hoehe * 0.12;
+  rahmen = { a: { x: drei.minX + 3, y: y - 4 }, b: { x: drei.maxX - 3, y: y + 4 } };
+  beendeRahmen();
+  const gestreift = bulkSelected.size;
+
+  // Gegenprobe: neben dem Gerüst nimmt derselbe Rahmen nichts auf.
+  bulkMode = false; bulkSelected.clear();
+  rahmen = { a: { x: eins.minX, y: eins.minY - 400 },
+             b: { x: eins.maxX, y: eins.minY - 300 } };
+  beendeRahmen();
+  const daneben = bulkSelected.size;
+
+  bulkSelected.clear();
+  gesichert.forEach(id => bulkSelected.add(id));
+  bulkMode = warModus;
+  renderAll();
+  return { gestreift, daneben, hoehe: Math.round(hoehe),
+           wiederhergestellt: bulkSelected.size };
+});
+assert(streif.gestreift === 3,
+  `ein Streifen, der die Felder nur am Rand berührt, nimmt sie mit `
+  + `(${streif.gestreift} von 3, Feldhöhe ${streif.hoehe} px)`);
+assert(streif.daneben === 0, 'ein Rahmen neben dem Gerüst nimmt nichts auf');
+
 // Ein Auswahlrahmen beginnt auf LEERER Fläche – dort darf das Pointer-Down
 // die laufende Auswahl noch nicht wegräumen, sonst könnte der Rahmen nichts
 // mehr dazunehmen.
@@ -266,6 +318,45 @@ assert(zonen.svg.b <= zonen.leiste.t + 1,
   'die Zeichenfläche endet über der Leiste – sie wird verkleinert, nicht verdeckt');
 assert(zonen.knoepfe.length >= 5 && zonen.knoepfe.every(k => k.h >= 36),
   `alle ${zonen.knoepfe.length} Knöpfe der Leiste sind vollständig und groß genug`);
+
+/* Dieselbe Zusage auf dem iPad HOCHKANT. Unter 900 px kommt das Werkzeug-Menü
+   nicht rechts angedockt, sondern als Blatt von unten – also genau dorthin,
+   wo auch die Aktionsleiste sitzt. Auch dann darf sich nichts überlagern: das
+   Blatt reserviert seinen Streifen, die Zeichenfläche wird kleiner und die
+   Leiste rückt darüber. */
+await page.setViewportSize({ width: 820, height: 1100 });
+await page.waitForTimeout(320);
+const hochkant = await page.evaluate(() => {
+  renderAll(); flushRender();
+  const r = el => { if (!el) return null; const b = el.getBoundingClientRect();
+                    return b.width && b.height ? { l: b.left, t: b.top, r: b.right, b: b.bottom } : null; };
+  const panel = document.getElementById('werkzeugPanel');
+  return {
+    blatt:   getComputedStyle(panel).position === 'fixed',
+    // Das Blatt fährt mit einer Animation hoch; für die Lage zählt die
+    // Layout-Höhe am unteren Fensterrand, nicht die Momentaufnahme.
+    panelTop: window.innerHeight - panel.offsetHeight,
+    anzeige: r(document.getElementById('selectionInfo')),
+    leiste:  r(document.getElementById('mehrfachBar')),
+    svg:     r(document.getElementById('planSvg')),
+    knoepfe: document.querySelectorAll('#mehrfachBar .mf-btn').length
+  };
+});
+assert(hochkant.blatt, 'hochkant kommt das Werkzeug-Menü als Blatt von unten');
+assert(hochkant.leiste && hochkant.leiste.b <= hochkant.panelTop + 1,
+  'die Aktionsleiste steht ÜBER dem Blatt – nicht dahinter');
+assert(hochkant.svg.b <= hochkant.leiste.t + 1,
+  'die Zeichenfläche endet über der Leiste');
+assert(hochkant.svg.b <= hochkant.panelTop + 1,
+  'und wird vom Blatt nicht verdeckt, sondern um dessen Höhe kleiner');
+assert(hochkant.anzeige && hochkant.anzeige.b < hochkant.leiste.t,
+  'die Auswahl-Anzeige bleibt oben und frei');
+assert(hochkant.knoepfe >= 5,
+  `alle ${hochkant.knoepfe} Knöpfe der Auswahl bleiben erreichbar`);
+
+await page.setViewportSize({ width: 1400, height: 1000 });
+await page.waitForTimeout(320);
+await page.evaluate(() => { setWerkzeugPanel(false); renderAll(); flushRender(); });
 
 /* ══ Ä4 – Bordbrett in Achsfarbe ══════════════════════════════════════════ */
 console.log('\nÄ4 – Bordbrett in Achsfarbe');

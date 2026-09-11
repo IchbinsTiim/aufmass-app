@@ -5806,7 +5806,8 @@ function currentSelectionBays() {
                                     weitere Tipp nimmt eines dazu bzw. wieder
                                     heraus.
      • ZWEI-FINGER-RAHMEN         → zwei Finger kurz ruhig aufliegen lassen,
-                                    der aufgezogene Rahmen wählt alles darin.
+                                    der aufgezogene Rahmen nimmt jedes Feld
+                                    mit, das er berührt.
      • LANGES TIPPEN auf leere
        Fläche                     → derselbe Rahmen mit einem Finger.
 
@@ -5814,8 +5815,9 @@ function currentSelectionBays() {
    subtraktiv verändern lässt – kein „alles oder nichts":
 
      • Tippen auf ein Feld    nimmt es dazu bzw. wieder heraus (Toggle).
-     • Rahmen aufziehen       nimmt alles darin DAZU; was schon ausgewählt
-                              war, bleibt es.
+     • Rahmen aufziehen       nimmt jedes BERÜHRTE Feld DAZU – auch ein nur
+                              gestreiftes; was schon ausgewählt war, bleibt
+                              es.
      • Auswahl aufheben       nur ausdrücklich (Knopf) oder mit einem Tipp auf
                               leere Zeichenfläche. Nach einer Aktion
                               (Zusatzbauteil setzen, Höhe ändern …) bleibt die
@@ -5864,11 +5866,67 @@ function bayUnterPunkt(pt, els) {
   return null;
 }
 
-/** Mittelpunkt eines Feld-Polygons (für die Rahmenauswahl). */
+/** Mittelpunkt eines Feld-Polygons. */
 function polyMitte(pts) {
   const n = pts.length || 1;
   return { x: pts.reduce((s, p) => s + p.x, 0) / n,
            y: pts.reduce((s, p) => s + p.y, 0) / n };
+}
+
+/** Schneiden sich die beiden Strecken a–b und c–d? Berührung zählt mit. */
+function streckenSchneiden(a, b, c, d) {
+  const dreh = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  const d1 = dreh(a, b, c), d2 = dreh(a, b, d);
+  const d3 = dreh(c, d, a), d4 = dreh(c, d, b);
+  if (d1 !== d2 && d3 !== d4) return true;
+  // Kollinear: liegt der Punkt im Streckenstück?
+  const drauf = (p, q, r) => dreh(p, q, r) === 0
+    && Math.min(p.x, q.x) <= r.x && r.x <= Math.max(p.x, q.x)
+    && Math.min(p.y, q.y) <= r.y && r.y <= Math.max(p.y, q.y);
+  return drauf(a, b, c) || drauf(a, b, d) || drauf(c, d, a) || drauf(c, d, b);
+}
+
+/**
+ * BERÜHRT der Rahmen dieses Feld?
+ *
+ * Maßgeblich ist die Berührung, nicht die Feldmitte. Ein Gerüstfeld ist lang
+ * und schmal; wer mit dem Finger quer über eine Reihe zieht, streift die
+ * Felder meist am Rand, ohne ihre Mitte einzuschließen. Über die Mitte
+ * gerechnet bliebe der Rahmen dann leer – obwohl er sichtbar über den Feldern
+ * lag. Deshalb zählt jede Überschneidung: Feld im Rahmen, Rahmen im Feld oder
+ * eine gekreuzte Kante.
+ *
+ * @param pts  Eckpunkte des Feld-Polygons (Welt)
+ * @param r    achsparalleles Rechteck { minX, minY, maxX, maxY } (Welt)
+ */
+function polyTrifftRahmen(pts, r) {
+  if (!pts || pts.length < 3) return false;
+  // Billige Vorprüfung über die Hüllrechtecke – die meisten Felder fallen
+  // schon hier heraus.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  pts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  });
+  if (maxX < r.minX || minX > r.maxX || maxY < r.minY || minY > r.maxY) return false;
+
+  // 1. Eine Feldecke liegt im Rahmen.
+  if (pts.some(p => p.x >= r.minX && p.x <= r.maxX && p.y >= r.minY && p.y <= r.maxY)) return true;
+
+  // 2. Der Rahmen liegt ganz im Feld (kleiner Rahmen mitten auf einem Feld).
+  const ecken = [{ x: r.minX, y: r.minY }, { x: r.maxX, y: r.minY },
+                 { x: r.maxX, y: r.maxY }, { x: r.minX, y: r.maxY }];
+  if (ecken.some(e => punktInPoly(e, pts))) return true;
+
+  // 3. Eine Feldkante kreuzt eine Rahmenkante.
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    for (let k = 0; k < 4; k++) {
+      if (streckenSchneiden(pts[j], pts[i], ecken[k], ecken[(k + 1) % 4])) return true;
+    }
+  }
+  return false;
 }
 
 /** Startet die Mehrfachauswahl mit genau einem Feld (langes Tippen). Läuft
@@ -5929,7 +5987,7 @@ function starteRahmen(a, b) {
   canvasGesture = null;             // Pan/Pinch geben ab
   rahmen = { a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } };
   zeichneRahmen();
-  showToast('Rahmen aufziehen – alle Felder darin werden ausgewählt');
+  showToast('Rahmen aufziehen – jedes berührte Feld kommt dazu');
 }
 
 function aktualisiereRahmen(pt, welcher) {
@@ -5949,13 +6007,18 @@ function beendeRahmen() {
 
   const p1 = screenToSvg(Math.min(a.x, b.x), Math.min(a.y, b.y));
   const p2 = screenToSvg(Math.max(a.x, b.x), Math.max(a.y, b.y));
+  // Die Kamera kennt nur Verschieben und Zoomen, keine Drehung – der Rahmen
+  // bleibt also auch in Weltkoordinaten achsparallel. Sortiert wird trotzdem,
+  // damit min/max unabhängig von der Ziehrichtung stimmen.
+  const rect = { minX: Math.min(p1.x, p2.x), maxX: Math.max(p1.x, p2.x),
+                 minY: Math.min(p1.y, p2.y), maxY: Math.max(p1.y, p2.y) };
   const treffer = [];
   computeLayout().forEach(el => {
     if (el.type !== 'bay') return;
     const bay = state.sections[el.si] && state.sections[el.si].bays[el.bi];
     if (!bay || !isBayVisible(bay)) return;
-    const m = polyMitte(el.pts);
-    if (m.x >= p1.x && m.x <= p2.x && m.y >= p1.y && m.y <= p2.y) treffer.push(bay);
+    // BERÜHRT statt „Mitte drin": schon eine Überschneidung nimmt das Feld auf.
+    if (polyTrifftRahmen(el.pts, rect)) treffer.push(bay);
   });
   if (!treffer.length) { showToast('Kein Feld im Rahmen'); return; }
   if (bordbrettModus) beendeBordbrettModus();
@@ -5989,6 +6052,48 @@ function setLeistenHoehe(px) {
   panel.style.setProperty('--leiste-h', wert);
   // Die Zeichenfläche ist jetzt kleiner – Kamera und Trefferrechnung müssen
   // das wissen, sonst liegt jeder Tipp um die Leistenhöhe daneben.
+  invalidateViewCaches();
+  applyCamera();
+}
+
+/* ── Das Werkzeug-Menü als Blatt von unten ───────────────────────────────────
+   Unter 900 px (iPad hochkant, Handy) kommt das Werkzeug-Menü nicht rechts
+   angedockt, sondern als Blatt von unten. Bisher legte es sich dabei ÜBER die
+   Zeichenfläche und verdeckte die Aktionsleiste der Mehrfachauswahl
+   vollständig – genau das, was Ä3 ausschließt („kein Overlay überdeckt ein
+   anderes"): Wer zwei Felder ausgewählt hatte und dann das Menü aufklappte,
+   sah die Knöpfe zu seiner Auswahl nicht mehr.
+
+   Deshalb reserviert das Blatt seinen Streifen, statt ihn zu überdecken: die
+   Zeichenfläche wird um seine Höhe kleiner (--wz-h) und die Aktionsleiste
+   rückt darüber. Angedockt rechts (≥ 900 px) ist --wz-h null – dort nimmt
+   sich das Panel seine Breite ohnehin aus dem Layoutfluss.               */
+
+/** Kommt das Werkzeug-Menü gerade als Blatt von unten? */
+function wzIstBlatt() {
+  const panel = document.getElementById('werkzeugPanel');
+  if (!panel || !werkzeugOffen) return false;
+  // Die Ausprägung steckt in der Media Query, nicht im JS – gefragt wird
+  // deshalb den tatsächlich gerechneten Stil, nicht die Fensterbreite.
+  return getComputedStyle(panel).position === 'fixed';
+}
+
+/** Reserviert den Streifen, den das Blatt von unten einnimmt. */
+function setWzBlattHoehe() {
+  const viewer = document.getElementById('viewerPanel');
+  const panel  = document.getElementById('werkzeugPanel');
+  if (!viewer) return;
+  let px = 0;
+  if (panel && wzIstBlatt()) {
+    // Gemessen wird über die LAYOUT-Höhe (offsetHeight) und den unteren
+    // Fensterrand, an dem das Blatt klebt: getBoundingClientRect() läge
+    // während der Auffahr-Animation (transform) noch daneben.
+    const oben = window.innerHeight - panel.offsetHeight;
+    px = Math.max(0, viewer.getBoundingClientRect().bottom - oben);
+  }
+  const wert = Math.max(0, Math.round(px)) + 'px';
+  if (viewer.style.getPropertyValue('--wz-h') === wert) return;
+  viewer.style.setProperty('--wz-h', wert);
   invalidateViewCaches();
   applyCamera();
 }
@@ -6254,10 +6359,15 @@ function setWerkzeugPanel(offen, { merken = true } = {}) {
   if (werkzeugOffen) renderWerkzeugPanel();
   // Die Zeichenflaeche wird schmaler bzw. wieder breiter.
   _vpCache = null;
-  // Im Handy-Modus tritt die untere Aktionsleiste hinter das Blatt zurück –
-  // dann gibt sie ihren reservierten Streifen wieder frei.
+  // Kommt das Menue als Blatt von unten, reserviert es seinen Streifen: die
+  // Zeichenflaeche wird um seine Hoehe kleiner, die Aktionsleiste rueckt
+  // darueber – verdeckt wird nichts.
+  setWzBlattHoehe();
   const bar = document.getElementById('mehrfachBar');
-  if (bar) requestAnimationFrame(() => setLeistenHoehe(bar.classList.contains('hidden') ? 0 : bar.offsetHeight));
+  requestAnimationFrame(() => {
+    setWzBlattHoehe();
+    if (bar) setLeistenHoehe(bar.classList.contains('hidden') ? 0 : bar.offsetHeight);
+  });
   if (autoFit) fitCameraToContent();
   applyCamera();
 }
@@ -12074,8 +12184,14 @@ function init() {
   syncToolbarOrt();
   let _modusTimer = null;
   window.addEventListener('resize', () => {
+    // Beim Drehen wechselt das Menue zwischen „rechts angedockt" und „Blatt
+    // von unten" – der reservierte Streifen muss sofort mitziehen, sonst
+    // steht die Aktionsleiste kurz im Leeren.
+    setWzBlattHoehe();
     clearTimeout(_modusTimer);
-    _modusTimer = setTimeout(() => { applyMode(); syncSidePanelOrt(); renderWzAnsicht(); }, 150);
+    _modusTimer = setTimeout(() => {
+      applyMode(); syncSidePanelOrt(); renderWzAnsicht(); setWzBlattHoehe();
+    }, 150);
   });
 
   setWerkzeugPanel(ladeWerkzeugOffen(), { merken: false });
