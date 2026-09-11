@@ -101,8 +101,8 @@ Vercel aus: das Dateisystem einer Serverless-Funktion überlebt keinen Aufruf.
 3. `EINLADUNG_PEPPER` setzen (Abschnitt 5).
 
 Fehlt die Datenbank, läuft alles andere weiter – die Anmeldung, die Aufmaß-App,
-die Vorschau-Deployments. Nur die Einladungsverwaltung meldet dann
-„noch nicht eingerichtet".
+die Vorschau-Deployments. Nur die Einladungsverwaltung und der Cloud-Speicher
+melden dann „noch nicht eingerichtet".
 
 ---
 
@@ -221,8 +221,11 @@ CLERK_SECRET_KEY=sk_test_platzhalter npm run build
 Phase 1 endet hier. Nicht enthalten und auch nicht vorbereitet über das
 Nötigste hinaus:
 
-* Cloud-Datenbank für **Projekte** – die liegen weiter im Browser.
-* Gemeinsame Projekte mehrerer Mitarbeiter.
+* Cloud-Projekte, Projektfreigaben und synchronisierte Ordner sind enthalten.
+  Die App arbeitet bei Funkloch zunächst lokal weiter und synchronisiert beim
+  nächsten Online-Moment. Gleichzeitige Änderungen werden nicht still
+  überschrieben: die App meldet einen Konflikt und verlangt zuerst das Laden
+  des Cloud-Stands.
 * Cloud-PDFs und Dateiablage.
 * Eine ausgebaute Rechteverwaltung. `lib/rollen.ts` und `lib/zugang.ts` sind
   die eine Stelle, an der das später hängen wird.

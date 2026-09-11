@@ -134,7 +134,10 @@
       </div>
 
       <footer class="hub-foot">
-        <span class="hub-foot-item"><b id="hubProjektzahl">0</b> Projekte auf diesem Gerät</span>
+        <span class="hub-foot-item"><b id="hubProjektzahl">0</b> Projekte</span>
+        <span class="hub-foot-sep">·</span>
+        <button type="button" class="hub-foot-btn" id="hubCloudBtn">Cloud aktualisieren</button>
+        <span class="hub-foot-item hub-cloud-status" id="hubCloudStatus" aria-live="polite">Cloud wird verbunden …</span>
         <span class="hub-foot-sep">·</span>
         <button type="button" class="hub-foot-btn" id="hubBackupBtn">Alle Projekte sichern</button>
         <span class="hub-foot-sep">·</span>
@@ -797,8 +800,9 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/app/core.js?v=20260908b"></script>
-  <script src="/app/script.js?v=20260908b"></script>
+  <script src="/app/script.js?v=20260910a"></script>
   <script src="/app/viewer2d.js?v=20260908b"></script>
+  <script src="/app/cloud.js?v=20260910a"></script>
   <script src="/app/shell.js?v=20260908b"></script>
 </body>
 </html>
