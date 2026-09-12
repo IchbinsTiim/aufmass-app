@@ -223,8 +223,15 @@ const CloudSpeicher = (() => {
           bekannteOrdnerIds.delete(id); snapshotsOrdner.delete(id);
         }
       }
-      schreiben(GK.projekte, projekte);
-      schreiben(GK.ordner, ordner);
+      // Während HTTP-Anfragen weitergezeichnete Daten niemals mit dem alten
+      // Sendestand ersetzen. Nur die bestätigte Revision übernehmen.
+      const abgleichen = (aktuell, gesendet) => aktuell.map(eintrag => {
+        const alt = gesendet.find(p => p.id === eintrag.id);
+        if (!alt) return eintrag;
+        return { ...eintrag, [META]: { ...alt[META], dirty: fingerabdruck(eintrag) !== fingerabdruck(alt) } };
+      });
+      schreiben(GK.projekte, abgleichen(lokaleProjekte(), projekte));
+      schreiben(GK.ordner, abgleichen(lokaleOrdner(), ordner));
       status('Cloud gespeichert', 'ok');
       if (laut && typeof showToast === 'function') showToast('Cloud-Projekte sind aktuell');
     } catch (fehler) {
@@ -235,6 +242,10 @@ const CloudSpeicher = (() => {
       }
     } finally {
       laeuft = false;
+      if (document.getElementById(STATUS_ID)?.dataset.status === 'ok' && lokaleProjekte().some(p => p[META]?.dirty && snapshotsProjekt.get(p.id) !== fingerabdruck(p))) {
+        clearTimeout(timer);
+        timer = setTimeout(() => void jetztSynchronisieren(false), 3000);
+      }
     }
   }
 
