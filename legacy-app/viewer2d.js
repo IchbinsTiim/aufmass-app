@@ -13219,3 +13219,22 @@ const ZweiDModul = (() => {
     }
   };
 })();
+
+
+// Kleine Schnittstelle für den Cloud-Zeichnungsbestand. Fachlogik bleibt hier.
+window.ZeichnungsBestand = {
+  aktuell() {
+    ZweiDModul.mount();
+    return { projektId: linkedProjectId, inhalt: JSON.parse(JSON.stringify(aktuelleZeichnungsDaten())) };
+  },
+  oeffnen(inhalt, name) {
+    ZweiDModul.mount();
+    flushAutosave2d();
+    const projekt = erzeugeZeichnung(name + ' (Kopie)', null);
+    if (!projekt) throw new Error('Lokaler Speicher voll. Zeichnung wurde nicht geöffnet.');
+    const liste = loadLinkedProjects();
+    liste.find(p => p.id === projekt.id).zeichnung2d = JSON.parse(JSON.stringify(inhalt));
+    if (!schreibeLinkedProjects(liste)) throw new Error('Lokaler Speicher voll.');
+    oeffneZeichnung(projekt.id);
+  }
+};

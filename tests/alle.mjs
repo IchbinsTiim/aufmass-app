@@ -31,6 +31,9 @@ const DATEIEN = [
   'r11-aufmass-hoehenkorrektur.mjs',
   'r12-runde7.mjs',
   'r12-huelle-schutz.mjs',
+  'r15-cloud-zeichnungen.mjs',
+  'r17-cloud-parallel.mjs',
+  'r16-cloud-zeichnungen-ui.mjs',
   'r13-einladungscodes.mjs',
   'r14-runde8.mjs'
 ];

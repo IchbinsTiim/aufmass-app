@@ -1,0 +1,16 @@
+.zeichnungs-bestand { margin:auto; box-shadow:0 20px 70px #0005; line-height:1.5; color-scheme:light; }
+.zeichnungs-bestand::backdrop { background:#142033aa; backdrop-filter:blur(3px); }
+.zeichnungs-bestand h2 { font-size:24px; letter-spacing:-.5px; margin:0 36px 12px 0; }
+.zeichnungs-bestand h3 { font-size:18px; margin:24px 0 12px; }
+.zeichnungs-bestand p { margin:8px 0 16px; color:#536477; font-size:14px; }
+.zeichnungs-bestand label { display:block; font-size:14px; font-weight:600; }
+.zeichnungs-bestand input,.zeichnungs-bestand select { font:inherit; color:#172b40; background:#f7f9fc; border:1px solid #c5ceda; border-radius:8px; min-height:44px; }
+.zeichnungs-bestand input[type=file] { display:block; width:100%; font-size:12px; border:0; padding:8px 0; background:transparent; }
+.zeichnungs-bestand button { cursor:pointer; font-family:inherit; font-size:14px; font-weight:600; line-height:1.3; color:#254463; background:#eef3f8; border:1px solid #cad5e0; padding:11px 15px; border-radius:8px; min-height:44px; }
+.zeichnungs-bestand button:disabled { opacity:.5; cursor:wait; }
+.zeichnungs-bestand button:focus-visible,.zeichnungs-bestand input:focus-visible,.zeichnungs-bestand select:focus-visible { outline:3px solid #6eafff; outline-offset:2px; }
+.zeichnungs-bestand #bestandSpeichern { color:white; background:#175dd6; border-color:#175dd6; align-self:center; }
+.zeichnungs-bestand #bestandStatus:not(:empty) { padding:12px; background:#edf4fc; border-radius:8px; color:#26435f; }
+.zeichnungs-bestand article strong { overflow-wrap:anywhere; }
+[data-zeichnungen] { white-space:normal; }
+@media(max-width:600px) { .zeichnungs-bestand { padding:18px!important; } .zeichnungs-bestand h2 { font-size:21px; } #toolbar [data-zeichnungen] { font-size:11px; max-width:85px; padding:6px; } }

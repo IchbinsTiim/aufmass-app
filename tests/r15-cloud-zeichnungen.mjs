@@ -1,0 +1,31 @@
+import { PGlite } from '@electric-sql/pglite';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import { zeichnungAnlegen, zeichnungenLesen } from '../lib/projekte/zeichnungen.ts';
+const db = new PGlite();
+await db.exec(fs.readFileSync(new URL('../db/schema.sql',import.meta.url),'utf8'));
+const sql = async (q,p) => (await db.query(q,p)).rows;
+await sql("INSERT INTO cloud_projekte(id,owner_user_id,inhalt) VALUES ('p','owner','{}')");
+await sql("INSERT INTO cloud_projekt_freigaben(projekt_id,user_id,rolle) VALUES ('p','reader','lesen'),('p','editor','bearbeiten')");
+const body = {id:'drawing-00001',name:'Nordfassade',quelle:'zeichnung',inhalt:{depth:0.73,sections:[{id:1,dir:'E',x0:0,y0:0,bays:[{id:1,len:2.57}]}]}};
+await zeichnungAnlegen(sql,'p','owner',false,body);
+await zeichnungAnlegen(sql,'p','owner',false,body);
+assert.equal((await zeichnungenLesen(sql,'p','reader',false)).length,1);
+assert.equal((await zeichnungenLesen(sql,'p','owner',false))[0].inhalt,undefined);
+assert.deepEqual((await zeichnungenLesen(sql,'p','editor',false,body.id))[0].inhalt,body.inhalt);
+await assert.rejects(zeichnungenLesen(sql,'p','stranger',false),e=>e.status===404);
+await assert.rejects(zeichnungAnlegen(sql,'p','reader',false,{...body,id:'drawing-00002'}));
+await assert.rejects(zeichnungAnlegen(sql,'p','stranger',false,{...body,id:'drawing-00002'}));
+await assert.rejects(zeichnungAnlegen(sql,'p','owner',false,{...body,name:'Geändert'}));
+await zeichnungAnlegen(sql,'p','editor',false,{...body,id:'drawing-00002'});
+await zeichnungAnlegen(sql,'p','admin',true,{...body,id:'drawing-00003'});
+assert.equal((await zeichnungenLesen(sql,'p','owner',false)).length,3);
+for (const inhalt of [{}, {sections:[],depth:-1}, {depth:1,sections:[{dir:'X',bays:[]}]}, {...body.inhalt,padding:'x'.repeat(1500000)}]) {
+  await assert.rejects(zeichnungAnlegen(sql,'p','owner',false,{...body,id:'drawing-invalid',inhalt}));
+}
+await sql("UPDATE cloud_projekte SET inhalt = '{\"zeichnung2d\":{}}' WHERE id='p'");
+assert.deepEqual((await zeichnungenLesen(sql,'p','owner',false,body.id))[0].inhalt,body.inhalt);
+await sql("DELETE FROM cloud_projekte WHERE id='p'");
+assert.equal((await sql('SELECT * FROM cloud_zeichnungen')).length,0);
+await db.close();
+console.log('Cloud-Zeichnungen: Rechte, unveränderliche Stände, Wiederholung, Upload-Prüfung und Projektlöschung bestanden.');

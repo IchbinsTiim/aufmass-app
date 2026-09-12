@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="/app/viewer2d.css?v=20260908b" />
   <link rel="stylesheet" href="/app/shell.css?v=20260908b" />
   <link rel="stylesheet" href="/app/theme.css?v=20260908b" />
+  <link rel="stylesheet" href="/app/zeichnungen.css?v=20260911">
 </head>
 <body data-modul="hub">
 
@@ -479,7 +480,7 @@
         </div>
       </header>
 
-      <div class="td-projekte-leiste">
+      <div class="td-projekte-leiste"><button type="button" class="td-leiste-btn" data-zeichnungen>Gespeicherte Zeichnungen / Upload</button>
         <input type="search" id="tdProjectSearch" class="td-projekte-suche"
                placeholder="Suche nach Name, Kunde, Adresse…" />
         <button type="button" id="tdAuswahlBtn" class="td-leiste-btn" aria-pressed="false"
@@ -528,7 +529,7 @@
     <div id="toolbar" role="toolbar" aria-label="Werkzeuge">
 
       <div class="tb-titel">
-        <a href="#/" class="back-link" title="Zurück" aria-label="Zurück">←</a>
+        <a href="#/" class="back-link" title="Zurück" aria-label="Zurück">←</a><button type="button" class="td-leiste-btn" data-zeichnungen>Zeichnung speichern</button>
         <input type="text" id="projectName" class="tb-name"
                placeholder="Zeichnung benennen…" aria-label="Name der Zeichnung"
                autocomplete="off" spellcheck="false" />
@@ -805,8 +806,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/app/core.js?v=20260908b"></script>
   <script src="/app/script.js?v=20260910a"></script>
-  <script src="/app/viewer2d.js?v=20260908b"></script>
-  <script src="/app/cloud.js?v=20260910a"></script>
+  <script src="/app/viewer2d.js?v=20260911"></script>
+  <script src="/app/cloud.js?v=20260911"></script><script src="/app/zeichnungen.js?v=20260911"></script>
   <script src="/app/shell.js?v=20260908b"></script>
 </body>
 </html>
