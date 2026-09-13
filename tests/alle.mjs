@@ -35,7 +35,8 @@ const DATEIEN = [
   'r17-cloud-parallel.mjs',
   'r16-cloud-zeichnungen-ui.mjs',
   'r13-einladungscodes.mjs',
-  'r14-runde8.mjs'
+  'r14-runde8.mjs',
+  'r18-tutorial.mjs'
 ];
 
 const fehlgeschlagen = [];

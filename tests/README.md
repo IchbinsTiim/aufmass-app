@@ -335,6 +335,30 @@ Nachbau. Der Anmeldedienst wird durch einen Ersatz vertreten, der auch
 scheitern darf: so lässt sich prüfen, dass ein Code bei einem Tippfehler nicht
 verbrennt, bei unklarem Ausgang aber gesperrt bleibt.
 
+Runde 18 (geführtes Tutorial der 2D-App):
+
+```bash
+node tests/r18-tutorial.mjs   # „?"-Knopf, elf Schritte mit Hervorhebung,
+                              # Menüs öffnen sich selbst, Aufräumen beim
+                              # Beenden, keine Datenänderung, Touch danach,
+                              # Handy/320 px/iPad hochkant
+```
+
+`r18` geht das Tutorial so ab, wie ein Nutzer es bedient: Der „?"-Knopf steht in
+der Werkzeugleiste (44 px, mit Hinweis-Punkt, solange das Tutorial nie
+abgeschlossen wurde) und lässt die Soll-Belegung der Werkzeuge aus Runde 7
+unverändert. Jeder der elf Schritte trägt Überschrift, ein bis drei Sätze,
+Fortschritt „n / 11" und hebt ein ECHTES Bedienelement hervor – nachgemessen
+wird, dass das Loch in der Abdunkelung wirklich über dem erklärten Knopf liegt
+und dass die Erklärkarte es nicht verdeckt. Geprüft wird ausdrücklich, dass das
+Tutorial nichts verändert: ein Tipp auf die Zeichenfläche bleibt wirkungslos,
+und `aktuelleZeichnungsDaten()` ist nach dem Durchlauf Zeichen für Zeichen
+dasselbe wie davor. Zum Schluss der Nachweis, dass die Bedienung unversehrt ist:
+Fingertipp wählt wieder ein Feld aus und öffnet sein Blatt, Pinch-Zoom mit zwei
+Fingern wirkt, Werkzeug-Menü und Einstellblätter arbeiten normal weiter – auf
+dem iPad quer, auf Smartphone hoch, auf einem 320-px-Gerät und auf dem iPad
+hochkant, wo „Bordbrett" und „PDF" im Menü liegen.
+
 ## Alles auf einmal
 
 ```bash
