@@ -41,7 +41,11 @@ const GK = {
   werkzeugMenue:        'geruest.2d.werkzeugMenue',
   // Feldübersicht am linken Rand ein-/ausgeklappt – bleibt über Sitzung und
   // Projektwechsel hinweg erhalten.
-  feldliste:            'geruest.2d.feldliste'
+  feldliste:            'geruest.2d.feldliste',
+  // Ob das geführte Tutorial der 2D-App schon einmal komplett durchlaufen
+  // wurde. Nur ein Hinweis-Punkt am „?"-Knopf hängt daran – das Tutorial
+  // selbst ist jederzeit über diesen Knopf erreichbar.
+  tutorial2d:           'geruest.2d.tutorial'
 };
 
 // Alte Schlüssel → neue Schlüssel. Beim ersten Start nach dem Zusammenführen

@@ -38,6 +38,8 @@ Browser nach.
 | `style.css` | Modul 1 + gemeinsame Bauteile (Buttons, Formulare, Toast) | bestand |
 | `viewer2d.js` | **Modul 2** – Fachlogik unverändert | bestand |
 | `viewer2d.css` | Modul 2, auf das aktive Modul eingegrenzt | bestand |
+| `tutorial.js` | geführtes Tutorial des 2D-Moduls (elf Schritte, hebt die vorhandenen Bedienelemente hervor) – siehe `TUTORIAL-2D.md` | neu |
+| `tutorial.css` | „?"-Knopf, Abdunkelung, Erklärkarte | neu |
 | `viewer2d.html`, `start.html` | Weiterleitungen für alte Lesezeichen | reduziert |
 | ~~`start.js`~~ | entfällt – Aufgabe übernimmt `shell.js` | entfernt |
 

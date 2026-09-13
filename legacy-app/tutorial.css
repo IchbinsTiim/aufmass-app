@@ -1,0 +1,285 @@
+/* ===========================================================================
+   Geführtes Tutorial des 2D-Moduls
+   ---------------------------------------------------------------------------
+   Drei Schichten, die nur während des Tutorials im Dokument liegen:
+
+     .tut-sperre   unsichtbarer Deckel über der ganzen Seite. Er nimmt jede
+                   Berührung auf, damit das Tutorial nichts an der Zeichnung
+                   ändern kann – weder durch einen Fehlgriff noch durch eine
+                   Wischgeste auf der Zeichenfläche.
+     .tut-schatten ein <svg>, das den Bildschirm abdunkelt und genau dort
+                   Löcher lässt, wo das erklärte Bedienelement sitzt. Die
+                   Löcher entstehen über eine Maske – das hervorgehobene
+                   Element selbst wird dabei NICHT angefasst (kein z-index,
+                   keine Klasse, kein Umhängen), sonst wäre es aus seinem
+                   Stapel- und Ereigniszusammenhang gerissen.
+     .tut-karte    die Erklärung: Fortschritt, Überschrift, zwei Sätze,
+                   Zurück / Weiter / Beenden.
+
+   Farben, Radien und Bewegung kommen aus den Design-Tokens (core.css), damit
+   das Tutorial aussieht wie der Rest von AufmaßX und nicht wie ein Fremdkörper.
+   =========================================================================== */
+
+/* ── Der „?"-Knopf in der Werkzeugleiste ─────────────────────────────────────
+   Dezent: nur ein Fragezeichen, keine Füllfarbe, kein Wort. Er steht neben
+   „Werkzeuge" und behält die 44-px-Trefferfläche der Baustellen-Handschuhe. */
+body[data-modul="2d"] .tb-hilfe-btn {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--touch, 44px);
+  min-height: var(--touch, 44px);
+  padding: 0;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, .08));
+  border-radius: var(--r-pille, 999px);
+  background: transparent;
+  color: var(--muted, #9FB3C8);
+  font-family: var(--font-display, inherit);
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--t-kurz, 160ms) var(--federnd, ease),
+              color var(--t-kurz, 160ms) var(--federnd, ease),
+              transform var(--t-kurz, 160ms) var(--federnd, ease);
+}
+body[data-modul="2d"] .tb-hilfe-btn:hover {
+  background: rgba(255, 255, 255, .10);
+  color: var(--text, #F2F6FF);
+}
+body[data-modul="2d"] .tb-hilfe-btn:active { transform: scale(.94); }
+body[data-modul="2d"] .tb-hilfe-btn.laeuft {
+  background: var(--accent-weich, rgba(76, 201, 240, .14));
+  border-color: var(--accent-rand, rgba(76, 201, 240, .38));
+  color: var(--accent-2d, #4CC9F0);
+}
+
+/* Wer das Tutorial noch nie abgeschlossen hat, sieht einen kleinen Punkt –
+   ein Hinweis, kein Dialog, der sich ungefragt über die Arbeit legt. */
+body[data-modul="2d"] .tb-hilfe-btn.neu::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2d, #4CC9F0);
+  box-shadow: 0 0 0 2px rgba(14, 22, 38, .9);
+}
+
+/* ── Deckel ──────────────────────────────────────────────────────────────── */
+.tut-sperre {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  background: transparent;
+  /* Kein Scrollen, kein Pinch-Zoom und kein Pan auf der Zeichenfläche,
+     solange das Tutorial läuft. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: default;
+}
+
+/* ── Abdunkelung mit Löchern ─────────────────────────────────────────────── */
+.tut-schatten {
+  position: fixed;
+  inset: 0;
+  z-index: 20001;
+  pointer-events: none;
+}
+.tut-maske-grund { fill: #fff; }
+.tut-loch        { fill: #000; }
+.tut-flaeche     { fill: rgba(7, 12, 22, .74); }
+
+.tut-ring {
+  fill: none;
+  stroke: var(--accent-2d, #4CC9F0);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 10px rgba(76, 201, 240, .55));
+}
+.tut-ring-aussen {
+  fill: none;
+  stroke: var(--accent-rand, rgba(76, 201, 240, .38));
+  stroke-width: 10;
+  opacity: .35;
+  animation: tut-puls 2.4s var(--federnd, ease) infinite;
+}
+@keyframes tut-puls {
+  0%, 100% { opacity: .12; }
+  50%      { opacity: .42; }
+}
+
+/* ── Erklärkarte ─────────────────────────────────────────────────────────── */
+.tut-karte {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20002;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  padding: 16px 18px 14px;
+  background: var(--surface, #16213A);
+  border: 1px solid var(--hairline-stark, rgba(255, 255, 255, .16));
+  border-radius: var(--r-karte, 20px);
+  box-shadow: var(--schatten-l, 0 24px 60px rgba(0, 0, 0, .46));
+  color: var(--text, #F2F6FF);
+  font-family: var(--font-text, sans-serif);
+  /* Notausgang für extrem flache Fenster: lieber in der Karte scrollen als
+     unten aus dem Bild laufen. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Die Karte wird per JS gesetzt; bis dahin darf sie nicht aufblitzen. */
+  opacity: 0;
+  transition: opacity var(--t-kurz, 160ms) var(--federnd, ease),
+              transform var(--t-normal, 240ms) var(--federnd, ease);
+}
+.tut-karte.sichtbar { opacity: 1; }
+
+.tut-kopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tut-marke {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display, inherit);
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent-2d, #4CC9F0);
+}
+.tut-zaehler {
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--muted, #9FB3C8);
+  white-space: nowrap;
+}
+.tut-schliessen {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, .08));
+  border-radius: var(--r-control, 12px);
+  background: var(--surface-tief, #111B2E);
+  color: var(--muted, #9FB3C8);
+  font-size: .9rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tut-schliessen:hover { color: var(--text, #F2F6FF); border-color: var(--hairline-stark, rgba(255, 255, 255, .16)); }
+
+/* Fortschritt: ein Strich je Schritt. Erledigte Schritte bleiben gefüllt –
+   so ist auf einen Blick zu sehen, wie viel noch kommt. */
+.tut-balken {
+  display: flex;
+  gap: 3px;
+  margin: 0 0 12px;
+}
+.tut-balken span {
+  flex: 1 1 0;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--hairline-stark, rgba(255, 255, 255, .16));
+}
+.tut-balken span.erledigt { background: var(--accent-rand, rgba(76, 201, 240, .38)); }
+.tut-balken span.jetzt    { background: var(--accent-2d, #4CC9F0); }
+
+.tut-titel {
+  margin: 0 0 6px;
+  font-family: var(--font-display, inherit);
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+.tut-text {
+  margin: 0;
+  font-size: .9rem;
+  line-height: 1.5;
+  color: var(--muted, #9FB3C8);
+}
+
+.tut-fuss {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.tut-btn {
+  flex: 0 0 auto;
+  min-height: var(--touch, 44px);
+  padding: 0 16px;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, .08));
+  border-radius: var(--r-control, 12px);
+  background: var(--surface-tief, #111B2E);
+  color: var(--muted, #9FB3C8);
+  font-family: var(--font-text, sans-serif);
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--t-kurz, 160ms) var(--federnd, ease),
+              border-color var(--t-kurz, 160ms) var(--federnd, ease),
+              transform var(--t-kurz, 160ms) var(--federnd, ease);
+}
+.tut-btn:hover:not(:disabled) { color: var(--text, #F2F6FF); border-color: var(--hairline-stark, rgba(255, 255, 255, .16)); }
+.tut-btn:active:not(:disabled) { transform: scale(.97); }
+.tut-btn:disabled { opacity: .38; cursor: not-allowed; }
+.tut-btn.primaer {
+  margin-left: auto;
+  background: var(--accent-2d, #4CC9F0);
+  border-color: transparent;
+  color: var(--accent-kontrast, #0E1626);
+}
+.tut-btn.primaer:hover { color: var(--accent-kontrast, #0E1626); filter: brightness(1.07); }
+.tut-btn.leise {
+  background: transparent;
+  border-color: transparent;
+  padding: 0 8px;
+  color: var(--muted-schwach, #6E819A);
+}
+.tut-btn.leise:hover { color: var(--text, #F2F6FF); background: rgba(255, 255, 255, .06); }
+
+/* ── Während das Tutorial läuft ──────────────────────────────────────────────
+   Das Einstellblatt („Feld hinzufügen") legt selbst einen dunklen Schleier
+   über die Seite. Zusammen mit dem Tutorial-Schatten wäre der Knopf in der
+   Werkzeugleiste doppelt abgedunkelt – deshalb tritt der Schleier des Blattes
+   für die Dauer des Tutorials zurück. Das Blatt selbst bleibt unverändert. */
+body.tut-laeuft .sheet-overlay { background: transparent; }
+
+/* Schmale Geräte: die Karte läuft über die Breite und bekommt etwas weniger
+   Innenabstand, damit auf 320 px noch zwei Sätze und drei Knöpfe Platz haben. */
+@media (max-width: 420px) {
+  .tut-karte { padding: 13px 14px 12px; border-radius: var(--r-karte-klein, 16px); }
+  .tut-titel { font-size: 1rem; }
+  .tut-text  { font-size: .86rem; }
+  .tut-btn   { padding: 0 12px; font-size: .86rem; }
+  .tut-btn.leise { padding: 0 6px; }
+}
+/* Flache Fenster (Handy im Querformat): Höhe ist hier die knappe Größe. */
+@media (max-height: 480px) {
+  .tut-karte { padding: 11px 14px 11px; }
+  .tut-balken { margin-bottom: 9px; }
+  .tut-fuss { margin-top: 11px; }
+  .tut-text { font-size: .84rem; line-height: 1.42; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tut-ring-aussen { animation: none; opacity: .3; }
+}

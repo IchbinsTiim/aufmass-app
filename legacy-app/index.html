@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="/app/shell.css?v=20260908b" />
   <link rel="stylesheet" href="/app/theme.css?v=20260908b" />
   <link rel="stylesheet" href="/app/zeichnungen.css?v=20260911">
+  <link rel="stylesheet" href="/app/tutorial.css?v=20260913" />
 </head>
 <body data-modul="hub">
 
@@ -588,6 +589,16 @@
 
         <span class="tb-trenner" id="tbTrennerWerkzeug" aria-hidden="true"></span>
 
+        <!-- Hilfe: startet das geführte Tutorial DIREKT in der Zeichnung (es
+             hebt die echten Knöpfe hervor, es gibt keine zweite Oberfläche
+             dafür). Bewusst dezent – nur ein Fragezeichen, keine Füllfarbe,
+             kein Wort – und bewusst hier, wo gearbeitet wird. Er trägt
+             absichtlich NICHT die Klasse `tb-btn`: die Soll-Belegung der
+             Werkzeuge („Feld … Werkzeuge") bleibt damit unverändert. -->
+        <button type="button" id="tutorialBtn" class="tb-hilfe-btn"
+                title="Tutorial: die 2D-App Schritt für Schritt"
+                aria-label="Tutorial starten">?</button>
+
         <!-- Der Pfeil öffnet das Werkzeug-Panel: Auswahl, Abmessungen,
              Zusatzbauteile, Aktionen. Er bleibt bewusst der LETZTE Knopf der
              Leiste – dort sucht man ein „mehr". -->
@@ -808,6 +819,9 @@
   <script src="/app/script.js?v=20260910a"></script>
   <script src="/app/viewer2d.js?v=20260911"></script>
   <script src="/app/cloud.js?v=20260911"></script><script src="/app/zeichnungen.js?v=20260911"></script>
+  <!-- Das Tutorial liegt bewusst NACH viewer2d.js: es ruft dessen Funktionen
+       (closeSheet, openAddSheet, setWerkzeugPanel) auf, statt sie nachzubauen. -->
+  <script src="/app/tutorial.js?v=20260913"></script>
   <script src="/app/shell.js?v=20260908b"></script>
 </body>
 </html>
