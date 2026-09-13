@@ -5,7 +5,8 @@ import { auth } from '@clerk/nextjs/server';
 import { abfrageHolen, pepperHolen } from '@/lib/einladungen/db';
 import { codeErzeugen, codeFormatieren, codeNormalisieren } from '@/lib/einladungen/code';
 import { einladungAnlegen, einladungWiderrufen } from '@/lib/einladungen/kern';
-import { zugangPruefen } from '@/lib/zugang';
+import { STANDARD_ROLLE, hatRecht } from '@/lib/rollen';
+import { rollenHolen, zugangMitRechten } from '@/lib/zugang';
 
 /**
  * Aktionen der Einladungsverwaltung.
@@ -16,9 +17,9 @@ import { zugangPruefen } from '@/lib/zugang';
  */
 
 async function adminOderRaus() {
-  const zugang = await zugangPruefen();
-  if (!zugang.erlaubt || zugang.rolle !== 'admin') {
-    throw new Error('Nur Administratoren dürfen Einladungen verwalten.');
+  const zugang = await zugangMitRechten();
+  if (!zugang.erlaubt || !hatRecht(zugang.rechte, 'mitarbeiter.verwalten')) {
+    throw new Error('Dafür fehlt Ihrer Rolle die Berechtigung.');
   }
   const { userId } = await auth();
   const abfrage = abfrageHolen();
@@ -48,7 +49,14 @@ export async function codeAnlegen(
 
   const tage = Math.min(Math.max(Number(formular.get('tage') || 7), 1), 90);
   const notiz = String(formular.get('notiz') || '').trim().slice(0, 200) || null;
-  const rolle = formular.get('rolle') === 'admin' ? 'admin' : 'mitarbeiter';
+
+  // Eingeladen wird in eine Rolle, die es auch gibt. Eine erfundene Kennung
+  // aus einer manipulierten Auswahlliste landet sonst als Freischaltung in
+  // den Metadaten eines Clerk-Kontos – mit einer Rolle, deren Rechte
+  // niemand festgelegt hat.
+  const gewuenscht = String(formular.get('rolle') || '');
+  const rollen = await rollenHolen();
+  const rolle = rollen.some(r => r.id === gewuenscht) ? gewuenscht : STANDARD_ROLLE;
 
   const code = codeErzeugen();
   const normalisiert = codeNormalisieren(code);

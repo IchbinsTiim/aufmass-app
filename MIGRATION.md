@@ -60,7 +60,9 @@ erledigen und lassen sich nicht aus dem Quellcode heraus setzen:
    { "metadata": "{{user.public_metadata}}", "email": "{{user.primary_email_address}}" }
    ```
    Ohne diesen Eintrag funktioniert alles ebenso, nur wird bei jedem Zugriff
-   der Benutzerdatensatz nachgeladen.
+   der Benutzerdatensatz nachgeladen. `metadata` überträgt dabei auch den
+   Status eines Zugangs (`deaktiviert`) – beides steht in denselben
+   Public-Metadaten.
 
 4. **Schlüssel** aus *API Keys* übernehmen (Abschnitt 5).
 
@@ -102,7 +104,21 @@ Vercel aus: das Dateisystem einer Serverless-Funktion überlebt keinen Aufruf.
 
 Fehlt die Datenbank, läuft alles andere weiter – die Anmeldung, die Aufmaß-App,
 die Vorschau-Deployments. Nur die Einladungsverwaltung und der Cloud-Speicher
-melden dann „noch nicht eingerichtet".
+melden dann „noch nicht eingerichtet"; die Rollenverwaltung fällt auf die
+beiden mitgelieferten Rollen zurück.
+
+**Bestehende Datenbank nachziehen:** Wer die Tabellen schon angelegt hatte,
+führt zusätzlich die Migration aus – sie bringt Rollen, Aktivitätsprotokoll
+und die Herkunftsspalten (`erstellt_von` / `geaendert_von`):
+
+```bash
+psql "$DATABASE_URL" -f db/migrations/20260913_mitarbeiter_rollen.sql
+```
+
+Die Migration ist wiederholbar und verliert nichts: Vorhandene Projekte
+bekommen ihren Eigentümer als Ersteller nachgetragen, eine bereits angepasste
+Rolle wird nicht zurückgesetzt. Eine frische Datenbank braucht sie nicht –
+`db/schema.sql` enthält denselben Stand.
 
 ---
 
@@ -227,5 +243,65 @@ Nötigste hinaus:
   überschrieben: die App meldet einen Konflikt und verlangt zuerst das Laden
   des Cloud-Stands.
 * Cloud-PDFs und Dateiablage.
-* Eine ausgebaute Rechteverwaltung. `lib/rollen.ts` und `lib/zugang.ts` sind
-  die eine Stelle, an der das später hängen wird.
+
+Die Rechteverwaltung ist inzwischen gebaut (siehe Abschnitt 10).
+
+---
+
+## 10. Mitarbeiter, Rollen und Rechte
+
+Seit dieser Runde verwaltet der Betrieb seine Mitarbeiter in der Anwendung
+selbst – unter `/mitarbeiter`, `/mitarbeiter/<id>` und `/rollen`.
+
+### Wo was liegt
+
+| Angabe | Quelle |
+|---|---|
+| Name, E-Mail, Registrierung, letzter Login | Clerk |
+| Rolle eines Benutzers | Clerk, `publicMetadata.rolle` |
+| Status eines Zugangs | Clerk, `publicMetadata.status` (fehlt = aktiv) |
+| Welche Rechte eine Rolle hat | Postgres, Tabelle `rollen` |
+| Wer welchen Datensatz angelegt hat | Postgres, `erstellt_von` / `geaendert_von` |
+| Ereignisprotokoll | Postgres, Tabelle `aktivitaeten` |
+
+Bewusst KEINE gespiegelte Benutzertabelle: Benutzerstammdaten führt der
+Anmeldedienst, und zwei Kopien derselben Wahrheit laufen irgendwann
+auseinander. Umgekehrt gehört das, was Clerk nicht kennt – Rechte, Herkunft,
+Protokoll –, in die Datenbank.
+
+### Rechte
+
+Der Katalog steht in `lib/rollen.ts` (`RECHTE`). Ein neues Recht ist ein
+Eintrag in dieser Liste und sonst nichts: Es erscheint automatisch in der
+Rollenverwaltung, und keine bestehende Rolle bekommt es stillschweigend.
+Geprüft werden Rechte IMMER serverseitig:
+
+* Seiten über `seiteSchuetzen()` (`app/schutz.ts`),
+* Server Actions über `aktionSchuetzen()` – sie sind eigene Endpunkte und
+  prüfen deshalb noch einmal selbst,
+* Cloud-Routen über `cloudZugriff('…')` (`lib/projekte/zugriff.ts`).
+
+Die Rolle `admin` darf immer alles, auch künftige Rechte (`"*"`), und lässt
+sich nicht beschneiden – sonst könnte sich ein Betrieb aus seiner eigenen
+Verwaltung aussperren.
+
+### Mitarbeiter deaktivieren
+
+„Löschen" heißt in AufmaßX **deaktivieren**, und das aus einem fachlichen
+Grund: Projekte, Aufmaße und Zeichnungen gehören dem Betrieb, nicht dem
+Konto. Sie bleiben vollständig erhalten, einschließlich des Vermerks, wer sie
+angelegt hat.
+
+Deaktivieren sperrt doppelt:
+
+1. Die Rolle wird entzogen und in `publicMetadata.rolleVorher` gemerkt –
+   damit greift die Sperre in `lib/zugang.ts` beim nächsten Aufruf,
+   unabhängig davon, ob Clerk gerade erreichbar ist.
+2. Das Konto wird bei Clerk gesperrt (`banUser`) – damit endet die laufende
+   Sitzung sofort statt erst bei der nächsten Token-Erneuerung.
+
+Freischalten macht beides rückgängig und gibt die gemerkte Rolle zurück.
+
+Zwei Sperren verhindern das versehentliche Aussperren: Niemand deaktiviert
+sich selbst oder ändert die eigene Rolle, und der letzte Zugang mit dem Recht
+„Mitarbeiter verwalten" bleibt bestehen. Beides wird serverseitig geprüft.

@@ -118,8 +118,13 @@ const kopf = await bau(async () => {
   await buildPdf('farbe');
   return window.__pdfSaved.calls.filter(c => c[0] === 'text').map(c => String(c[2]));
 });
-assert(kopf.some(t => /Skizze 1 von \d+ .*Felder A1 – A\d+/.test(t)),
-  `die Kopfzeile nennt die Felder des Blattes: „${kopf.find(t => /Skizze 1 von/.test(t)) || '–'}"`);
+// Seit die Feldbezeichnungen nicht mehr im Plan stehen, nennt die Kopfzeile
+// nicht mehr „Felder A1 – A9" (das wäre ein Verweis ins Leere), sondern wie
+// viel Gerüst auf diesem Blatt steht.
+assert(kopf.some(t => /Skizze 1 von \d+ .*\d+ Felder\s+·\s+[\d,]+ m/.test(t)),
+  `die Kopfzeile nennt den Umfang des Blattes: „${kopf.find(t => /Skizze 1 von/.test(t)) || '–'}"`);
+assert(!kopf.some(t => /Felder A\d/.test(t)),
+  'die Kopfzeile verweist nicht mehr auf Feldbezeichnungen');
 // Die frühere eigene Übersichtsseite ist entfallen – ein Blatt, das keine
 // Zeichnung zeigt, kostet nur Papier. Die Lage im Gesamtplan steht als kleine
 // Karte auf jedem Planblatt selbst.

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { abfrageHolen } from '@/lib/einladungen/db';
+import { aktivitaetNotieren } from '@/lib/mitarbeiter/aktivitaet';
 import { cloudZugriff } from '@/lib/projekte/zugriff';
 import { ZeichnungsFehler, zeichnungenLesen, zeichnungAnlegen } from '@/lib/projekte/zeichnungen';
 import { antwortFehler } from '../../../arbeitsbereich/route';
@@ -9,7 +10,8 @@ type Kontext = { params: Promise<{ id: string }> };
 const headers = { 'Cache-Control': 'private, no-store' };
 async function ausfuehren(request: Request, ctx: Kontext, schreiben: boolean) {
   try {
-    const zugang = await cloudZugriff();
+    // Lesen darf jeder Freigeschaltete; speichern nur, wer zeichnen darf.
+    const zugang = await cloudZugriff(schreiben ? 'zeichnungen.erstellen' : undefined);
     const { id } = await ctx.params;
     const db = abfrageHolen();
     if (!db) throw new ZeichnungsFehler(503, 'Cloud-Speicher noch nicht eingerichtet.');
@@ -27,7 +29,10 @@ async function ausfuehren(request: Request, ctx: Kontext, schreiben: boolean) {
     let body;
     try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
     catch { throw new ZeichnungsFehler(400, 'Ungültige JSON-Datei.'); }
-    return NextResponse.json({ zeichnung: await zeichnungAnlegen(db,id,zugang.userId,zugang.istAdmin,body) }, { status:201, headers });
+    const zeichnung = await zeichnungAnlegen(db,id,zugang.userId,zugang.istAdmin,body);
+    await aktivitaetNotieren(db, { userId: zugang.userId, art: 'zeichnung.gespeichert',
+      objektId: String(zeichnung.id), objektTitel: String(zeichnung.name || '') });
+    return NextResponse.json({ zeichnung }, { status:201, headers });
   } catch (error) {
     if (error instanceof ZeichnungsFehler) return NextResponse.json({error:error.message}, {status:error.status, headers});
     return antwortFehler(error);

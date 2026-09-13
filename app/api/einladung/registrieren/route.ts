@@ -61,7 +61,7 @@ export async function POST(req: Request) {
 async function clerkKontoAnlegen(auftrag: {
   benutzername: string; passwort: string; email?: string;
   vorname?: string; nachname?: string;
-  rolle: 'admin' | 'mitarbeiter'; einladungId: string;
+  rolle: string; einladungId: string;
 }) {
   try {
     const clerk = await clerkClient();

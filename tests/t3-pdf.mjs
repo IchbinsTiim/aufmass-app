@@ -86,10 +86,13 @@ assert(Object.values(pages).every(t => t.some(x => /Gerüsttiefe 0,73 m/.test(x)
 assert(Object.values(pages).every(t => t.some(x => /^Seite \d+ von \d+$/.test(x))),
   'die Fußzeile besteht nur aus der Seitenzahl');
 
-// Die Zeichnung bleibt beschriftet.
-assert(pages[1].some(x => x === 'A1') && pages[1].some(x => x === '2,57')
-    && pages[1].some(x => /^h 8,50/.test(x)),
-  'die Zeichnung zeigt Feldbezeichnung, Feldlänge und Höhe');
+// Die Zeichnung bleibt beschriftet – aber ohne Feldbezeichnung: Feldlänge und
+// Höhe stehen im Plan, die Kennung „A1" nicht mehr. Welcher Achse ein Feld
+// angehört, zeigt seine Farbe (und die Legende darunter).
+assert(pages[1].some(x => x === '2,57') && pages[1].some(x => /^h 8,50/.test(x)),
+  'die Zeichnung zeigt Feldlänge und Höhe');
+assert(!pages[1].some(x => /^A\d+$/.test(x)),
+  'die Zeichnung zeigt KEINE Feldbezeichnung (A1, A2 …) mehr');
 assert(pages[1].some(x => x === 'Konsole') && pages[1].some(x => x === 'Netz'),
   'unter der Skizze steht eine Legende der verwendeten Positionsarten');
 assert(!pages[1].some(x => /Bordbrett/.test(x)),
@@ -158,8 +161,8 @@ const planPages = Object.entries(pages).filter(([, t]) => istPlanseite(t)).map((
 assert(planPages.length >= 3, `großer Plan wird auf ${planPages.length} Planblätter verteilt`);
 assert(planPages.every(p => /Skizze \d+ von \d+/.test(pages[p].join('\n'))),
   'jedes Planblatt ist als „Skizze x von y" gekennzeichnet');
-assert(planPages.every(p => pages[p].some(x => /Felder A\d+ – A\d+|Feld A\d+/.test(x))),
-  'jedes Planblatt nennt die Felder, die es zeigt');
+assert(planPages.every(p => pages[p].some(x => /\d+ Felder?\s+·\s+[\d,]+ m/.test(x))),
+  'jedes Planblatt nennt Anzahl und Länge der Felder, die es zeigt');
 assert(planPages.every(p => pages[p].some(x => /^LAGE IM GESAMTPLAN/.test(x))),
   'jedes Planblatt zeigt seine Lage im Gesamtplan (Übersichts-Thumbnail)');
 const scaleTexts = [...new Set(Object.values(pages).flat()

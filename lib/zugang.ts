@@ -1,5 +1,18 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
-import { STANDARD_ROLLE, type Rolle } from './rollen';
+import { abfrageHolen } from './einladungen/db';
+import { rollenLaden } from './mitarbeiter/rollen-db';
+import { STANDARD_ROLLE, hatRecht, rechteVonRolle, rolleFinden, type Rolle } from './rollen';
+import {
+  DEAKTIVIERT, GESPERRT, STATUS_DEAKTIVIERT, adminEmailsAus, zugangAusAngaben,
+  type Zugang, type Zugangsgrund
+} from './zugang-regeln';
+
+// Die Regeln selbst stehen in lib/zugang-regeln.ts – ohne Clerk, ohne Next.js
+// und damit für sich prüfbar. Hier werden sie nur mit den Angaben gefüttert,
+// die der Anmeldedienst liefert. Wiederausgegeben, damit Aufrufer weiterhin
+// alles aus einer Datei beziehen.
+export { STATUS_DEAKTIVIERT, zugangAusAngaben };
+export type { Zugang, Zugangsgrund };
 
 /**
  * Zugang – AufmaßX ist eine interne Anwendung. Wer nicht eingeladen wurde,
@@ -21,37 +34,28 @@ import { STANDARD_ROLLE, type Rolle } from './rollen';
  * Der erste Admin ist das Henne-Ei-Problem: er kann sich die Rolle nicht
  * selbst geben, bevor er hineinkommt. Dafür gibt es AUFMASSX_ADMIN_EMAILS –
  * eine kommagetrennte Liste von E-Mail-Adressen, die immer als Admin gelten.
+ *
+ * SEIT DER MITARBEITERVERWALTUNG kommen zwei Dinge dazu:
+ *
+ *  • In `publicMetadata.rolle` darf jede Rollenkennung stehen, auch die einer
+ *    selbst angelegten Rolle. Was diese Rolle DARF, steht in der Tabelle
+ *    `rollen` – abgefragt wird das nur dort, wo ein Recht gebraucht wird
+ *    (siehe `rechteHolen`), nicht bei jedem Seitenaufruf.
+ *  • Ein DEAKTIVIERTER Zugang kommt nicht mehr hinein. Beim Deaktivieren
+ *    nimmt die Verwaltung dem Konto die Rolle weg und merkt sie sich in
+ *    `publicMetadata.rolleVorher`; zusätzlich wird das Konto bei Clerk
+ *    gesperrt. Ohne Rolle greift die Sperre unten schon beim nächsten
+ *    Aufruf – auch dann, wenn die Sperre bei Clerk einmal nicht durchgeht.
  */
 
-export type Zugangsgrund =
-  | 'nicht-angemeldet'
-  | 'rolle'
-  | 'admin-liste'
-  | 'nicht-freigeschaltet';
-
-export type Zugang = {
-  erlaubt: boolean;
-  rolle: Rolle;
-  grund: Zugangsgrund;
-};
-
 function adminListe(): string[] {
-  return (process.env.AUFMASSX_ADMIN_EMAILS ?? '')
-    .split(',')
-    .map(e => e.trim().toLowerCase())
-    .filter(Boolean);
+  return adminEmailsAus(process.env.AUFMASSX_ADMIN_EMAILS);
 }
-
-function istRolle(wert: unknown): wert is Rolle {
-  return wert === 'admin' || wert === 'mitarbeiter';
-}
-
-const GESPERRT: Zugang = { erlaubt: false, rolle: STANDARD_ROLLE, grund: 'nicht-freigeschaltet' };
 
 /**
  * Prüft Anmeldung UND Freischaltung.
  *
- * Der Regelfall kostet keinen Netzaufruf: Rolle und E-Mail stehen im
+ * Der Regelfall kostet keinen Netzaufruf: Rolle, Status und E-Mail stehen im
  * Session-Token, sofern im Clerk-Dashboard die Vorlage aus MIGRATION.md
  * hinterlegt ist. Fehlt sie, wird der Benutzerdatensatz nachgeladen – das
  * kostet, ist aber nie falsch. So bleibt die Sperre auch bei
@@ -62,34 +66,87 @@ export async function zugangPruefen(): Promise<Zugang> {
   if (!userId) return { erlaubt: false, rolle: STANDARD_ROLLE, grund: 'nicht-angemeldet' };
 
   const claims = sessionClaims as
-    | { metadata?: { rolle?: unknown }; email?: unknown }
+    | { metadata?: { rolle?: unknown; status?: unknown }; email?: unknown }
     | null
     | undefined;
 
-  const rolleAusClaim = claims?.metadata?.rolle;
-  if (istRolle(rolleAusClaim)) {
-    return { erlaubt: true, rolle: rolleAusClaim, grund: 'rolle' };
-  }
+  const ausToken = zugangAusAngaben(
+    claims?.metadata,
+    typeof claims?.email === 'string' ? [claims.email] : [],
+    adminListe()
+  );
+  if (ausToken) return ausToken;
 
-  const emailAusClaim = typeof claims?.email === 'string' ? claims.email.toLowerCase() : null;
-  if (emailAusClaim && adminListe().includes(emailAusClaim)) {
-    return { erlaubt: true, rolle: 'admin', grund: 'admin-liste' };
-  }
-
-  // Kein brauchbarer Claim – am Benutzerdatensatz nachsehen.
+  // Keine Metadaten im Token – am Benutzerdatensatz nachsehen.
   const user = await currentUser();
   if (!user) return GESPERRT;
 
-  const rolleAusMetadata = user.publicMetadata?.rolle;
-  if (istRolle(rolleAusMetadata)) {
-    return { erlaubt: true, rolle: rolleAusMetadata, grund: 'rolle' };
+  return zugangAusAngaben(
+    user.publicMetadata ?? {},
+    user.emailAddresses.map(a => a.emailAddress),
+    adminListe()
+  ) ?? GESPERRT;
+}
+
+/* ── Rechte ─────────────────────────────────────────────────────────────────
+   Was eine Rolle darf, steht in der Datenbank und ändert sich selten – eine
+   Abfrage je Anfrage wäre trotzdem spürbar, weil die 2D-App im Sekundentakt
+   speichert. Deshalb ein kurzer Zwischenspeicher je Serverinstanz: Eine
+   Rechteänderung greift damit spätestens nach ROLLEN_FRISCH Millisekunden.
+   Länger zu puffern wäre eine Sicherheitsfrage, kürzer brächte nichts.      */
+
+const ROLLEN_FRISCH = 30_000;
+let rollenCache: { zeit: number; rollen: Rolle[] } | null = null;
+
+export async function rollenHolen(): Promise<Rolle[]> {
+  const jetzt = Date.now();
+  if (rollenCache && jetzt - rollenCache.zeit < ROLLEN_FRISCH) return rollenCache.rollen;
+  let rollen: Rolle[];
+  try {
+    rollen = await rollenLaden(abfrageHolen());
+  } catch {
+    // Datenbank gerade nicht erreichbar: Mit den mitgelieferten Rollen
+    // weiterarbeiten ist richtig – sie sind die engere Annahme, nicht die
+    // weitere: Eigene Rollen mit zusätzlichen Rechten greifen dann nicht.
+    rollen = await rollenLaden(null);
   }
+  rollenCache = { zeit: jetzt, rollen };
+  return rollen;
+}
 
-  const liste = adminListe();
-  const trefferAdmin = user.emailAddresses.some(a =>
-    liste.includes(a.emailAddress.toLowerCase())
-  );
-  if (trefferAdmin) return { erlaubt: true, rolle: 'admin', grund: 'admin-liste' };
+/** Nur für Tests und nach dem Speichern einer Rolle. */
+export function rollenCacheLeeren(): void {
+  rollenCache = null;
+}
 
-  return GESPERRT;
+export type ZugangMitRechten = Zugang & {
+  userId: string | null;
+  rechte: Set<string>;
+  rolleObjekt: Rolle | null;
+};
+
+/**
+ * Zugang samt aufgelöster Rechte – die Grundlage jeder serverseitigen
+ * Prüfung. Ein ausgeblendeter Knopf ist keine Absicherung; erlaubt ist, was
+ * hier herauskommt.
+ */
+export async function zugangMitRechten(): Promise<ZugangMitRechten> {
+  const [zugang, anmeldung] = await Promise.all([zugangPruefen(), auth()]);
+  if (!zugang.erlaubt) {
+    return { ...zugang, userId: anmeldung.userId ?? null, rechte: new Set(), rolleObjekt: null };
+  }
+  const rollen = await rollenHolen();
+  const rolleObjekt = rolleFinden(rollen, zugang.rolle);
+  return {
+    ...zugang,
+    userId: anmeldung.userId ?? null,
+    rolleObjekt,
+    rechte: rechteVonRolle(rolleObjekt)
+  };
+}
+
+/** Kurzform für Seiten: „darf der angemeldete Benutzer das?" */
+export async function darf(recht: string): Promise<boolean> {
+  const zugang = await zugangMitRechten();
+  return zugang.erlaubt && hatRecht(zugang.rechte, recht);
 }

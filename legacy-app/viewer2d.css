@@ -3155,8 +3155,37 @@ body[data-modul="2d"] #toolbar.tb-zweizeilig {
 }
 body[data-modul="2d"][data-mode="iphone"] .tb-titel,
 body[data-modul="2d"] .tb-zweizeilig .tb-titel { order: 1; flex: 1 1 8rem; }
+/* Die Kennzahlen dürfen schrumpfen und notfalls umbrechen.
+   Vorher waren sie unschrumpfbar (`flex: 0 0 auto`): Kamen zu den Feldern
+   Bordbrett- und Warnhinweis dazu, wurde die Zeile zu breit – und weil der
+   Titelblock seine Knöpfe nicht weiter zusammenschieben kann, lagen die
+   Kennzahlen ÜBER dem Menü-Knopf. Auf dem Handy war der Knopf damit nicht
+   mehr zu treffen. Jetzt weichen die Kennzahlen in eine zweite Reihe aus. */
 body[data-modul="2d"][data-mode="iphone"] .tb-werte,
-body[data-modul="2d"] .tb-zweizeilig .tb-werte { order: 2; }
+body[data-modul="2d"] .tb-zweizeilig .tb-werte {
+  order: 2;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+/* … und der Titelblock muss so schmal werden können, dass daneben noch Platz
+   für sie bleibt. Auf dem Handy wird „Zeichnung speichern" deshalb zum
+   Symbol; der Name des Knopfes bleibt für die Vorlesehilfe erhalten. */
+body[data-modul="2d"][data-mode="iphone"] .tb-titel [data-zeichnungen],
+body[data-modul="2d"] .tb-zweizeilig .tb-titel [data-zeichnungen] {
+  flex: 0 0 auto;
+  width: 44px;
+  padding: 0;
+  font-size: 0;
+}
+body[data-modul="2d"][data-mode="iphone"] .tb-titel [data-zeichnungen]::before,
+body[data-modul="2d"] .tb-zweizeilig .tb-titel [data-zeichnungen]::before {
+  content: '\1F4BE';
+  font-size: 1.05rem;
+  line-height: 1;
+}
 body[data-modul="2d"][data-mode="iphone"] .tb-tools,
 body[data-modul="2d"] .tb-zweizeilig .tb-tools {
   order: 3;
@@ -3360,7 +3389,14 @@ body[data-modul="2d"] .tb-menue-btn:active { transform: scale(.96); }
     padding: 5px 8px 7px;
   }
   body[data-modul="2d"] .tb-titel { order: 1; flex: 1 1 8rem; }
-  body[data-modul="2d"] .tb-werte { order: 2; }
+  body[data-modul="2d"] .tb-werte {
+    order: 2;
+    flex: 0 1 auto;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 4px;
+  }
   body[data-modul="2d"] .tb-tools {
     order: 3;
     flex: 1 1 100%;

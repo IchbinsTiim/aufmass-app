@@ -40,6 +40,7 @@ node tests/t1-abschnitte.mjs    # Achsen: anlegen/zuordnen/löschen, Anzeige obe
 node tests/t2-rotation.mjs 80   # Auswahl/Drehen ohne Verzögerung, Renderaufwand (Argument = Feldanzahl)
 node tests/t3-pdf.mjs           # PDF: Seite 1 Skizze / danach das Aufmaß, Blatteinteilung,
                                 #      Achsen auf einer Seite, Tabellenumbruch, zwei Ausgaben
+                                #      (seit Runde 20 ohne Feldbezeichnungen im Plan)
 node tests/fitcheck.mjs         # geometrischer Nachweis: kein Blattinhalt ragt in Kopf-/Fußzeile
 node tests/e2e.mjs              # durchgängiger Ablauf über die Oberfläche (Vorlage → Abschnitt → Drehen → PDF)
 ```
@@ -317,7 +318,10 @@ node tests/r12-huelle-schutz.mjs   # nichts von der App ohne Anmeldung, alte
 `r12` baut die Anwendung (falls nötig), startet sie und ruft sie ab wie ein
 Unbeteiligter: ohne Sitzung, ohne Cookie. Für jede Adresse gilt: kein 200 und
 kein Inhalt, an dem sich die App erkennen ließe. Geprüft wird ausdrücklich auch
-`/aufmass_final_app/…` – die Adresse aus der Zeit vor der Anmeldung.
+`/aufmass_final_app/…` – die Adresse aus der Zeit vor der Anmeldung – sowie
+seit Runde 19 `/mitarbeiter`, `/mitarbeiter/<id>` und `/rollen`: Dort stehen
+Namen, E-Mail-Adressen und Anmeldezeitpunkte, also genau das, was ohne
+Anmeldung nirgends auftauchen darf.
 
 Runde 13 (Einladungscodes):
 
@@ -358,6 +362,70 @@ Fingertipp wählt wieder ein Feld aus und öffnet sein Blatt, Pinch-Zoom mit zwe
 Fingern wirkt, Werkzeug-Menü und Einstellblätter arbeiten normal weiter – auf
 dem iPad quer, auf Smartphone hoch, auf einem 320-px-Gerät und auf dem iPad
 hochkant, wo „Bordbrett" und „PDF" im Menü liegen.
+
+Runde 19 (Mitarbeiterverwaltung, eigene Rollen, Rechte):
+
+```bash
+node tests/r19-rollen-rechte.mjs    # Rechtekatalog, Rollen in der Datenbank,
+                                    # Migration (wiederholbar, verlustfrei),
+                                    # „wer hat was angelegt", Aktivitäten,
+                                    # Deaktivieren ohne Datenverlust,
+                                    # Notbetrieb ohne DATABASE_URL
+```
+
+`r19` läuft wie `r13` gegen ein echtes Postgres im Speicher (PGlite) mit dem
+Schema aus `db/schema.sql` – also gegen dieselben SQL-Anweisungen, die später
+auf Neon laufen. Clerk kommt nicht vor: Die Benutzer liegen dort, aber alles,
+was diese Runde entscheidet, entscheidet sie ohne Anmeldedienst.
+
+Drei Punkte sind die eigentliche Abnahme:
+
+* **Erweiterbarkeit** – ein neu erfundenes Recht hat eine bestehende Rolle
+  NICHT automatisch, der Administrator (`"*"`) dagegen schon. Unbekannte
+  Rechte werden beim Speichern verworfen.
+* **Kein Aussperren** – die Rolle „admin" lässt sich umbenennen, aber nicht
+  beschneiden; eine Systemrolle lässt sich nicht löschen; eine noch vergebene
+  Rolle auch nicht.
+* **Kein Datenverlust** – die Werke eines Mitarbeiters hängen an
+  `erstellt_von` und bleiben nach dem Deaktivieren vollständig in seiner
+  Akte. Die Migration trägt beim Altbestand den Eigentümer als Ersteller nach
+  und lässt einen zweiten Lauf ohne Wirkung.
+
+Runde 20 (Beschriftungssystem der PDF):
+
+```bash
+node tests/r20-pdf-beschriftung.mjs # keine Feldbezeichnungen im Plan, keine
+                                    # Überdeckungen, nichts auf einer
+                                    # Gerüstfläche, Führungslinien, 6 pt
+```
+
+`r20` misst an den tatsächlich gezeichneten Beschriftungen (die Aufrufe von
+`pdfPill`/`pdfText` werden protokolliert) und geht fünf Gerüste durch: eine
+gerade Wand, gestaffelte Höhen, ein geschlossenes Haus mit vier Ecken, eine
+schräg verlaufende Wand und zwei dicht nebeneinanderliegende Bahnen. In jedem
+Fall gilt: keine Kennung „A1" mehr im Plan, keine zwei Beschriftungen
+überdecken sich, jede Feldlänge und jede Höhe ist vorhanden, keine
+Beschriftung liegt auf einem Gerüstfeld, nichts unter 6 pt. Die Gegenprobe
+zählt, wie viele Überlagerungen es OHNE die Entzerrung gäbe – sonst prüfte
+der Test eine Lage, die gar nicht eintritt.
+
+Runde 21 (ruhige Zeichenfläche und Zurück-Pfeil):
+
+```bash
+node tests/r21-zeichnung-navigation.mjs  # kein Achsentext unter den Feldern,
+                                         # Achse über Farbe, Achsname nur bei
+                                         # Auswahl, Bezeichnungen in Menüs,
+                                         # Zurück-Pfeil je nach Herkunft
+```
+
+`r21` prüft beide Seiten der Änderung: Die Zeichenfläche zeigt keine
+Feldbezeichnung und keinen Achsnamen mehr, wohl aber weiterhin Maße, Höhen
+und die Achsfarbe – und die Bezeichnungen gibt es unverändert in
+Feldübersicht, Auswahl-Anzeige und Feld-Blatt. Beim Zurück-Pfeil wird jeder
+Weg einzeln nachgegangen: aus der Zeichnungsübersicht, aus dem Aufmaß, vom
+Startbildschirm, per Deep-Link und mit verknüpftem Projekt. Genau der letzte
+Fall schickte den Pfeil früher ins andere Programm.
+
 
 ## Alles auf einmal
 

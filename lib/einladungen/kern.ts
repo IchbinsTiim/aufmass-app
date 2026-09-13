@@ -19,7 +19,9 @@ export type Einladung = {
   id: string;
   codePraefix: string;
   status: CodeStatus;
-  rolle: 'admin' | 'mitarbeiter';
+  /* Kennung einer Rolle aus lib/rollen.ts – seit der Rollenverwaltung auch
+     die einer selbst angelegten Rolle, nicht mehr nur 'admin'/'mitarbeiter'. */
+  rolle: string;
   notiz: string | null;
   erstelltAm: string;
   laeuftAbAm: string;
@@ -38,11 +40,11 @@ export type Ablehnung =
   | 'nicht_bereit'; // keine Datenbank eingerichtet
 
 export type Pruefergebnis =
-  | { ok: true; rolle: 'admin' | 'mitarbeiter' }
+  | { ok: true; rolle: string }
   | { ok: false; grund: Ablehnung };
 
 export type Reservierung =
-  | { ok: true; id: string; rolle: 'admin' | 'mitarbeiter' }
+  | { ok: true; id: string; rolle: string }
   | { ok: false; grund: Ablehnung };
 
 // ── Sperre gegen Durchprobieren ─────────────────────────────────────────────
@@ -90,7 +92,7 @@ export async function einladungAnlegen(
     pepper: string;
     gueltigTage: number;
     erstelltVonUserId: string;
-    rolle?: 'admin' | 'mitarbeiter';
+    rolle?: string;
     notiz?: string | null;
   }
 ): Promise<Einladung> {
@@ -155,7 +157,7 @@ export async function codePruefen(
     [codeHash(normalisiert, pepper)]
   );
   if (zeilen.length !== 1) return { ok: false, grund: 'ungueltig' };
-  return { ok: true, rolle: zeilen[0].rolle as 'admin' | 'mitarbeiter' };
+  return { ok: true, rolle: String(zeilen[0].rolle) };
 }
 
 /**
@@ -187,7 +189,7 @@ export async function codeReservieren(
   return {
     ok: true,
     id: String(zeilen[0].id),
-    rolle: zeilen[0].rolle as 'admin' | 'mitarbeiter'
+    rolle: String(zeilen[0].rolle)
   };
 }
 
@@ -238,7 +240,7 @@ function zeileZuEinladung(z: Record<string, unknown>): Einladung {
     id: String(z.id),
     codePraefix: String(z.code_praefix),
     status,
-    rolle: z.rolle as 'admin' | 'mitarbeiter',
+    rolle: String(z.rolle),
     notiz: z.notiz === null || z.notiz === undefined ? null : String(z.notiz),
     erstelltAm: alsText(z.erstellt_am),
     laeuftAbAm,

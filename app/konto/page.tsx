@@ -3,8 +3,8 @@ import { redirect } from 'next/navigation';
 import { SignOutButton, UserButton } from '@clerk/nextjs';
 import { currentUser } from '@clerk/nextjs/server';
 import { Marke } from '../marke';
-import { rolleBeschriftung } from '@/lib/rollen';
-import { zugangPruefen } from '@/lib/zugang';
+import { hatRecht, rolleBeschriftung } from '@/lib/rollen';
+import { rollenHolen, zugangMitRechten } from '@/lib/zugang';
 
 export const metadata = { title: 'Konto · AufmaßX' };
 
@@ -15,13 +15,17 @@ export const metadata = { title: 'Konto · AufmaßX' };
  * übernimmt Profil und Passwort. Bewusst eine eigene Seite und kein Knopf in
  * der App: die Modul-Leiste wird während der Arbeit dauernd angetippt, dort
  * hat ein Abmelden-Knopf nichts verloren.
+ *
+ * Die Verwaltungsknöpfe erscheinen nach RECHT, nicht nach Rolle: Wer
+ * Mitarbeiter verwalten darf, kommt hierüber hin – gleich, wie seine Rolle
+ * heißt.
  */
 export default async function KontoSeite() {
-  const zugang = await zugangPruefen();
+  const zugang = await zugangMitRechten();
   if (zugang.grund === 'nicht-angemeldet') redirect('/sign-in');
   if (!zugang.erlaubt) redirect('/kein-zugang');
 
-  const user = await currentUser();
+  const [user, rollen] = await Promise.all([currentUser(), rollenHolen()]);
   const name =
     user?.fullName ||
     user?.primaryEmailAddress?.emailAddress ||
@@ -37,7 +41,7 @@ export default async function KontoSeite() {
           <UserButton />
           <div className="konto-text">
             <strong>{name}</strong>
-            <span>{rolleBeschriftung(zugang.rolle)}</span>
+            <span>{rolleBeschriftung(zugang.rolle, rollen)}</span>
           </div>
         </div>
 
@@ -45,7 +49,19 @@ export default async function KontoSeite() {
           Zurück zur Anwendung
         </Link>
 
-        {zugang.rolle === 'admin' ? (
+        {hatRecht(zugang.rechte, 'mitarbeiter.ansehen') ? (
+          <Link className="auth-knopf auth-knopf--leise" href="/mitarbeiter">
+            Mitarbeiter
+          </Link>
+        ) : null}
+
+        {hatRecht(zugang.rechte, 'rollen.verwalten') ? (
+          <Link className="auth-knopf auth-knopf--leise" href="/rollen">
+            Rollen &amp; Rechte
+          </Link>
+        ) : null}
+
+        {hatRecht(zugang.rechte, 'mitarbeiter.verwalten') ? (
           <Link className="auth-knopf auth-knopf--leise" href="/admin/einladungen">
             Mitarbeiter einladen
           </Link>
