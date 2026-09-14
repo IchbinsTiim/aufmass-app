@@ -391,3 +391,337 @@ html, body {
   line-height: 1.5;
   color: var(--muted);
 }
+
+/* ===========================================================================
+   Mitarbeiterverwaltung, Rollen und Rechte
+   ---------------------------------------------------------------------------
+   Dieselben Tokens wie der Rest der Hülle – eine zweite Gestaltungssprache
+   für „Verwaltung" gäbe es in der App nicht, und der Wechsel dorthin soll
+   sich wie ein Raumwechsel anfühlen, nicht wie ein Programmwechsel.
+
+   Die Arbeitsfläche ist das iPad: Alles Antippbare ist mindestens 44 px hoch,
+   die Tabellen sind waagerecht scrollbar statt gequetscht, und unter 720 px
+   wird aus jeder Tabellenzeile eine Karte mit vorangestellter Spaltenangabe
+   (`data-spalte`). Auf dem Telefon steht damit dasselbe wie auf dem Desktop,
+   nur untereinander.
+   =========================================================================== */
+
+.admin-wrap--breit { max-width: 1180px; }
+
+.admin-navi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-kopf h1 + .admin-hinweis { margin-top: 4px; }
+
+.admin-knopf-klein.gefahr {
+  border-color: rgba(255, 107, 107, .38);
+  color: #ffb3b3;
+}
+.admin-knopf-klein.gefahr:hover { background: rgba(255, 107, 107, .12); }
+
+.mv-knopf-gefahr { background: #ff6b6b; color: #2a0b0b; }
+
+.mv-zurueck {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+.mv-zurueck:hover { color: var(--text); }
+
+.mv-tabelle td { vertical-align: middle; }
+
+.mv-name {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.mv-name:hover { color: var(--accent-2d); }
+
+.mv-zeile--inaktiv td { opacity: .62; }
+
+.mv-hinweis-klein {
+  display: block;
+  color: var(--muted-schwach);
+  font-size: 12px;
+}
+
+.mv-rolle-fest { color: var(--muted); }
+
+.mv-rollenform,
+.mv-zugangsform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mv-select {
+  min-height: var(--touch);
+  min-width: 150px;
+  font-size: 15px;
+}
+
+/* Mit JavaScript schickt die Auswahl das Formular selbst ab; der Knopf ist
+   der Weg für alle anderen Fälle – sichtbar, aber zurückhaltend. */
+.mv-rollenknopf { min-height: 36px; }
+
+.mv-meldung {
+  flex: 1 1 100%;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mv-meldung--fehler { color: #ffb3b3; }
+.mv-meldung--ok { color: #8ff0c4; }
+
+.mv-kopfkarte {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.mv-stammdaten {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px 26px;
+  margin: 0;
+  flex: 1 1 420px;
+}
+.mv-stammdaten div { display: flex; flex-direction: column; gap: 2px; }
+.mv-stammdaten dt {
+  color: var(--muted-schwach);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.mv-stammdaten dd { margin: 0; font-size: 15px; font-weight: 600; }
+
+.mv-kopfaktionen {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.mv-abschnitt-titel {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+
+.mv-aktivitaet {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mv-aktivitaet li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 14px;
+}
+.mv-aktivitaet-zeit { color: var(--muted-schwach); min-width: 132px; }
+.mv-aktivitaet-art { font-weight: 600; }
+.mv-aktivitaet-objekt { color: var(--muted); }
+
+/* ── Sicherheitsabfrage vor dem Deaktivieren ─────────────────────────────── */
+.mv-dialog-huelle {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(6, 10, 18, .72);
+}
+
+.mv-dialog {
+  width: min(460px, 100%);
+  padding: 22px;
+  border: 1px solid var(--hairline-stark);
+  border-radius: var(--r-karte);
+  background: var(--surface);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .55);
+}
+.mv-dialog h2 { margin: 0 0 10px; font-family: var(--font-display); font-size: 20px; }
+.mv-dialog p { margin: 0 0 12px; font-size: 15px; line-height: 1.5; }
+.mv-dialog-detail { color: var(--muted); font-size: 13px; }
+.mv-dialog-knoepfe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* ── Rollen ──────────────────────────────────────────────────────────────── */
+.rl-kopfzeile { display: flex; justify-content: flex-end; }
+
+.rl-liste { display: flex; flex-direction: column; gap: 16px; }
+
+.rl-karte-kopf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.rl-karte-kopf h2 {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rl-marke {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.rl-belegung code { color: var(--muted); }
+
+.rl-rechte-anzeige {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.rl-recht-pille {
+  padding: 4px 10px;
+  border: 1px solid var(--hairline-stark);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rl-recht-pille--alle { border-color: rgba(76, 201, 240, .5); color: #9fe4fa; }
+.rl-recht-pille--leer { color: var(--muted-schwach); }
+
+.rl-form {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rl-form-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rl-form-zeile .auth-feld { flex: 1 1 200px; }
+.rl-feld-breit { flex: 2 1 320px !important; }
+.rl-feld-schmal { flex: 0 1 130px !important; }
+
+.rl-bereich {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+}
+.rl-bereich legend {
+  padding: 0 6px;
+  color: var(--muted-schwach);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rl-rechte {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px 18px;
+}
+
+/* Die ganze Zeile ist das Ziel, nicht nur das Kästchen – mit Handschuhen
+   trifft man kein 16-px-Quadrat. */
+.rl-recht {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: var(--touch);
+  padding: 8px;
+  border-radius: var(--r-control);
+  cursor: pointer;
+}
+.rl-recht:hover { background: rgba(255, 255, 255, .04); }
+.rl-recht input { width: 22px; height: 22px; margin-top: 2px; flex: 0 0 auto; }
+.rl-recht span { display: flex; flex-direction: column; gap: 2px; }
+.rl-recht strong { font-size: 14px; font-weight: 600; }
+.rl-recht em { font-style: normal; color: var(--muted-schwach); font-size: 12px; line-height: 1.4; }
+
+.rl-form-aktionen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.rl-loeschfrage {
+  padding: 14px;
+  border: 1px solid rgba(255, 107, 107, .4);
+  border-radius: var(--r-control);
+  background: rgba(255, 107, 107, .08);
+  font-size: 14px;
+}
+.rl-loeschfrage p { margin: 0 0 10px; }
+
+.rl-vorlagen { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ── Telefon: aus Tabellenzeilen werden Karten ───────────────────────────── */
+@media (max-width: 720px) {
+  .mv-tabelle,
+  .mv-tabelle tbody,
+  .mv-tabelle tr,
+  .mv-tabelle td { display: block; width: 100%; }
+  .mv-tabelle thead { display: none; }
+  .mv-tabelle tr {
+    margin-bottom: 12px;
+    padding: 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-control);
+    background: var(--surface-tief);
+  }
+  .mv-tabelle td {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+    padding: 6px 0;
+    border: 0;
+    white-space: normal;
+  }
+  .mv-tabelle td::before {
+    content: attr(data-spalte);
+    color: var(--muted-schwach);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .mv-tabelle td:empty { display: none; }
+  .mv-kopfkarte { flex-direction: column; }
+}

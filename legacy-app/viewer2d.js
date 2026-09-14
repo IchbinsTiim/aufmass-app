@@ -2329,46 +2329,28 @@ function renderSvg() {
       g.appendChild(t);
     };
 
-    // Feldbezeichnung (z. B. "A1") – als kleines Kästchen in der Feld-Ecke.
-    // Färbt sich je nach Auswahlzustand ein, damit klar ist, WELCHES Feld
-    // gerade ausgewählt bzw. in der Mehrfachauswahl markiert ist.
-    {
-      const fieldLabel = bayLabel(state.sections[el.si], el.bi);
-      const cornerFont = Math.max(depth * 0.24, 9);
-      const padX       = cornerFont * 0.45;
-      const boxH       = cornerFont * 1.4;
-      let   labelFont  = cornerFont;
-      let   boxW       = fieldLabel.length * labelFont * 0.62 + padX * 2;
-      const maxBoxW    = el.len * PX_PER_M * 0.55;
-      if (boxW > maxBoxW) { labelFont *= maxBoxW / boxW; boxW = maxBoxW; }
-      const cornerPad  = Math.max(depth * 0.08, 3);
-      const bbMinX     = Math.min(p0.x, p1.x, p2.x, p3.x);
-      const bbMinY     = Math.min(p0.y, p1.y, p2.y, p3.y);
-      const boxX = bbMinX + cornerPad, boxY = bbMinY + cornerPad;
-      const boxCx = boxX + boxW / 2, boxCy = boxY + boxH / 2;
-      const boxBg  = isBulkSelected ? '#6a4bd1' : (isSelected ? '#007aff' : (absch ? absch.color : '#0a2f58'));
-      const boxRot = labelRot ? `rotate(${labelRot.toFixed(1)},${boxCx},${boxCy})` : '';
-      g.appendChild(svgEl('rect', {
-        x: boxX, y: boxY, width: boxW, height: boxH,
-        rx: boxH * 0.25, fill: boxBg, transform: boxRot, 'pointer-events': 'none'
-      }));
-      const nameTxt = svgEl('text', {
-        x: boxCx, y: boxCy,
-        'text-anchor': 'middle', 'dominant-baseline': 'middle',
-        'font-size': labelFont, 'font-family': 'system-ui, sans-serif',
-        fill: '#fff', 'font-weight': '800',
-        transform: boxRot,
-        'pointer-events': 'none'
-      });
-      nameTxt.textContent = fieldLabel;
-      g.appendChild(nameTxt);
+    /* ── Notiz- und Hinweis-Zeichen in der Feld-Ecke ──────────────────────
+       Hier stand früher zusätzlich die Feldbezeichnung („A1") in einem
+       farbigen Kästchen. Sie ist entfallen: In der Zeichnung interessiert,
+       WIE LANG ein Feld ist, WIE HOCH es ist und WAS darauf liegt – die
+       Kennung dazwischen war eine vierte Angabe je Feld und machte die
+       Zeichnung unruhig, ohne etwas zu beantworten. Zu welcher ACHSE ein
+       Feld gehört, zeigt seine Farbe; welches Feld gerade ausgewählt ist,
+       zeigen Ring, Füllung und Haken.
 
-      // Notiz-/Hinweis-Icons neben dem Namenskästchen – auf einen Blick
-      // erkennbar, ohne das Sheet öffnen zu müssen.
-      let markerX = boxX + boxW + boxH * 0.15;
-      const markerFont = boxH * 0.85;
+       Die Bezeichnung selbst gibt es unverändert weiter – in der
+       Feldübersicht, in der Auswahl-Anzeige und im Feld-Blatt. Nur in der
+       Zeichenfläche steht sie nicht mehr unter jedem Feld.                */
+    {
+      const eckFont   = Math.max(depth * 0.24, 9);
+      const cornerPad = Math.max(depth * 0.08, 3);
+      const bbMinX    = Math.min(p0.x, p1.x, p2.x, p3.x);
+      const bbMinY    = Math.min(p0.y, p1.y, p2.y, p3.y);
+      const markerFont = eckFont * 1.2;
+      let markerX = bbMinX + cornerPad;
+      const markerY = bbMinY + cornerPad + markerFont / 2;
       const addMarker = (glyph, title) => {
-        const mx = markerX + markerFont * 0.55, my = boxCy;
+        const mx = markerX + markerFont * 0.55, my = markerY;
         const rot = labelRot ? `rotate(${labelRot.toFixed(1)},${mx},${my})` : '';
         const t = svgEl('text', {
           x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
@@ -3699,9 +3681,33 @@ function inSperrzone(cx, cy, w, h, zonen) {
                       && cy + h / 2 > z.minY && cy - h / 2 < z.maxY);
 }
 
+/**
+ * Die Achsen, deren Name gerade in der Zeichnung stehen soll.
+ *
+ * Das ist bewusst NICHT „alle": Die Zuordnung eines Feldes zu seiner Achse
+ * zeigt die FARBE des Feldes, dauerhaft und ohne ein einziges Wort. Ein Name
+ * je Achsenzug, immerzu sichtbar, war die zweite Hälfte derselben Aussage –
+ * und bei einem Gerüst mit acht Achsen acht Beschriftungen, die mit Maßen,
+ * Höhen und Bauteilen um denselben Platz stritten.
+ *
+ * Sichtbar wird ein Achsname deshalb dann, wenn er eine Frage beantwortet:
+ * sobald Felder ausgewählt sind, zeigt er, in welcher Achse man gerade
+ * arbeitet – und bleibt zugleich das Bedienelement, über das sich die ganze
+ * Achse auswählen und umbenennen lässt. Ohne Auswahl bleibt die Zeichnung
+ * ruhig. Wer die Achsen aller Felder sehen will, findet sie unverändert in
+ * der Feldübersicht und im Werkzeug-Menü.
+ */
+function sichtbareAchsLabelIds() {
+  const ids = new Set();
+  currentSelectionBays().forEach(b => { if (b.abschnittId) ids.add(b.abschnittId); });
+  return ids;
+}
+
 function renderAchsLabels(g, hs, els) {
   if (bordbrettModus) return;
-  const zuege = achsZuege(els);
+  const gewuenscht = sichtbareAchsLabelIds();
+  if (!gewuenscht.size) return;
+  const zuege = achsZuege(els).filter(z => gewuenscht.has(z.id));
   if (!zuege.length) return;
   const zonen = overlaySperrzonen();
 
@@ -7399,9 +7405,9 @@ function renderAbschnittBar() {
 /** Zeigt OBEN MITTIG auf der Zeichenfläche, welche Felder gerade ausgewählt
  *  sind und welcher Achse sie angehören – als schmale Pille, die nur bei
  *  aktiver Auswahl erscheint. Sie nennt immer die exakte Zahl, nie
- *  „mehrere". Das Achslabel steht am Objekt (renderAchsLabels), die
- *  Aktionsleiste unten (renderMehrfachBar): drei feste, kollisionsfreie
- *  Zonen. */
+ *  „mehrere". Das Achslabel steht am Objekt (renderAchsLabels – ebenfalls
+ *  nur bei Auswahl), die Aktionsleiste unten (renderMehrfachBar): drei
+ *  feste, kollisionsfreie Zonen. */
 function renderSelectionInfo() {
   const el = document.getElementById('selectionInfo');
   if (!el) return;
@@ -10134,8 +10140,16 @@ const PDF_LEGEND_H = 5;    // einzeilige Legende unter dem Plan
 // Lesbarkeitsgrenze rutscht.
 const PDF_FS_LEN   = 8.5;   // Feldlänge
 const PDF_FS_H     = 7.5;   // Höhenangaben
-const PDF_FS_LABEL = 7;     // Feldbezeichnung (A1 …)
 const PDF_FS_BADGE = 6.5;   // Positions-Badges
+
+/* Kleinste Schrift, die auf dem Blatt vorkommen darf.
+   Sie ist keine Empfehlung, sondern eine Grenze: Ein auf DIN A4 gedruckter
+   Plan wird auf der Baustelle im Stehen gelesen, oft als Kopie. Früher wurde
+   eine Beschriftung notfalls bis auf 5,5 pt zusammengestaucht, damit sie in
+   ein schmales Feld passt. Jetzt gilt umgekehrt: Die Schrift bleibt lesbar –
+   passt eine Beschriftung damit nicht mehr ins Feld, wandert sie nach außen
+   (siehe pdfLabelsPlanen) und bekommt eine Führungslinie. */
+const PDF_FS_MIN   = 6;
 
 /* ── Zwei Ausgaben desselben Dokuments ───────────────────────────────────────
    Früher standen hier drei „Designs", die sich in Farbbalken, Tabellenköpfen
@@ -10439,16 +10453,104 @@ function pdfPlanOrigin(win, area, s) {
 
 /* ── Kollisionsfreies Blattlayout ────────────────────────────────────────────
    Feldflächen werden am Rand des Ausschnitts abgeschnitten, ihre BESCHRIFTUNGEN
-   (Feldlänge, Feldbezeichnung, Höhen- und Positions-Pillen) aber nicht: die
-   sitzen neben dem Feld und ragten deshalb bei randnahen Feldern in die
-   Legende, die Kopf-/Fußzeile oder über die Übersichtskarte.
-   Deshalb werden alle Beschriftungen erst GEPLANT (Position + tatsächliche
-   Ausdehnung auf dem Papier), dann gegen feste Sperrzonen geprüft und erst
-   danach gezeichnet.                                                        */
+   (Feldlänge, Höhen- und Positions-Pillen) aber nicht: die sitzen neben dem
+   Feld und ragten deshalb bei randnahen Feldern in die Legende, die Kopf-/
+   Fußzeile oder über die Übersichtskarte.
+
+   Der Weg einer Beschriftung aufs Blatt geht deshalb über drei Schritte:
+
+     1. pdfLabelsPlanen     Wunschposition und tatsächliche Ausdehnung in mm.
+     2. pdfPlanLabels       ENTZERREN: Jede Beschriftung bekommt einen Platz,
+                            an dem sie weder eine andere Beschriftung noch ein
+                            Gerüstfeld, die Legende, die Fuß-/Kopfzeile oder
+                            die Übersichtskarte berührt.
+     3. pdfDrawPlan         zeichnen – samt Führungslinie für alles, was dafür
+                            von seinem Feld abrücken musste.
+
+   Schritt 2 ist bewusst eine SUCHE und kein fester Pixelversatz: Wie eng es
+   auf dem Blatt zugeht, hängt von Maßstab, Feldlänge, Anzahl der Positionen
+   und der Form des Gerüsts ab. Feste Abstände sind in einem dieser Fälle
+   immer falsch.                                                             */
 
 /** Überlappen sich zwei Rechtecke {x,y,w,h}? */
 function rectHits(a, b) {
   return !!b && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/** Rechteck ringsum um `luft` mm vergrößern. */
+function rectLuft(r, luft) {
+  return { x: r.x - luft, y: r.y - luft, w: r.w + luft * 2, h: r.h + luft * 2 };
+}
+
+/**
+ * Rasterindex über Rechtecke.
+ *
+ * Die Entzerrung probiert je Beschriftung bis zu ein paar Dutzend Plätze aus;
+ * jeder Versuch muss gegen alles geprüft werden, was schon liegt. Ohne Index
+ * wäre das quadratisch und bei einem Blatt mit mehreren hundert
+ * Beschriftungen spürbar langsam. Mit Raster bleibt es linear.
+ */
+function pdfRasterIndex(zelle = 8) {
+  const map = new Map();
+  const schluessel = r => {
+    const i0 = Math.floor(r.x / zelle), i1 = Math.floor((r.x + r.w) / zelle);
+    const j0 = Math.floor(r.y / zelle), j1 = Math.floor((r.y + r.h) / zelle);
+    const out = [];
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) out.push(i + ':' + j);
+    return out;
+  };
+  return {
+    hinzu(r, nutzlast) {
+      const eintrag = { r, nutzlast };
+      schluessel(r).forEach(k => {
+        const liste = map.get(k);
+        if (liste) liste.push(eintrag); else map.set(k, [eintrag]);
+      });
+    },
+    /** @param {Function} [genauer] zusätzliche, genaue Prüfung je Treffer */
+    trifft(r, genauer) {
+      const gesehen = new Set();
+      for (const k of schluessel(r)) {
+        const liste = map.get(k);
+        if (!liste) continue;
+        for (const e of liste) {
+          if (gesehen.has(e)) continue;
+          gesehen.add(e);
+          if (!rectHits(r, e.r)) continue;
+          if (!genauer || genauer(e.nutzlast)) return true;
+        }
+      }
+      return false;
+    }
+  };
+}
+
+/**
+ * Schneiden sich zwei konvexe Polygone? (Trennachsensatz)
+ *
+ * Gebraucht für Beschriftung gegen Gerüstfeld: Ein gedrehtes Feld ist als
+ * achsparalleles Rechteck viel größer, als es ist – eine Beschriftung würde
+ * sonst grundlos weggeschoben. Geprüft wird deshalb gegen das echte Viereck.
+ */
+function konvexSchnitt(a, b) {
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length];
+      const ax = -(q.y - p.y), ay = q.x - p.x;
+      if (!ax && !ay) continue;
+      let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;
+      for (const v of a) { const d = v.x * ax + v.y * ay; if (d < minA) minA = d; if (d > maxA) maxA = d; }
+      for (const v of b) { const d = v.x * ax + v.y * ay; if (d < minB) minB = d; if (d > maxB) maxB = d; }
+      if (maxA < minB || maxB < minA) return false;
+    }
+  }
+  return true;
+}
+
+/** Rechteck {x,y,w,h} als Punktliste – für konvexSchnitt. */
+function rectPunkte(r) {
+  return [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y },
+          { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
 }
 
 /**
@@ -10637,15 +10739,47 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
   //    klein, Text würde sich nur überlagern.
   if (shapesOnly) { doc.setTextColor(0, 0, 0); return; }
 
-  const labels = pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth);
+  const geplant = pdfLabelsPlanen(doc, s, bayEls, theme, P, XY, depth);
 
   /* Sperrzonen: Der Zeichenbereich `area` endet exakt unter der Legende und
      über der Fußzeile – was dort nicht hineinpasst, wird hineingeschoben oder
-     weggelassen. Zusätzlich bleibt die Übersichtskarte frei. Sie wird ERST
-     platziert, wenn die Beschriftungen bekannt sind, und danach gezeichnet. */
+     weggelassen. Zusätzlich bleibt die Übersichtskarte frei. Ihre Ecke wird
+     aus den GEPLANTEN Beschriftungen bestimmt (dort steht der Text, den sie
+     nicht verdecken soll) und danach als Sperrzone in die Entzerrung
+     gegeben – so weichen die Beschriftungen ihr aus, statt zu entfallen. */
   const locBox = opts.locator
-    ? pdfPickLocatorBox(area, win, s, bayEls, opts.locator.w, opts.locator.h, labels)
+    ? pdfPickLocatorBox(area, win, s, bayEls, opts.locator.w, opts.locator.h, geplant)
     : null;
+
+  /* Feldflächen und Eckstücke als „hier bitte nicht": Eine Höhenangabe auf
+     dem Nachbarfeld ist genauso unbrauchbar wie eine auf der Legende.
+     Mitgegeben wird jeweils das echte (gedrehte) Viereck, nicht seine
+     Hüllbox. */
+  const flaechen = [];
+  const merkeFlaeche = pts => {
+    const mm = pts.map(P);
+    const xs = mm.map(q => q.x), ys = mm.map(q => q.y);
+    const x = Math.min(...xs), y = Math.min(...ys);
+    const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+    // Ein halber Millimeter Toleranz: Eine Pille darf die Feldkante berühren,
+    // nur eben nicht auf dem Feld liegen.
+    flaechen.push({ rect: { x: x + 0.5, y: y + 0.5, w: Math.max(0, w - 1), h: Math.max(0, h - 1) }, pts: mm });
+  };
+  bayEls.forEach(el => merkeFlaeche(el.pts));
+  layout.filter(e => e.type === 'corner' && sichtbar(e)).forEach(el => merkeFlaeche(el.pts));
+
+  const labels = pdfPlanLabels(geplant, {
+    area, sperr: locBox ? [locBox] : [], flaechen
+  });
+
+  // Führungslinien zuerst und alle zusammen – so liegt keine unter einer
+  // fremden Pille hindurchlaufende Linie über einer anderen Beschriftung.
+  doc.setLineWidth(0.2);
+  labels.forEach(ln => {
+    if (!ln.fuehrung) return;
+    doc.setDrawColor(...(ln.plain ? ln.col : ln.stroke));
+    doc.line(ln.fuehrung.x, ln.fuehrung.y, ln.cx, ln.cy);
+  });
 
   labels.forEach(raw => {
     const ln = clampLabelInto(raw, area);
@@ -10668,20 +10802,33 @@ function pdfDrawPlan(doc, win, area, s, bayEls, layout, shapesOnly, opts = {}) {
 }
 
 /**
- * Plant alle Feldbeschriftungen eines Blattes, OHNE sie zu zeichnen.
+ * Plant alle Feldbeschriftungen eines Blattes, OHNE sie zu zeichnen und OHNE
+ * sie zu entzerren – das macht pdfPlanLabels im zweiten Schritt.
  *
  * Die Gerüsttiefe ist im Grundriss nur ~0,7 m breit. Damit auf Papier nichts
- * ineinanderläuft, sitzt im Feld selbst NUR die Feldlänge; die Feldbezeichnung
- * liegt an der Wandseite, Höhen und Positionen gestapelt an der offenen Seite –
- * jeweils längs zum Feld gedreht und auf die Feldlänge eingepasst.
+ * ineinanderläuft, sitzt im Feld selbst NUR die Feldlänge; Höhen und
+ * Positionen liegen gestapelt an der offenen Seite – jeweils längs zum Feld
+ * gedreht.
  *
- * @returns {Array<{text,cx,cy,rot,fs,fill,stroke,col,plain,rect}>}
- *          `rect` ist die achsparallele Hüllbox in mm – Grundlage für die
- *          Kollisionsprüfung gegen Legende, Fußzeile und Übersichtskarte.
+ * Die FELDBEZEICHNUNG („A1", „A2" …) steht seit dieser Fassung nicht mehr im
+ * Plan. Sie war die häufigste Ursache für ineinanderlaufende Beschriftungen
+ * (sie saß als vierte Angabe an der Wandseite jedes Feldes) und sagte nichts
+ * aus, was die Zeichnung nicht schon zeigt: Zu welcher Achse ein Feld gehört,
+ * steht in seiner FARBE – dieselbe Farbe wie auf dem Bildschirm und in der
+ * Legende. Die Bezeichnungen selbst bleiben vollständig erhalten: in der
+ * Feldübersicht, im Feld-Blatt und in den Aufmaßtabellen des Dokuments.
+ *
+ * @returns {Array<Beschriftung>} mit
+ *   `rect`   achsparallele Hüllbox in mm (Grundlage jeder Kollisionsprüfung)
+ *   `art`    'laenge' | 'hoehe' | 'position' – bestimmt Vorrang und ob die
+ *            Beschriftung notfalls entfallen darf
+ *   `fest`   true = sitzt im Feld und wird nicht verschoben
+ *   `richtung`/`anker`/`ziel` – Grundlage der Entzerrung und der Führungslinie
  */
-function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
+function pdfLabelsPlanen(doc, s, bayEls, theme, P, XY, depth) {
   const out = [];
   const depthMM = depth * s;
+  const PT_MM = 0.352778;
 
   /** Hüllbox einer gedrehten Pille bzw. eines gedrehten Textes (mm). */
   const mkRect = (cx, cy, w, h, deg) => {
@@ -10701,38 +10848,43 @@ function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
     const wallMid  = P({ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 });
     let ox = c.x - wallMid.x, oy = c.y - wallMid.y;
     const olen = Math.hypot(ox, oy) || 1; ox /= olen; oy /= olen;
+    const richtung = { x: ox, y: oy };
+    // Anker der Führungslinie: die Mitte der offenen Feldkante. Von dort geht
+    // die Linie zu einer Beschriftung, die abrücken musste – damit bleibt
+    // eindeutig, zu WELCHEM Feld eine Höhe gehört.
+    const anker = P({ x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 });
 
     const lenMM  = el.len * PX_PER_M * s;
     const maxTxt = lenMM * 0.92;
 
-    // Feldlänge mittig im Feld (ohne Pille – die Fläche ist ihr Hintergrund)
+    /* Feldlänge: bevorzugt mittig IM Feld – die Fläche ist ihr Hintergrund,
+       und näher am Maß kann eine Maßangabe nicht stehen. Nur wenn das Feld
+       dafür zu schmal ist (die Schrift müsste unter PDF_FS_MIN), wandert sie
+       als erste Zeile in den Stapel an der offenen Seite. Lieber ein Stück
+       neben dem Feld und lesbar als mittendrin und zu klein. */
     const lenTxt = el.len.toFixed(2).replace('.', ',');
     doc.setFont('helvetica', 'bold');
-    const lenFs = pdfFitFont(doc, lenTxt, maxTxt, PDF_FS_LEN, 5.5);
-    const lenW  = doc.getTextWidth(lenTxt), lenH = lenFs * 0.352778;
-    out.push({ text: lenTxt, cx: c.x, cy: c.y, rot, fs: lenFs, plain: true,
-               col: theme.ink, rect: mkRect(c.x, c.y, lenW, lenH, rot) });
+    const lenFs = pdfFitFont(doc, lenTxt, maxTxt, PDF_FS_LEN, PDF_FS_MIN);
+    const lenW  = doc.getTextWidth(lenTxt), lenH = lenFs * PT_MM;
+    const lenPasst = lenW <= maxTxt;
 
-    // Feldbezeichnung an der Wandseite – in der Abschnittsfarbe, sodass sich
-    // die Abschnitte auch im Ausdruck auf einen Blick unterscheiden.
-    const absch = abschnittById(bay.abschnittId);
-    const lblBg = absch ? pdfCol(theme, pdfHex(absch.color)) : theme.accent;
-    const label = bayLabel(state.sections[el.si], el.bi);
-    doc.setFont('helvetica', 'bold');
-    const lblFs = pdfFitPill(doc, label, maxTxt, PDF_FS_LABEL, 5.5);
-    const lblFsMM = lblFs * 0.352778;
-    const lblD  = depthMM / 2 + lblFsMM;
-    const lblCx = c.x - ox * lblD, lblCy = c.y - oy * lblD;
-    out.push({ text: label, cx: lblCx, cy: lblCy, rot, fs: lblFs,
-               fill: lblBg, stroke: lblBg, col: [255, 255, 255],
-               rect: mkRect(lblCx, lblCy,
-                            doc.getTextWidth(label) + lblFsMM * 0.8, lblFsMM * 1.5, rot) });
+    if (lenPasst) {
+      out.push({ text: lenTxt, cx: c.x, cy: c.y, rot, fs: lenFs, plain: true,
+                 col: theme.ink, art: 'laenge', fest: true, dicke: lenH,
+                 richtung, anker, ziel: { x: c.x, y: c.y },
+                 rect: mkRect(c.x, c.y, lenW, lenH, rot) });
+    }
 
-    // Offene Seite: Höhen, darunter je Position eine Zeile
+    // Offene Seite: ggf. die Feldlänge, dann Höhen, dann je Position eine Zeile
     const lines = [];
+    if (!lenPasst) {
+      lines.push({ text: lenTxt, art: 'laenge', fs: PDF_FS_LEN,
+                   fill: [255, 255, 255], stroke: theme.rule, col: theme.ink });
+    }
     const hL = bay.hL != null ? bay.hL.toFixed(2).replace('.', ',') : null;
     const hR = bay.hR != null ? bay.hR.toFixed(2).replace('.', ',') : null;
     const hStil = {
+      art: 'hoehe',
       fill: pdfCol(theme, [240, 249, 243]), stroke: pdfCol(theme, [31, 122, 61]),
       col: pdfCol(theme, [22, 92, 45]), fs: PDF_FS_H
     };
@@ -10743,7 +10895,7 @@ function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
       // die Feldbreite, werden zwei kurze daraus („L …" / „R …") – lieber
       // übereinander als in das Nachbarfeld hinein.
       doc.setFont('helvetica', 'bold'); doc.setFontSize(PDF_FS_H);
-      const passt = doc.getTextWidth(zusammen) + PDF_FS_H * 0.352778 * 0.8 <= maxTxt;
+      const passt = doc.getTextWidth(zusammen) + PDF_FS_H * PT_MM * 0.8 <= maxTxt;
       if (beide && !passt) {
         lines.push({ text: 'L ' + hL, ...hStil });
         lines.push({ text: 'R ' + hR, ...hStil });
@@ -10754,7 +10906,7 @@ function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
     (bay.positions || []).forEach(pos => {
       const meta = POS_BY_KEY[pos.cat];
       const col  = pdfCol(theme, pdfHex((meta && meta.color) || '#333333'));
-      lines.push({ text: posBadge(pos, bay), kurz: posBadgeKurz(pos),
+      lines.push({ text: posBadge(pos, bay), kurz: posBadgeKurz(pos), art: 'position',
                    fill: [255, 255, 255], stroke: col, col, fs: PDF_FS_BADGE });
     });
 
@@ -10768,21 +10920,164 @@ function pdfPlanLabels(doc, s, bayEls, theme, P, XY, depth) {
       // Aufmaß-Tabellen, ein in das Nachbarfeld ragender Badge nirgends.
       let text = ln.text;
       if (ln.kurz && ln.kurz !== text) {
-        doc.setFontSize(5.5);
-        if (doc.getTextWidth(text) + 5.5 * 0.352778 * 0.8 > maxTxt) text = ln.kurz;
+        doc.setFontSize(PDF_FS_MIN);
+        if (doc.getTextWidth(text) + PDF_FS_MIN * PT_MM * 0.8 > maxTxt) text = ln.kurz;
       }
-      const fs = pdfFitPill(doc, text, maxTxt, ln.fs, 5.5);
-      const fsMM = fs * 0.352778;
-      const h  = fsMM * 1.5;
-      dist += h * 0.62;
+      const fs = pdfFitPill(doc, text, maxTxt, ln.fs, PDF_FS_MIN);
+      const fsMM = fs * PT_MM;
+      const h  = fsMM * 1.5;             // Dicke der Pille quer zum Feld
+      // Der Stapel wird gleich so geplant, dass zwischen zwei Pillen schon
+      // der Mindestabstand liegt. Sonst müsste die Entzerrung jede einzelne
+      // Pille um einen Hauch verschieben – und jede bekäme eine
+      // Führungslinie, obwohl sie genau dort steht, wo sie hingehört.
+      dist += h / 2;
       const cx = c.x + ox * dist, cy = c.y + oy * dist;
       out.push({ text, cx, cy, rot, fs, fill: ln.fill, stroke: ln.stroke, col: ln.col,
+                 art: ln.art, fest: false, dicke: h, richtung, anker, ziel: { x: cx, y: cy },
                  rect: mkRect(cx, cy, doc.getTextWidth(text) + fsMM * 0.8, h, rot) });
-      dist += h * 0.48;
+      dist += h / 2 + PDF_LABEL_LUFT * 1.4;
     });
   });
 
   return out;
+}
+
+/* Vorrang bei der Entzerrung: Wer zuerst platziert wird, bekommt den besten
+   Platz. Die Reihenfolge folgt dem, was auf der Baustelle zuerst gebraucht
+   wird – erst das Maß, dann die Höhe, dann das Bauteil. */
+const PDF_LABEL_RANG   = { laenge: 0, hoehe: 1, position: 2 };
+const PDF_LABEL_LUFT   = 0.45;   // mm Mindestabstand zwischen zwei Beschriftungen
+const PDF_LABEL_STUFEN = 14;     // so viele Stufen nach außen werden probiert
+const PDF_LABEL_QUER   = [0, 1, -1, 2, -2, 3, -3];   // Vielfache seitlich
+const PDF_LEADER_AB    = 0.8;    // ab dieser Verschiebung (mm) eine Führungslinie
+
+/** Beschriftung um (dx,dy) verschieben – Mittelpunkt und Hüllbox zugleich. */
+function pdfLabelVerschieben(label, dx, dy) {
+  if (!dx && !dy) return label;
+  return { ...label, cx: label.cx + dx, cy: label.cy + dy,
+           rect: { ...label.rect, x: label.rect.x + dx, y: label.rect.y + dy } };
+}
+
+/** Führungslinie vermerken, sobald eine Beschriftung spürbar abgerückt ist. */
+function pdfLabelFuehrung(label) {
+  if (!label.anker || !label.ziel || label.fest) return label;
+  const d = Math.hypot(label.cx - label.ziel.x, label.cy - label.ziel.y);
+  return d > PDF_LEADER_AB ? { ...label, fuehrung: label.anker } : label;
+}
+
+/**
+ * ENTZERREN – der Kern des Beschriftungssystems.
+ *
+ * Jede geplante Beschriftung bekommt einen Platz, an dem sie
+ *
+ *   • keine andere Beschriftung berührt (mit PDF_LABEL_LUFT Abstand),
+ *   • auf keiner Gerüstfläche und keinem Eckstück liegt,
+ *   • innerhalb des Zeichenbereichs bleibt (also weder in Legende noch in
+ *     Kopf-/Fußzeile läuft) und
+ *   • die Übersichtskarte frei lässt.
+ *
+ * Gesucht wird entlang der Auswärtsrichtung ihres Feldes (weg von der Wand,
+ * dorthin, wo ohnehin schon der Beschriftungsstapel steht) und zusätzlich
+ * seitlich daneben. Das ist der Grund für die Suche statt fester Werte: Ob
+ * eine Höhe zwei Millimeter oder zwei Zentimeter abrücken muss, hängt vom
+ * Maßstab, der Feldlänge und den Nachbarfeldern ab.
+ *
+ * Wer abrücken musste, bekommt eine Führungslinie zu seinem Feld – ohne sie
+ * wäre bei einer verschobenen Höhenangabe nicht mehr sicher, zu welchem Feld
+ * sie gehört.
+ *
+ * Bleibt trotz aller Versuche kein freier Platz, entscheidet die Art:
+ * Feldlänge und Höhe bleiben stehen (ohne sie ist das Blatt wertlos), ein
+ * Positions-Badge entfällt – seine Menge steht in der Aufmaßtabelle.
+ *
+ * @param {object} opts { area, sperr:[rect], flaechen:[{rect,pts}] }
+ * @returns {Array} die zu zeichnenden Beschriftungen
+ */
+function pdfPlanLabels(labels, opts = {}) {
+  const area  = opts.area || null;
+  const belegt = pdfRasterIndex();
+
+  // Harte Sperrzonen (Übersichtskarte) stehen getrennt: Sie sind nie
+  // verhandelbar – auch der Notnagel weicht ihnen aus.
+  const sperr = pdfRasterIndex();
+  (opts.sperr || []).filter(Boolean).forEach(r => sperr.hinzu(r));
+
+  const flaechen = pdfRasterIndex();
+  (opts.flaechen || []).forEach(f => flaechen.hinzu(f.rect, f.pts));
+
+  const reihenfolge = labels
+    .map((l, i) => ({ l, i }))
+    .sort((a, b) => ((PDF_LABEL_RANG[a.l.art] ?? 9) - (PDF_LABEL_RANG[b.l.art] ?? 9))
+                 || (a.i - b.i));
+
+  const out = [];
+  const umgebung = { belegt, sperr, flaechen, area };
+  reihenfolge.forEach(({ l }) => {
+    let platz = pdfLabelPlatzSuchen(l, umgebung);
+    // Die Feldlänge sitzt im Feld und wird nicht verschoben – es sei denn,
+    // genau dort liegt die Übersichtskarte. Dann ist ein Maß mit
+    // Führungslinie immer noch besser als gar kein Maß.
+    if (!platz && l.fest) platz = pdfLabelPlatzSuchen({ ...l, fest: false }, umgebung);
+    if (!platz) return;
+    belegt.hinzu(rectLuft(platz.rect, PDF_LABEL_LUFT));
+    out.push(pdfLabelFuehrung(platz));
+  });
+  return out;
+}
+
+/**
+ * Sucht den Platz für EINE Beschriftung (siehe pdfPlanLabels).
+ *
+ * Gesucht wird in zwei Durchgängen, weil die Anforderungen nicht gleich hart
+ * sind: Zwei Texte übereinander sind IMMER unbrauchbar, ein Text auf einer
+ * Feldfläche ist nur unschön. Deshalb erst streng (nichts berührt sich,
+ * nichts liegt auf einem Feld), dann nachsichtig (nur noch: kein Text auf
+ * einem Text). So bleibt eine Angabe auch auf einem eng bebauten Blatt
+ * erhalten, statt zu entfallen.
+ *
+ * Abgesucht wird von der Wunschposition aus nach AUSSEN (dort steht ohnehin
+ * schon der Stapel) und nach INNEN – der Platz an der Wandseite ist frei,
+ * seit dort keine Feldbezeichnung mehr klebt.
+ */
+function pdfLabelPlatzSuchen(label, { belegt, sperr, flaechen, area }) {
+  const dir  = label.richtung || { x: 0, y: 1 };
+  const quer = { x: -dir.y, y: dir.x };
+  // Schrittweite quer zum Feld: die DICKE der Beschriftung, nicht die Höhe
+  // ihrer achsparallelen Hüllbox – bei einer senkrechten Wand ist die Hüllbox
+  // so hoch wie die Pille lang ist, und die Suche spränge viel zu weit.
+  const schritt = Math.max(label.dicke || label.rect.h, 1.2) * 0.9;
+  const stufen  = label.fest ? 0 : PDF_LABEL_STUFEN;
+  const seiten  = label.fest ? [0] : PDF_LABEL_QUER;
+  const vorzeichen = label.fest ? [1] : [1, -1];
+
+  let notnagel = null;
+  let nachsichtig = null;
+  for (let k = 0; k <= stufen; k++) {
+    for (const vz of (k === 0 ? [1] : vorzeichen)) {
+      for (const q of seiten) {
+        const versetzt = pdfLabelVerschieben(label,
+          dir.x * k * vz * schritt + quer.x * q * schritt * 1.3,
+          dir.y * k * vz * schritt + quer.y * q * schritt * 1.3);
+        const drin = area ? clampLabelInto(versetzt, area) : versetzt;
+        if (!drin || sperr.trifft(drin.rect)) continue;
+        if (!notnagel) notnagel = drin;
+        if (belegt.trifft(drin.rect)) continue;
+        // Gegen Feldflächen wird genau geprüft (gedrehte Felder), nicht gegen
+        // ihre viel größere achsparallele Hüllbox.
+        if (!label.fest && flaechen.trifft(drin.rect,
+              pts => !pts || konvexSchnitt(pts, rectPunkte(drin.rect)))) {
+          if (!nachsichtig) nachsichtig = drin;
+          continue;
+        }
+        return drin;
+      }
+    }
+  }
+  if (nachsichtig) return nachsichtig;
+  // Auch das reicht nicht: Maß und Höhe bleiben trotzdem stehen (ohne sie ist
+  // das Blatt wertlos), ein Positions-Badge entfällt – seine Menge steht in
+  // der Aufmaßtabelle.
+  return label.art === 'position' ? null : notnagel;
 }
 
 /** Kleine Übersichtskarte: ganzes Gerüst grau, der aktuelle Ausschnitt farbig
@@ -10897,18 +11192,20 @@ function pdfPlanGroups(boxes, useW, useH) {
   return gruppen;
 }
 
-/** Kurzbeschreibung der Felder eines Blattes für die Kopfzeile, z. B.
- *  „Felder A1 – A9". Aufgezählt wird in Leserichtung (links → rechts), damit
- *  die Angabe zur Anordnung auf dem Blatt passt. */
+/**
+ * Kurzbeschreibung der Felder eines Blattes für die Kopfzeile.
+ *
+ * Früher stand hier „Felder A1 – A9". Seit die Feldbezeichnungen nicht mehr
+ * im Plan stehen (siehe pdfLabelsPlanen), wäre das ein Verweis ins Leere –
+ * im Blatt selbst gibt es kein „A9" mehr zu finden. Was ein Blatt zeigt,
+ * beantworten jetzt die Zahl der Felder und ihre Gesamtlänge; WO dieses Blatt
+ * im Gerüst liegt, zeigt die Übersichtskarte auf dem Blatt selbst.
+ */
 function pdfBlattFelder(els) {
-  const namen = els
-    .map(el => ({ el, b: elBBox(el) }))
-    .sort((a, b) => (a.b.minX - b.b.minX) || (a.b.minY - b.b.minY))
-    .map(o => bayLabel(state.sections[o.el.si], o.el.bi));
-  if (!namen.length) return 'keine Felder';
-  if (namen.length === 1) return 'Feld ' + namen[0];
-  if (namen.length === 2) return `Felder ${namen[0]}, ${namen[1]}`;
-  return `Felder ${namen[0]} – ${namen[namen.length - 1]}`;
+  if (!els.length) return 'keine Felder';
+  const laenge = els.reduce((s, el) => s + (el.len || 0), 0);
+  return `${els.length} Feld${els.length === 1 ? '' : 'er'}`
+       + `   ·   ${fmtQty(laenge)} m`;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -10925,7 +11222,7 @@ function pdfBlattFelder(els) {
 
 const PDF_BLATT_KEY   = 'geruest.2d.pdfBlaetter';
 const PDF_BLATT_WAHLEN = ['auto', '1', '2', '3'];
-const PDF_LABEL_MIN_PT = 6;      // so groß muss die Feldbeschriftung bleiben
+const PDF_LABEL_MIN_PT = PDF_FS_MIN;   // so groß muss die Feldlänge im Feld bleiben
 
 /** Gemerkte Blattzahl-Wahl ('auto' | '1' | '2' | '3'). */
 function pdfBlattWahl() {
@@ -10940,12 +11237,18 @@ function setPdfBlattWahl(v) {
 }
 
 /**
- * Schriftgröße der Feldbeschriftung bei einem Maßstab – ohne jsPDF gerechnet.
+ * Schriftgröße der Feldlänge bei einem Maßstab – ohne jsPDF gerechnet.
  *
  * Die Beschriftung ist die Feldlänge („2,57"), fett gesetzt und auf 92 % der
- * Feldlänge eingepasst (siehe pdfPlanLabels/pdfFitFont). Die Zeichenbreiten
+ * Feldlänge eingepasst (siehe pdfLabelsPlanen/pdfFitFont). Die Zeichenbreiten
  * von Helvetica-Bold sind für Ziffern und Komma konstant, deshalb genügt eine
  * geschlossene Formel – gebraucht wird sie, BEVOR es ein Dokument gibt.
+ *
+ * Bewusst OHNE untere Schranke: Die Frage lautet „wie klein müsste die
+ * Beschriftung werden, damit sie noch ins Feld passt" – und nicht „wie klein
+ * wird sie gesetzt". Antwortet die Formel mit weniger als PDF_FS_MIN, dann
+ * passt die Feldlänge bei diesem Maßstab eben NICHT mehr ins Feld; die
+ * Blattwahl nimmt das als Anlass, ein Blatt mehr zu spendieren.
  *
  * @param {number} s  Maßstab in mm je Welt-px
  * @returns {number}  kleinste vorkommende Schriftgröße in pt
@@ -10959,7 +11262,7 @@ function pdfLabelSchriftgroesse(s, bayEls) {
     const em    = [...txt].reduce((n, c) => n + (c === '.' ? KOMMA : ZIFFER), 0);
     const maxMM = (el.len || 0) * PX_PER_M * s * 0.92;
     const breit = em * PDF_FS_LEN * PT_MM;          // Breite bei voller Größe
-    const fs    = breit <= maxMM ? PDF_FS_LEN : Math.max(5.5, PDF_FS_LEN * maxMM / breit);
+    const fs    = breit <= maxMM ? PDF_FS_LEN : PDF_FS_LEN * maxMM / breit;
     if (fs < min) min = fs;
   });
   return min;
@@ -11745,11 +12048,18 @@ async function buildPdfDocument(themeName) {
   // ── Notizen ────────────────────────────────────────────────────────────
   // Nur, wenn welche erfasst sind – und im Anschluss an das Aufmaß, nicht auf
   // einem eigenen Blatt.
+  // Bezeichnet wird ein Feld über das, was IM PLAN steht: seine Achse (und
+  // damit seine Farbe) und seine Länge. Die Kennung „A7" stünde hier sonst
+  // als Verweis auf etwas, das im Plan nicht mehr auftaucht.
   const notizen = [];
   state.sections.forEach(sec => {
-    sec.bays.forEach((bay, bi) => {
+    sec.bays.forEach(bay => {
       if (isBayVisible(bay) && (bay.note || '').trim()) {
-        notizen.push({ label: bayLabel(sec, bi), note: bay.note.trim() });
+        notizen.push({
+          label: (bay.abschnittId ? achsAnzeigeName(bay.abschnittId) : 'Ohne Achse')
+               + ' · ' + fmtQty(bay.len || 0) + ' m',
+          note: bay.note.trim()
+        });
       }
     });
   });
@@ -11759,17 +12069,19 @@ async function buildPdfDocument(themeName) {
     doc.setTextColor(...theme.ink);
     doc.text('Notizen', margin, ny);
     ny += 7;
+    const NOTIZ_SPALTE = 44;   // mm für „Achse · Länge"
     notizen.forEach(({ label, note }) => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-      const lines = doc.splitTextToSize(note, availW - 26);
+      const lines = doc.splitTextToSize(note, availW - NOTIZ_SPALTE);
       const blockH = Math.max(6, lines.length * 4.4) + 2.5;
       if (ny + blockH > contentBottom) ny = startPage({ rechts: 'Notizen (Fortsetzung)' }) + 4;
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      pdfFitFont(doc, label, NOTIZ_SPALTE - 4, 9, 6.5);
       doc.setTextColor(...theme.ink);
       doc.text(label, margin, ny);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
       doc.setTextColor(...theme.inkSoft);
-      doc.text(lines, margin + 26, ny);
+      doc.text(lines, margin + NOTIZ_SPALTE, ny);
       ny += blockH;
     });
   }
@@ -12217,19 +12529,39 @@ function init() {
   renderWzAnsicht();
 }
 
-// ── Rücksprung-Ziel der Kopfzeile ──────────────────────────────────────────
-// Ist der Zeichner aus einem Projekt heraus geöffnet, führt der Pfeil zurück
-// in genau dieses Projekt; sonst auf den Startbildschirm.
+/* ── Rücksprung-Ziel der Kopfzeile ──────────────────────────────────────────
+   Der Pfeil führt dorthin, WO DER NUTZER HERKAM: aus der Zeichnungsübersicht
+   zurück in die Zeichnungsübersicht, aus dem Aufmaß zurück ins Aufmaß, sonst
+   auf den Startbildschirm.
+
+   Früher entschied das allein `linkedProjectId`: Jede Zeichnung, die zu einem
+   Projekt gehört – also praktisch jede –, schickte den Pfeil nach
+   `#/aufmass`. Wer aus der Zeichnungsübersicht kam, landete damit im anderen
+   Programm, ohne es gewollt zu haben. Die Herkunft kennt die Shell
+   (Shell.zurueckZiel); hier steht nur noch, wie sie beschriftet wird.
+
+   Ein Ziel außerhalb von AufmaßX kommt dabei nicht vor: `zurueckZiel()`
+   liefert ausschließlich Routen dieser Anwendung, im Zweifel den
+   Startbildschirm.                                                         */
+
+const ZURUECK_NAMEN = {
+  '#/':            'Zurück zum Startbildschirm',
+  '#/2d/projekte': 'Zurück zur Zeichnungsübersicht',
+  '#/aufmass':     'Zurück zum Aufmaß',
+  '#/2d':          'Zurück zum Startbildschirm'
+};
 
 function syncBackLink() {
   const backLink = document.querySelector('#td-zeichnung .back-link');
   if (!backLink) return;
-  const ziel = linkedProjectId ? 'Aufmaß' : 'Start';
-  backLink.setAttribute('href', linkedProjectId ? '#/aufmass' : '#/');
+  const ziel = (typeof Shell !== 'undefined' && Shell.zurueckZiel)
+    ? Shell.zurueckZiel() : '#/';
+  const sicher = ZURUECK_NAMEN[ziel] ? ziel : '#/';
+  backLink.setAttribute('href', sicher);
   // Nur der Pfeil: in der schmalen Leiste zählt jeder Millimeter, das Ziel
   // steht im Tooltip und in der Vorlesehilfe.
-  backLink.setAttribute('title', 'Zurück zu ' + ziel);
-  backLink.setAttribute('aria-label', 'Zurück zu ' + ziel);
+  backLink.setAttribute('title', ZURUECK_NAMEN[sicher]);
+  backLink.setAttribute('aria-label', ZURUECK_NAMEN[sicher]);
 }
 
 /**

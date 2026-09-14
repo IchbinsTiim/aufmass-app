@@ -54,10 +54,12 @@ async function measure(kind) {
     // Beschriftungen und Übersichtskarten mitschneiden.
     const labels = [], locators = [], raw = [];
     const origPill = window.pdfPill, origText = window.pdfText, origLoc = window.pdfDrawLocator;
-    // Die GEPLANTEN Beschriftungen (vor der Kollisionsprüfung) mitschneiden –
-    // nur so ist belegbar, dass die Sperrzonen überhaupt etwas zu tun haben.
-    const origLabels = window.pdfPlanLabels;
-    window.pdfPlanLabels = function (doc, ...rest) {
+    // Die GEPLANTEN Beschriftungen (vor dem Entzerren) mitschneiden – nur so
+    // ist belegbar, dass Sperrzonen und Entzerrung überhaupt etwas zu tun
+    // haben. Mitgeschnitten wird deshalb der Planer (pdfLabelsPlanen), nicht
+    // das Ergebnis der Entzerrung (pdfPlanLabels).
+    const origLabels = window.pdfLabelsPlanen;
+    window.pdfLabelsPlanen = function (doc, ...rest) {
       const out = origLabels.call(null, doc, ...rest);
       out.forEach(l => raw.push({ page: doc._page, text: l.text, ...l.rect }));
       return out;
@@ -93,7 +95,7 @@ async function measure(kind) {
       orientation = JSON.parse(first[1]).orientation;
     } finally {
       window.pdfPill = origPill; window.pdfText = origText; window.pdfDrawLocator = origLoc;
-      window.pdfPlanLabels = origLabels;
+      window.pdfLabelsPlanen = origLabels;
     }
 
     // Erlaubter Zeichenbereich einer PLANSEITE – exakt wie in buildPdf.

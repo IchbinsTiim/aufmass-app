@@ -112,7 +112,12 @@ try {
     '/app/viewer2d.html',
     '/konto',
     '/kein-zugang',
-    '/admin/einladungen'
+    '/admin/einladungen',
+    // Die Mitarbeiterverwaltung zeigt Namen, E-Mail-Adressen und
+    // Anmeldezeitpunkte – sie ist ohne Anmeldung genauso zu wie die App.
+    '/mitarbeiter',
+    '/mitarbeiter/user_beispiel',
+    '/rollen'
   ];
 
   for (const pfad of geschuetzt) {
@@ -187,10 +192,15 @@ try {
   assert(/Einladungscode/i.test(einladungRumpf),
     'die Einladungsseite fragt nach dem Code');
 
-  // Die Verwaltung der Codes ist keine offene Tür.
-  const verwaltung = await hole('/admin/einladungen');
-  assert(verwaltung.status !== 200,
-    `/admin/einladungen ist ohne Anmeldung zu (${verwaltung.status})`);
+  // Die Verwaltung ist keine offene Tür – weder für Codes noch für
+  // Mitarbeiterdaten oder Rollen.
+  for (const pfad of ['/admin/einladungen', '/mitarbeiter', '/rollen']) {
+    const verwaltung = await hole(pfad);
+    const rumpf = await verwaltung.text();
+    assert(verwaltung.status !== 200, `${pfad} ist ohne Anmeldung zu (${verwaltung.status})`);
+    assert(!/Mitarbeiter verwalten|Rollen &amp; Rechte|Einladungscode erstellen/.test(rumpf),
+      `${pfad} gibt ohne Anmeldung nichts preis`);
+  }
 
   // ── 8. Registrierung ohne gültigen Code ──────────────────────────────────
   // Die Route legt ohne Code kein Konto an – weder mit leerem Code, noch mit

@@ -9,7 +9,9 @@ export const runtime = 'nodejs';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const [{ id }, zugriff, body] = await Promise.all([params, cloudZugriff(), request.json()]);
+    const [{ id }, zugriff, body] = await Promise.all([
+      params, cloudZugriff('projekte.bearbeiten'), request.json()
+    ]);
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
     if (!email || email.length > 320) return NextResponse.json({ error: 'Bitte eine gültige E-Mail-Adresse eingeben.' }, { status: 400 });
     const client = await clerkClient();

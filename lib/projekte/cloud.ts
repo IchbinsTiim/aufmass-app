@@ -1,5 +1,7 @@
 import { abfrageHolen } from '@/lib/einladungen/db';
 import type { Abfrage } from '@/lib/einladungen/kern';
+import { aktivitaetNotieren } from '@/lib/mitarbeiter/aktivitaet';
+import { hatRecht } from '@/lib/rollen';
 
 export type CloudRolle = 'lesen' | 'bearbeiten';
 export type CloudProjekt = {
@@ -102,7 +104,9 @@ export async function arbeitsbereichAuflisten(userId: string, istAdmin: boolean)
 }
 
 export async function projektSpeichern(
-  userId: string, istAdmin: boolean, eingabe: { id: unknown; inhalt: unknown; revision?: unknown }
+  userId: string, istAdmin: boolean,
+  eingabe: { id: unknown; inhalt: unknown; revision?: unknown },
+  rechte?: Set<string> | string[]
 ): Promise<CloudProjekt> {
   const id = textId(eingabe.id, 'Projekt-ID');
   const inhalt = objekt(eingabe.inhalt, 'Projekt');
@@ -110,15 +114,33 @@ export async function projektSpeichern(
   const vorher = await projektHolen(id, userId, istAdmin);
   const verbindung = db();
 
+  // Anlegen und Ändern sind zwei verschiedene Rechte. Welches von beiden
+  // gebraucht wird, weiß erst diese Stelle – vorher ist nicht bekannt, ob es
+  // das Projekt schon gibt. Ohne mitgegebene Rechte (Altaufrufe, Tests) wird
+  // nicht geprüft; die Route reicht sie durch.
+  if (rechte) {
+    const noetig = vorher ? 'projekte.bearbeiten' : 'projekte.erstellen';
+    if (!hatRecht(rechte, noetig)) {
+      throw new CloudFehler(403, vorher
+        ? 'Ihre Rolle darf Projekte nicht bearbeiten.'
+        : 'Ihre Rolle darf keine Projekte anlegen.');
+    }
+  }
+
   if (!vorher) {
     const neu = await verbindung(
-      `INSERT INTO cloud_projekte (id, owner_user_id, titel, inhalt)
-       VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO cloud_projekte (id, owner_user_id, titel, inhalt, erstellt_von, geaendert_von)
+       VALUES ($1, $2, $3, $4::jsonb, $2, $2)
        ON CONFLICT (id) DO NOTHING
        RETURNING id, owner_user_id, inhalt, revision, NULL::text AS freigabe`,
       [id, userId, titel, JSON.stringify(inhalt)]
     );
-    if (neu[0]) return zeileZuProjekt(neu[0], userId, istAdmin);
+    if (neu[0]) {
+      await aktivitaetNotieren(verbindung, {
+        userId, art: 'projekt.angelegt', objektId: id, objektTitel: titel
+      });
+      return zeileZuProjekt(neu[0], userId, istAdmin);
+    }
     // Die ID gehört inzwischen einem anderen Konto; kein Projekt übernehmen.
     const inzwischen = await projektHolen(id, userId, istAdmin);
     if (!inzwischen) throw new CloudFehler(403, 'Für dieses Projekt fehlt die Berechtigung.');
@@ -132,7 +154,7 @@ export async function projektSpeichern(
   }
   const zeilen = await verbindung(
     `UPDATE cloud_projekte p SET titel = $1, inhalt = $2::jsonb,
-       revision = p.revision + 1, geaendert_am = now()
+       revision = p.revision + 1, geaendert_am = now(), geaendert_von = $5
       WHERE p.id = $3 AND p.revision = $4
         AND ($6::boolean OR p.owner_user_id = $5 OR EXISTS (
           SELECT 1 FROM cloud_projekt_freigaben f
@@ -149,17 +171,27 @@ export async function projektSpeichern(
   return zeileZuProjekt(zeilen[0], userId, istAdmin);
 }
 
-export async function projektLoeschen(userId: string, istAdmin: boolean, idWert: string, revisionWert: unknown) {
+export async function projektLoeschen(
+  userId: string, istAdmin: boolean, idWert: string, revisionWert: unknown,
+  rechte?: Set<string> | string[]
+) {
   const id = textId(idWert, 'Projekt-ID');
   const vorher = await projektHolen(id, userId, istAdmin);
   if (!vorher) throw new CloudFehler(404, 'Projekt nicht gefunden.');
+  if (rechte && !hatRecht(rechte, 'projekte.loeschen')) {
+    throw new CloudFehler(403, 'Ihre Rolle darf Projekte nicht löschen.');
+  }
   if (!istAdmin && vorher.ownerUserId !== userId) throw new CloudFehler(403, 'Nur der Eigentümer darf das Projekt löschen.');
   const revision = Number(revisionWert);
   if (!Number.isInteger(revision) || revision !== vorher.revision) {
     throw new CloudFehler(409, 'Das Projekt wurde auf einem anderen Gerät geändert.', vorher);
   }
-  const zeilen = await db()('DELETE FROM cloud_projekte WHERE id = $1 AND revision = $2 RETURNING id', [id, revision]);
+  const zeilen = await db()('DELETE FROM cloud_projekte WHERE id = $1 AND revision = $2 RETURNING titel', [id, revision]);
   if (!zeilen[0]) throw new CloudFehler(409, 'Das Projekt wurde gleichzeitig geändert.');
+  await aktivitaetNotieren(db(), {
+    userId, art: 'projekt.geloescht', objektId: id,
+    objektTitel: String(zeilen[0].titel || '')
+  });
 }
 
 export async function ordnerSpeichern(
@@ -173,7 +205,8 @@ export async function ordnerSpeichern(
   );
   if (!vorher[0]) {
     const neu = await verbindung(
-      `INSERT INTO cloud_ordner (id, owner_user_id, inhalt) VALUES ($1, $2, $3::jsonb)
+      `INSERT INTO cloud_ordner (id, owner_user_id, inhalt, erstellt_von, geaendert_von)
+       VALUES ($1, $2, $3::jsonb, $2, $2)
        ON CONFLICT (id) DO NOTHING RETURNING id, inhalt, revision`, [id, userId, JSON.stringify(inhalt)]
     );
     if (neu[0]) return zeileZuOrdner(neu[0]);
@@ -184,7 +217,8 @@ export async function ordnerSpeichern(
     throw new CloudFehler(409, 'Der Ordner wurde auf einem anderen Gerät geändert.', zeileZuOrdner(vorher[0]));
   }
   const neu = await verbindung(
-    `UPDATE cloud_ordner SET inhalt = $1::jsonb, revision = revision + 1, geaendert_am = now()
+    `UPDATE cloud_ordner SET inhalt = $1::jsonb, revision = revision + 1, geaendert_am = now(),
+       geaendert_von = $3
       WHERE id = $2 AND owner_user_id = $3 AND revision = $4 RETURNING id, inhalt, revision`,
     [JSON.stringify(inhalt), id, userId, revision]
   );

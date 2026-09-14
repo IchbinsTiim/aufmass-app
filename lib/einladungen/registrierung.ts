@@ -50,7 +50,7 @@ export type KontoAnleger = (auftrag: {
   email?: string;
   vorname?: string;
   nachname?: string;
-  rolle: 'admin' | 'mitarbeiter';
+  rolle: string;
   einladungId: string;
 }) => Promise<{ userId: string }>;
 

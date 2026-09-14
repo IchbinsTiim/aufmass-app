@@ -120,7 +120,25 @@ const CloudSpeicher = (() => {
     }
   }
 
+  /* Das angemeldete Konto samt Rechten kommt mit der Arbeitsbereich-Antwort
+     (siehe app/api/cloud/arbeitsbereich/route.ts). Gebraucht wird es für
+     genau eine Sache: den Zugang zur Mitarbeiterverwaltung in der Fußzeile
+     anzubieten – und nur dem, der ihn auch nutzen darf. Die Seite dahinter
+     prüft das Recht selbst noch einmal; hier geht es allein darum, niemandem
+     einen Link vor die Nase zu setzen, der ihn zu einer Absage führt. */
+  let konto = null;
+
+  function kontoUebernehmen(daten) {
+    konto = daten && typeof daten === 'object' ? daten : null;
+    const rechte = Array.isArray(konto?.rechte) ? konto.rechte : [];
+    const darfMitarbeiter = rechte.includes('mitarbeiter.ansehen');
+    ['hubMitarbeiterBtn', 'hubMitarbeiterSep'].forEach(id => {
+      document.getElementById(id)?.classList.toggle('hidden', !darfMitarbeiter);
+    });
+  }
+
   function arbeitsbereichEinspielen(cloud) {
+    kontoUebernehmen(cloud && cloud.konto);
     const lokalProjekte = lokaleProjekte();
     const lokalOrdner = lokaleOrdner();
     const remoteProjekte = new Map((cloud.projects || []).map(p => [p.id, p]));
@@ -236,7 +254,14 @@ const CloudSpeicher = (() => {
       if (laut && typeof showToast === 'function') showToast('Cloud-Projekte sind aktuell');
     } catch (fehler) {
       if (fehler.status === 409) konflikt('Dieses Projekt wurde auf einem anderen Gerät geändert.');
-      else {
+      else if (fehler.status === 403) {
+        // Die Rolle darf den Vorgang nicht. „Nicht erreichbar" wäre hier die
+        // falsche Auskunft – die Verbindung steht, die Berechtigung fehlt.
+        status('Keine Berechtigung', 'fehler');
+        if (typeof showToast === 'function') {
+          showToast(fehler.message || 'Dafür fehlt Ihrer Rolle die Berechtigung.');
+        }
+      } else {
         status(navigator.onLine ? 'Cloud gerade nicht erreichbar' : 'Offline – Änderungen bleiben auf diesem Gerät', 'fehler');
         if (laut && typeof showToast === 'function') showToast(fehler.message || 'Cloud-Speicher nicht erreichbar');
       }
@@ -306,7 +331,12 @@ const CloudSpeicher = (() => {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 
-  return { aktualisieren, freigeben, status: () => document.getElementById(STATUS_ID)?.textContent || '' };
+  return {
+    aktualisieren, freigeben,
+    status: () => document.getElementById(STATUS_ID)?.textContent || '',
+    konto: () => konto,
+    darf: recht => Array.isArray(konto?.rechte) && konto.rechte.includes(recht)
+  };
 })();
 
 // Andere Bestands-Skripte greifen bewusst über `window` darauf zu.

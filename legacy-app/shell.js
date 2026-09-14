@@ -36,6 +36,34 @@ const Shell = (() => {
   let aktuelleAnsicht = null;
   let aktuellerHash   = null;
 
+  /* ── Woher kam der Zeichner? ──────────────────────────────────────────────
+     Der Zurück-Pfeil oben links in der 2D-Zeichnung führt dorthin zurück, wo
+     der Nutzer die Zeichnung geöffnet hat – und nicht an einen fest
+     verdrahteten Ort.
+
+     Vorher hing das Ziel allein daran, ob die Zeichnung zu einem Projekt
+     gehört: Tat sie das, ging der Pfeil nach `#/aufmass`. Weil eine Zeichnung
+     aber fast immer zu einem Projekt gehört, landete man auch dann im
+     Aufmaß-Modul, wenn man aus der Zeichnungsübersicht gekommen war – also
+     im falschen Programm.
+
+     Gemerkt wird deshalb die Route, aus der heraus `#/2d` betreten wurde.
+     Ist keine bekannt (Deep-Link, Neuladen), führt der Pfeil auf den
+     Startbildschirm. Ein Ziel außerhalb dieser Anwendung gibt es nicht.     */
+  const ZURUECK_FALLBACK = '#/';
+  let herkunft2d = null;
+
+  function merkeHerkunft(neuerHash) {
+    if (neuerHash !== '#/2d') return;
+    if (!aktuellerHash || aktuellerHash === '#/2d') return;
+    herkunft2d = ROUTEN[aktuellerHash] ? aktuellerHash : null;
+  }
+
+  /** Route, auf die der Zurück-Pfeil der 2D-Zeichnung führt. */
+  function zurueckZiel() {
+    return herkunft2d && ROUTEN[herkunft2d] ? herkunft2d : ZURUECK_FALLBACK;
+  }
+
   // ── Routen lesen/schreiben ────────────────────────────────────────────────
 
   function ansichtAusHash() {
@@ -57,6 +85,10 @@ const Shell = (() => {
   function zeige(ansicht, hash) {
     if (!ROUTE_VON_ANSICHT[ansicht]) ansicht = 'hub';
     hash = hash || window.location.hash || '#/';
+
+    // Muss VOR jedem Zustandswechsel passieren: danach ist `aktuellerHash`
+    // schon die neue Route und die Herkunft nicht mehr feststellbar.
+    merkeHerkunft(hash);
 
     // Gleiche Ansicht, andere Unterroute (z. B. Zeichnung ↔ Projektliste):
     // Das Modul bleibt geladen und entscheidet selbst, was es anzeigt.
@@ -278,5 +310,11 @@ const Shell = (() => {
     start();
   }
 
-  return { gehe, zeige, aktualisiereHub, ansicht: () => aktuelleAnsicht };
+  return {
+    gehe, zeige, aktualisiereHub,
+    ansicht: () => aktuelleAnsicht,
+    zurueckZiel,
+    /** Nur für Tests und Sonderfälle: Herkunft wieder vergessen. */
+    herkunftZuruecksetzen: () => { herkunft2d = null; }
+  };
 })();

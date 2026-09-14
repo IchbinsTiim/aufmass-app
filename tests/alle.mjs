@@ -36,7 +36,10 @@ const DATEIEN = [
   'r16-cloud-zeichnungen-ui.mjs',
   'r13-einladungscodes.mjs',
   'r14-runde8.mjs',
-  'r18-tutorial.mjs'
+  'r18-tutorial.mjs',
+  'r19-rollen-rechte.mjs',
+  'r20-pdf-beschriftung.mjs',
+  'r21-zeichnung-navigation.mjs'
 ];
 
 const fehlgeschlagen = [];

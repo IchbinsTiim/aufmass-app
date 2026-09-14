@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { abfrageHolen, einladungenBereit } from '@/lib/einladungen/db';
 import { einladungenAuflisten, type Einladung } from '@/lib/einladungen/kern';
-import { zugangPruefen } from '@/lib/zugang';
+import { hatRecht, rolleBeschriftung } from '@/lib/rollen';
+import { rollenHolen, zugangMitRechten } from '@/lib/zugang';
 import { AnlegeFormular } from './formular';
 import { codeWiderrufen } from './aktionen';
 
@@ -17,21 +18,30 @@ export const dynamic = 'force-dynamic';
  * einen neuen an.
  */
 export default async function EinladungsVerwaltung() {
-  const zugang = await zugangPruefen();
+  const zugang = await zugangMitRechten();
   if (zugang.grund === 'nicht-angemeldet') redirect('/sign-in');
   if (!zugang.erlaubt) redirect('/kein-zugang');
-  if (zugang.rolle !== 'admin') redirect('/app');
+  // Nicht mehr „ist Admin", sondern „darf Mitarbeiter verwalten": Eine eigene
+  // Rolle mit diesem Recht kommt genauso herein (siehe lib/rollen.ts).
+  if (!hatRecht(zugang.rechte, 'mitarbeiter.verwalten')) redirect('/app');
 
   const bereit = einladungenBereit();
   const abfrage = abfrageHolen();
-  const liste: Einladung[] = bereit && abfrage ? await einladungenAuflisten(abfrage) : [];
+  const [liste, rollen] = await Promise.all([
+    bereit && abfrage ? einladungenAuflisten(abfrage) : Promise.resolve([] as Einladung[]),
+    rollenHolen()
+  ]);
 
   return (
     <main className="admin-seite">
       <div className="admin-wrap">
         <header className="admin-kopf">
           <h1>Mitarbeiter einladen</h1>
-          <Link className="admin-knopf-klein" href="/app">Zur Anwendung</Link>
+          <nav className="admin-navi">
+            <Link className="admin-knopf-klein" href="/mitarbeiter">Mitarbeiter</Link>
+            <Link className="admin-knopf-klein" href="/rollen">Rollen</Link>
+            <Link className="admin-knopf-klein" href="/app">Zur Anwendung</Link>
+          </nav>
         </header>
 
         {!bereit ? (
@@ -46,7 +56,7 @@ export default async function EinladungsVerwaltung() {
           </div>
         ) : (
           <>
-            <AnlegeFormular />
+            <AnlegeFormular rollen={rollen} />
 
             <div className="admin-karte admin-rollen">
               <table className="admin-tabelle">
@@ -67,7 +77,7 @@ export default async function EinladungsVerwaltung() {
                     <tr key={e.id}>
                       <td><code>{e.codePraefix}-…</code></td>
                       <td><StatusPille einladung={e} /></td>
-                      <td>{e.rolle === 'admin' ? 'Administrator' : 'Mitarbeiter'}</td>
+                      <td>{rolleBeschriftung(e.rolle, rollen)}</td>
                       <td>{datum(e.laeuftAbAm)}</td>
                       <td>{e.notiz || '—'}</td>
                       <td>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { STANDARD_ROLLE, type Rolle } from '@/lib/rollen';
 import { codeAnlegen, type AnlegeErgebnis } from './aktionen';
 
 /**
@@ -8,7 +9,7 @@ import { codeAnlegen, type AnlegeErgebnis } from './aktionen';
  * Kasten – zum Abschreiben oder Kopieren. Ein Neuladen der Seite lässt ihn
  * verschwinden; das ist beabsichtigt.
  */
-export function AnlegeFormular() {
+export function AnlegeFormular({ rollen }: { rollen: Rolle[] }) {
   const [ergebnis, aktion, laeuft] = useActionState<AnlegeErgebnis | null, FormData>(
     codeAnlegen,
     null
@@ -24,9 +25,10 @@ export function AnlegeFormular() {
         </label>
         <label className="auth-feld">
           <span>Rolle</span>
-          <select name="rolle" defaultValue="mitarbeiter" className="auth-eingabe">
-            <option value="mitarbeiter">Mitarbeiter</option>
-            <option value="admin">Administrator</option>
+          <select name="rolle" defaultValue={STANDARD_ROLLE} className="auth-eingabe">
+            {rollen.map(r => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
           </select>
         </label>
         <label className="auth-feld">

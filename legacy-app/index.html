@@ -17,7 +17,7 @@
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
   <link rel="stylesheet" href="/app/core.css?v=20260908b" />
   <link rel="stylesheet" href="/app/style.css?v=20260908b" />
-  <link rel="stylesheet" href="/app/viewer2d.css?v=20260908b" />
+  <link rel="stylesheet" href="/app/viewer2d.css?v=20260914" />
   <link rel="stylesheet" href="/app/shell.css?v=20260908b" />
   <link rel="stylesheet" href="/app/theme.css?v=20260908b" />
   <link rel="stylesheet" href="/app/zeichnungen.css?v=20260911">
@@ -146,6 +146,12 @@
         <!-- Konto/Abmelden liegt bewusst hier und nicht im Modul-Umschalter:
              der Umschalter wird während der Arbeit dauernd angetippt, ein
              Abmelden-Knopf daneben wäre ein Fehlgriff mit Folgen. -->
+        <!-- Erscheint nur, wenn die Rolle des angemeldeten Benutzers das Recht
+             „Mitarbeiter ansehen" trägt (siehe cloud.js). Die Seite selbst
+             prüft es noch einmal – der ausgeblendete Link ist Bequemlichkeit,
+             keine Absicherung. -->
+        <a class="hub-foot-btn hidden" id="hubMitarbeiterBtn" href="/mitarbeiter">Mitarbeiter</a>
+        <span class="hub-foot-sep hidden" id="hubMitarbeiterSep">·</span>
         <a class="hub-foot-btn" id="hubKontoBtn" href="/konto">Konto &amp; Abmelden</a>
       </footer>
     </div>
@@ -817,11 +823,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/app/core.js?v=20260908b"></script>
   <script src="/app/script.js?v=20260910a"></script>
-  <script src="/app/viewer2d.js?v=20260911"></script>
-  <script src="/app/cloud.js?v=20260911"></script><script src="/app/zeichnungen.js?v=20260911"></script>
+  <script src="/app/viewer2d.js?v=20260914"></script>
+  <script src="/app/cloud.js?v=20260914"></script><script src="/app/zeichnungen.js?v=20260911"></script>
   <!-- Das Tutorial liegt bewusst NACH viewer2d.js: es ruft dessen Funktionen
        (closeSheet, openAddSheet, setWerkzeugPanel) auf, statt sie nachzubauen. -->
   <script src="/app/tutorial.js?v=20260913"></script>
-  <script src="/app/shell.js?v=20260908b"></script>
+  <script src="/app/shell.js?v=20260914"></script>
 </body>
 </html>
