@@ -9,6 +9,8 @@ export type CloudProjekt = {
   revision: number;
   ownerUserId: string;
   rolle: 'owner' | 'admin' | CloudRolle;
+  eigenes?: boolean;
+  erstelltVon?: string;
   inhalt: Record<string, unknown>;
 };
 export type CloudOrdner = {
