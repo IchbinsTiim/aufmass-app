@@ -197,6 +197,27 @@ html, body {
   gap: 8px;
   margin-bottom: 12px;
 }
+.project-view-switch {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+.project-view-btn {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.project-view-btn.active { background: var(--color-primary); color: #fff; }
 .overview-search { flex: 2; min-width: 200px; }
 .overview-select { flex: 1; min-width: 140px; }
 
@@ -343,6 +364,12 @@ html, body {
   margin-top: 4px;
   font-size: 0.7rem;
   color: var(--color-text-secondary);
+}
+.project-card2-owner {
+  margin-top: 10px;
+  color: var(--color-text-secondary);
+  font-size: .82rem;
+  font-weight: 600;
 }
 
 /* Schwebendes Aktionsmenü (Projekt-/Ordner-Aktionen) */

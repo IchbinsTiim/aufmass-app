@@ -16,7 +16,7 @@
   <!-- Reihenfolge zählt: core = Tokens & gemeinsame Bausteine, dann die beiden
        Modul-Stylesheets, dann Shell (Hub/Umschalter) und Theme (Oberfläche). -->
   <link rel="stylesheet" href="/app/core.css?v=20260908b" />
-  <link rel="stylesheet" href="/app/style.css?v=20260908b" />
+  <link rel="stylesheet" href="/app/style.css?v=20260914b" />
   <link rel="stylesheet" href="/app/viewer2d.css?v=20260914" />
   <link rel="stylesheet" href="/app/shell.css?v=20260908b" />
   <link rel="stylesheet" href="/app/theme.css?v=20260908b" />
@@ -172,6 +172,11 @@
         <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
       </header>
       <main class="screen-content">
+
+        <div class="project-view-switch hidden" id="projectViewSwitch" aria-label="Zeichnungsansicht">
+          <button type="button" class="project-view-btn active" id="myProjectsBtn">Meine Zeichnungen</button>
+          <button type="button" class="project-view-btn" id="allProjectsBtn">Alle Zeichnungen</button>
+        </div>
 
         <div class="overview-toolbar">
           <input type="search" id="searchInput" class="form-input overview-search" placeholder="Suche nach Name, Kunde, Adresse…" />
@@ -822,9 +827,9 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/app/core.js?v=20260908b"></script>
-  <script src="/app/script.js?v=20260910a"></script>
-  <script src="/app/viewer2d.js?v=20260914"></script>
-  <script src="/app/cloud.js?v=20260914"></script><script src="/app/zeichnungen.js?v=20260911"></script>
+  <script src="/app/script.js?v=20260914b"></script>
+  <script src="/app/viewer2d.js?v=20260914b"></script>
+  <script src="/app/cloud.js?v=20260914b"></script><script src="/app/zeichnungen.js?v=20260911"></script>
   <!-- Das Tutorial liegt bewusst NACH viewer2d.js: es ruft dessen Funktionen
        (closeSheet, openAddSheet, setWerkzeugPanel) auf, statt sie nachzubauen. -->
   <script src="/app/tutorial.js?v=20260913"></script>

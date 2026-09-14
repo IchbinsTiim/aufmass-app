@@ -46,6 +46,8 @@ const CloudSpeicher = (() => {
       revision: cloud.revision,
       ownerUserId: cloud.ownerUserId || null,
       rolle: cloud.rolle || 'owner',
+      eigenes: cloud.eigenes !== false,
+      erstelltVon: cloud.erstelltVon || (cloud.eigenes === false ? 'Mitarbeiter' : 'Du'),
       dirty: false
     };
     return lokal;
@@ -197,7 +199,10 @@ const CloudSpeicher = (() => {
       method: 'PUT', body: JSON.stringify({ inhalt: ohneMeta(projekt), revision })
     });
     const cloud = body.projekt;
-    projekt[META] = { revision: cloud.revision, ownerUserId: cloud.ownerUserId, rolle: cloud.rolle };
+    projekt[META] = {
+      ...projekt[META], revision: cloud.revision, ownerUserId: cloud.ownerUserId,
+      rolle: cloud.rolle, dirty: false
+    };
     snapshotsProjekt.set(projekt.id, fingerabdruck(projekt));
     bekannteProjektIds.set(projekt.id, cloud.revision);
   }
@@ -320,6 +325,31 @@ const CloudSpeicher = (() => {
     }
   }
 
+  /** Löscht zuerst die Cloud-Fassung und erst danach den lokalen Eintrag.
+      So kann eine gleichzeitig laufende Sicherung keine Zeichnung wieder
+      hervorholen, die der Benutzer gerade entfernt hat. */
+  async function loeschen(projekt) {
+    const meta = projekt?.[META];
+    if (!meta?.revision) return true; // noch nie hochgeladen
+    if (meta.rolle === 'lesen' || meta.rolle === 'bearbeiten') {
+      if (typeof showToast === 'function') showToast('Nur Eigentümer oder Administratoren dürfen löschen.');
+      return false;
+    }
+    while (laeuft) await new Promise(resolve => setTimeout(resolve, 40));
+    const revision = lokaleProjekte().find(p => p.id === projekt.id)?.[META]?.revision || meta.revision;
+    try {
+      await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id) +
+        '?revision=' + encodeURIComponent(revision), { method: 'DELETE' });
+      bekannteProjektIds.delete(projekt.id);
+      snapshotsProjekt.delete(projekt.id);
+      return true;
+    } catch (fehler) {
+      if (fehler.status === 409) konflikt('Die Zeichnung wurde auf einem anderen Gerät geändert.');
+      else if (typeof showToast === 'function') showToast(fehler.message || 'Zeichnung konnte nicht gelöscht werden.');
+      return false;
+    }
+  }
+
   function start() {
     const btn = document.getElementById('hubCloudBtn');
     btn?.addEventListener('click', () => void aktualisieren());
@@ -332,10 +362,15 @@ const CloudSpeicher = (() => {
   else start();
 
   return {
-    aktualisieren, freigeben,
+    aktualisieren, freigeben, loeschen,
     status: () => document.getElementById(STATUS_ID)?.textContent || '',
     konto: () => konto,
-    darf: recht => Array.isArray(konto?.rechte) && konto.rechte.includes(recht)
+    darf: recht => Array.isArray(konto?.rechte) && konto.rechte.includes(recht),
+    istEigenes: projekt => {
+      const meta = projekt?.[META];
+      return !meta?.ownerUserId || !konto?.userId || meta.ownerUserId === konto.userId;
+    },
+    ersteller: projekt => projekt?.[META]?.erstelltVon || 'Mitarbeiter'
   };
 })();
 

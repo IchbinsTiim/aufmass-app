@@ -13097,19 +13097,24 @@ function legeZeichnungAn(name, folderId) {
 }
 
 /** Entfernt Zeichnungen aus dem Speicher. @returns die entfernten Datensätze. */
-function loescheZeichnungen(ids) {
+async function loescheZeichnungen(ids) {
   const liste   = loadLinkedProjects();
-  const entfernt = liste.filter(p => ids.indexOf(p.id) >= 0);
+  const ziel = liste.filter(p => ids.indexOf(p.id) >= 0);
+  const entfernt = [];
+  for (const projekt of ziel) {
+    if (!window.CloudSpeicher || await window.CloudSpeicher.loeschen(projekt)) entfernt.push(projekt);
+  }
   if (!entfernt.length) return [];
-  if (!schreibeLinkedProjects(liste.filter(p => ids.indexOf(p.id) < 0))) return [];
+  const geloescht = new Set(entfernt.map(projekt => projekt.id));
+  if (!schreibeLinkedProjects(liste.filter(p => !geloescht.has(p.id)))) return [];
 
   // Der Zeiger auf „zuletzt geöffnet" darf nicht auf einen gelöschten
   // Datensatz zeigen – sonst sucht der nächste Start ein Projekt, das es
   // nicht mehr gibt.
   const aktuell = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
-  if (aktuell && ids.indexOf(aktuell) >= 0) localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+  if (aktuell && geloescht.has(aktuell)) localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
 
-  zeichnungenEntfallen(ids);
+  zeichnungenEntfallen(Array.from(geloescht));
   return entfernt;
 }
 
@@ -13127,8 +13132,8 @@ function frageZeichnungenLoeschen(ids) {
   const ziel = loadLinkedProjects().filter(p => ids.indexOf(p.id) >= 0);
   if (!ziel.length) return;
 
-  zeigeLoeschDialog(ziel, () => {
-    const entfernt = loescheZeichnungen(ziel.map(p => p.id));
+  zeigeLoeschDialog(ziel, async () => {
+    const entfernt = await loescheZeichnungen(ziel.map(p => p.id));
     if (!entfernt.length) return;
     setzeAuswahlModus(false, true);
     renderProjektListe();

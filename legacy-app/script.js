@@ -36,7 +36,8 @@ let overviewState = {
   search: '',
   folderId: '',       // '' = alle, '__none__' = ohne Ordner, sonst Ordner-ID
   status: '',          // '' = alle
-  sort: 'geaendert'    // 'geaendert' | 'name'
+  sort: 'geaendert',   // 'geaendert' | 'name'
+  ansicht: 'meine'     // 'meine' | 'alle'
 };
 
 const ZUSATZ_ARTEN = [
@@ -600,7 +601,7 @@ function matchesSearch(proj, q) {
 }
 
 function getFilteredSortedProjects() {
-  let list = projects.filter(p => {
+  let list = sichtbareProjekte().filter(p => {
     if (overviewState.folderId === '__none__' && p.folderId) return false;
     if (overviewState.folderId && overviewState.folderId !== '__none__' && p.folderId !== overviewState.folderId) return false;
     if (overviewState.status && p.status !== overviewState.status) return false;
@@ -613,6 +614,19 @@ function getFilteredSortedProjects() {
     list = list.sort((a, b) => (b.geaendert || '').localeCompare(a.geaendert || ''));
   }
   return list;
+}
+
+function sichtbareProjekte() {
+  if (overviewState.ansicht === 'alle') return projects;
+  return projects.filter(projekt => window.CloudSpeicher?.istEigenes(projekt) !== false);
+}
+
+function aktualisiereAnsichtsUmschalter() {
+  const darfAlleSehen = window.CloudSpeicher?.darf('fremde.daten.ansehen') === true;
+  document.getElementById('projectViewSwitch')?.classList.toggle('hidden', !darfAlleSehen);
+  if (!darfAlleSehen && overviewState.ansicht === 'alle') overviewState.ansicht = 'meine';
+  document.getElementById('myProjectsBtn')?.classList.toggle('active', overviewState.ansicht === 'meine');
+  document.getElementById('allProjectsBtn')?.classList.toggle('active', overviewState.ansicht === 'alle');
 }
 
 function renderFolderBar() {
@@ -632,11 +646,12 @@ function renderFolderBar() {
     return btn;
   };
 
-  bar.appendChild(makeChip('Alle Projekte', '', projects.length));
-  bar.appendChild(makeChip('Ohne Ordner', '__none__', projects.filter(p => !p.folderId).length));
+  const basis = sichtbareProjekte();
+  bar.appendChild(makeChip('Alle Projekte', '', basis.length));
+  bar.appendChild(makeChip('Ohne Ordner', '__none__', basis.filter(p => !p.folderId).length));
 
   folders.forEach(f => {
-    const count = projects.filter(p => p.folderId === f.id).length;
+    const count = basis.filter(p => p.folderId === f.id).length;
     const chip = makeChip(f.name, f.id, count);
     chip.addEventListener('dblclick', () => renameFolderPrompt(f.id));
     bar.appendChild(chip);
@@ -777,6 +792,7 @@ function duplicateProject(proj) {
 
 function deleteProjectFromOverview(proj) {
   if (!confirm(`Projekt "${getProjectName(proj)}" wirklich löschen?`)) return;
+  void deleteProjectNachCloudFreigabe(proj, () => {
   const id = proj.id;
   projects = projects.filter(p => p.id !== id);
   saveProjects();
@@ -790,6 +806,12 @@ function deleteProjectFromOverview(proj) {
   if (typeof zeichnungenEntfallen === 'function')  zeichnungenEntfallen([id]);
   renderProjectOverview();
   showToast('Projekt gelöscht');
+  });
+}
+
+async function deleteProjectNachCloudFreigabe(proj, fortsetzen) {
+  if (window.CloudSpeicher && !(await window.CloudSpeicher.loeschen(proj))) return;
+  fortsetzen();
 }
 
 function openProjectActionMenu(proj, anchorEl) {
@@ -824,6 +846,7 @@ function createProjectCard(proj) {
     statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
   }
   const vzList = Array.isArray(proj.technik?.verwendungszweck) ? proj.technik.verwendungszweck : [];
+  const ersteller = overviewState.ansicht === 'alle' ? window.CloudSpeicher?.ersteller(proj) : null;
 
   card.innerHTML = `
     <div class="project-card2-top">
@@ -838,6 +861,7 @@ function createProjectCard(proj) {
     ${vzList.length ? `<div class="project-card2-vz">${vzList.map(v => `<span class="project-card2-vz-tag">${v}</span>`).join('')}</div>` : ''}
     <div class="project-card2-stats">${statsParts.join(' · ')}</div>
     <div class="project-card2-dates">Erstellt ${fmtDate(proj.erstellt)} · Geändert ${fmtDate(proj.geaendert)}</div>
+    ${ersteller ? `<div class="project-card2-owner">Erstellt von: ${ersteller}</div>` : ''}
   `;
 
   card.querySelector('.project-card2-menu-btn').addEventListener('click', ev => {
@@ -854,14 +878,24 @@ function renderProjectOverview() {
   const noResEl   = document.getElementById('noResultsState');
   if (!gridEl) return;
 
+  aktualisiereAnsichtsUmschalter();
   renderFolderBar();
   renderBackupReminder();
 
   gridEl.innerHTML = '';
 
-  if (projects.length === 0) {
+  if (sichtbareProjekte().length === 0) {
     emptyEl.classList.remove('hidden');
     noResEl.classList.add('hidden');
+    const titel = emptyEl.querySelector('h2');
+    const text = emptyEl.querySelector('p');
+    if (overviewState.ansicht === 'meine' && projects.length) {
+      if (titel) titel.textContent = 'Keine eigenen Zeichnungen';
+      if (text) text.textContent = 'Unter „Alle Zeichnungen“ sehen Sie die Projekte Ihrer Mitarbeiter.';
+    } else {
+      if (titel) titel.textContent = 'Keine Projekte';
+      if (text) text.textContent = 'Tippen Sie auf „+ Neues Projekt“ um zu beginnen.';
+    }
     return;
   }
   emptyEl.classList.add('hidden');
@@ -1271,6 +1305,9 @@ function flushAutosave() {
 function deleteCurrentProject() {
   if (!currentProjectId) return;
   if (!confirm('Dieses Projekt wirklich löschen?')) return;
+  const projekt = getCurrentProject();
+  if (!projekt) return;
+  void deleteProjectNachCloudFreigabe(projekt, () => {
   projects = projects.filter(p => p.id !== currentProjectId);
   saveProjects();
   if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === currentProjectId) {
@@ -1279,6 +1316,7 @@ function deleteCurrentProject() {
   currentProjectId = null;
   renderProjectOverview();
   showScreen('homeScreen');
+  });
 }
 
 // ============================================================
@@ -3543,6 +3581,14 @@ function initApp() {
   });
   document.getElementById('sortSelect')?.addEventListener('change', e => {
     overviewState.sort = e.target.value;
+    renderProjectOverview();
+  });
+  document.getElementById('myProjectsBtn')?.addEventListener('click', () => {
+    overviewState.ansicht = 'meine';
+    renderProjectOverview();
+  });
+  document.getElementById('allProjectsBtn')?.addEventListener('click', () => {
+    overviewState.ansicht = 'alle';
     renderProjectOverview();
   });
 }
