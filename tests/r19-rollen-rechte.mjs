@@ -297,6 +297,8 @@ assert(entscheide({}, ['chef@beispiel.de'])?.grund === 'admin-liste',
   'der Notzugang über AUFMASSX_ADMIN_EMAILS funktioniert');
 assert(entscheide({}, ['CHEF@Beispiel.DE'])?.grund === 'admin-liste',
   'Groß- und Kleinschreibung der Adresse ist dabei egal');
+assert(entscheide({ rolle: 'mitarbeiter' }, ['chef@beispiel.de'])?.rolle === 'admin',
+  'der Notzugang macht den ersten Administrator auch dann zum Admin, wenn ihm zuvor die Mitarbeiterrolle zugewiesen wurde');
 assert(entscheide({}, ['fremd@beispiel.de']) === null,
   'ein Konto ohne Rolle und ohne Notzugang bekommt keine Zusage');
 
