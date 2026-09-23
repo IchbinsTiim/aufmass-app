@@ -49,9 +49,10 @@ export function istRollenkennung(wert: unknown): wert is string {
  *
  *   1. DEAKTIVIERT schlägt alles. Auch eine Rolle, auch die Admin-Liste –
  *      sonst käme ein gesperrter Zugang über den Notzugang wieder herein.
- *   2. Eine gültige Rollenkennung ist der Nachweis der Einladung.
- *   3. Erst danach die Admin-Liste aus AUFMASSX_ADMIN_EMAILS – der Notzugang
- *      für den allerersten Administrator.
+ *   2. Die Admin-Liste aus AUFMASSX_ADMIN_EMAILS ist der Notzugang für den
+ *      ersten Administrator. Sie muss auch dann greifen, wenn diese Person
+ *      vorher bereits die Mitarbeiterrolle bekommen hat.
+ *   3. Eine gültige Rollenkennung ist der reguläre Nachweis der Einladung.
  *
  * @param metadata Clerks `publicMetadata`, oder `undefined`, wenn sie an
  *        dieser Stelle NICHT vorliegen.
@@ -68,12 +69,12 @@ export function zugangAusAngaben(
 ): Zugang | null {
   if (metadata === null || metadata === undefined) return null;
   if (metadata.status === STATUS_DEAKTIVIERT) return DEAKTIVIERT;
-  if (istRollenkennung(metadata.rolle)) {
-    return { erlaubt: true, rolle: metadata.rolle, grund: 'rolle' };
-  }
   const liste = adminEmails.map(e => String(e).trim().toLowerCase()).filter(Boolean);
   const treffer = emails.some(e => e && liste.includes(String(e).toLowerCase()));
   if (treffer) return { erlaubt: true, rolle: ADMIN_ROLLE, grund: 'admin-liste' };
+  if (istRollenkennung(metadata.rolle)) {
+    return { erlaubt: true, rolle: metadata.rolle, grund: 'rolle' };
+  }
   return null;
 }
 
