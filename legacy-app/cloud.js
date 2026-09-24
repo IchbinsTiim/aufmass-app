@@ -193,11 +193,60 @@ const CloudSpeicher = (() => {
     if (typeof showToast === 'function') showToast(text + ' Cloud aktualisieren, bevor Sie weiterschreiben.');
   }
 
+  /* Ein Konflikt darf niemals dazu führen, dass ein Stand still verloren geht.
+     Die API liefert bei 409 die aktuelle Cloud-Fassung bereits mit. Wir machen
+     daraus wieder das ursprüngliche Projekt und heben die lokale Änderung als
+     neues, klar benanntes Projekt auf. So ist der Server wieder aktuell und
+     der Mitarbeiter kann beide Fassungen vergleichen, statt in einer 409-
+     Schleife festzuhängen. */
+  function konfliktKopieId() {
+    return 'proj_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function konfliktAufloesen(projekt, aktuell) {
+    if (!projekt || !aktuell?.id || aktuell.id !== projekt.id || !aktuell.inhalt) return false;
+
+    const lokaleKopie = ohneMeta(projekt);
+    lokaleKopie.id = konfliktKopieId();
+    const name = String(lokaleKopie.name || 'Projekt').trim() || 'Projekt';
+    lokaleKopie.name = name + ' (lokale Konfliktkopie)';
+    lokaleKopie.geaendert = new Date().toISOString().slice(0, 10);
+    lokaleKopie[META] = {
+      revision: null, rolle: 'owner', eigenes: true, erstelltVon: 'Du', dirty: true
+    };
+
+    const cloudProjekt = mitMeta(aktuell.inhalt, aktuell);
+    const projekte = lokaleProjekte().map(eintrag =>
+      eintrag.id === projekt.id ? cloudProjekt : eintrag
+    );
+    projekte.push(lokaleKopie);
+
+    unterdrueckt = true;
+    schreiben(GK.projekte, projekte);
+    unterdrueckt = false;
+    snapshotsProjekt.set(cloudProjekt.id, fingerabdruck(cloudProjekt));
+    bekannteProjektIds.set(cloudProjekt.id, cloudProjekt[META].revision);
+    aktualisiereOberflaeche();
+    status('Cloud-Stand geladen – lokale Kopie gesichert', 'ok');
+    if (typeof showToast === 'function') {
+      showToast('Der neuere Cloud-Stand wurde geladen. Deine Änderungen liegen als „' + lokaleKopie.name + '“ vor.');
+    }
+    return true;
+  }
+
   async function projektSichern(projekt) {
     const revision = projekt[META]?.revision;
-    const body = await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id), {
-      method: 'PUT', body: JSON.stringify({ inhalt: ohneMeta(projekt), revision })
-    });
+    let body;
+    try {
+      body = await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id), {
+        method: 'PUT', body: JSON.stringify({ inhalt: ohneMeta(projekt), revision })
+      });
+    } catch (fehler) {
+      // Der zentrale Fehlerhandler muss wissen, welches lokale Projekt zur
+      // aktuellen Cloud-Fassung gehört, um beide Fassungen sicher zu bewahren.
+      fehler.projekt = projekt;
+      throw fehler;
+    }
     const cloud = body.projekt;
     projekt[META] = {
       ...projekt[META], revision: cloud.revision, ownerUserId: cloud.ownerUserId,
@@ -258,7 +307,10 @@ const CloudSpeicher = (() => {
       status('Cloud gespeichert', 'ok');
       if (laut && typeof showToast === 'function') showToast('Cloud-Projekte sind aktuell');
     } catch (fehler) {
-      if (fehler.status === 409) konflikt('Dieses Projekt wurde auf einem anderen Gerät geändert.');
+      if (fehler.status === 409 && konfliktAufloesen(fehler.projekt, fehler.aktuell)) {
+        // konfliktAufloesen hat den aktuellen Cloud-Stand und eine lokale
+        // Kopie geschrieben. Die finally-Klausel stößt deren Upload an.
+      } else if (fehler.status === 409) konflikt('Dieses Projekt wurde auf einem anderen Gerät geändert.');
       else if (fehler.status === 403) {
         // Die Rolle darf den Vorgang nicht. „Nicht erreichbar" wäre hier die
         // falsche Auskunft – die Verbindung steht, die Berechtigung fehlt.
