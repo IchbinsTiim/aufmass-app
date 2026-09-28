@@ -39,7 +39,8 @@ const DATEIEN = [
   'r18-tutorial.mjs',
   'r19-rollen-rechte.mjs',
   'r20-pdf-beschriftung.mjs',
-  'r21-zeichnung-navigation.mjs'
+  'r21-zeichnung-navigation.mjs',
+  'r22-netz-plane-stirnseite.mjs'
 ];
 
 const fehlgeschlagen = [];

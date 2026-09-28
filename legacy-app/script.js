@@ -56,6 +56,21 @@ const PREFERRED_EINHEIT = {
 };
 // Positionsarten ohne Maßbezug: nur Anzahl + Notiz (Pauschal-/Stückpositionen)
 const PAUSCHAL_ARTEN = ['Parkplatz', 'Genehmigung'];
+
+// Bekleidung der Gerüstfläche je Hausseite: Netze und Planen. Beide sind
+// dieselbe Art Position (m², Vorschlag „= Fläche" der Seite) und laufen
+// deshalb über EINE Definition durch Erfassung, Zusammenfassung und PDF –
+// eine Änderung an der Logik wirkt auf beide. Getrennt sind nur Feldname,
+// Bezeichnung und Summenzeile.
+//   feld   – Eigenschaft der Seite im gespeicherten Projekt
+//   acc    – Kennung des Bedienelements (data-acc)
+//   label  – Beschriftung der Taste
+//   kurz   – Kürzel in der Zusammenfassung
+//   summe  – Zeile in den Positionen des PDF
+const HUELLEN = [
+  { feld: 'netze',  acc: 'ne', label: 'Netze (NE)',  kurz: 'NE', summe: 'Netze'  },
+  { feld: 'planen', acc: 'pl', label: 'Planen (PL)', kurz: 'PL', summe: 'Planen' }
+];
 // Ab dieser Gerüstlänge (m) ist ein zweiter Aufstieg/Treppenturm erforderlich –
 // die App weist beim Überschreiten automatisch darauf hin.
 const TREPPENTURM_WARN_LAENGE = 50;
@@ -1236,7 +1251,7 @@ function collectSeiten() {
       treppenturm: (ttToggle && ttToggle.classList.contains('active'))
         ? { hoehe: isNaN(ttVal) ? null : ttVal, autoL1: ttL1Btn ? ttL1Btn.dataset.active === '1' : false }
         : null,
-      netze:    collectSingleToggle('ne'),
+      ...Object.fromEntries(HUELLEN.map(h => [h.feld, collectSingleToggle(h.acc)])),
       ks:       isNaN(ksVal) ? null : ksVal,
       ksManual: ksInp ? !!ksInp._ksManual : false
     });
@@ -2016,6 +2031,7 @@ function addSide() {
     fussgaengertunnel: null,
     treppenturm:       null,
     netze:             null,
+    planen:            null,
     ks:                null,
     ksManual:          false
   };
@@ -2714,13 +2730,16 @@ function createAccessoriesSection(seiteData, card, onChange) {
     TREPPENTURM_HINWEIS
   ));
 
-  // Netze: Vorschlags-m² = Gerüstfläche der Seite (wie beim KS-Feld).
-  section.appendChild(createSingleAcc(
-    'ne', 'Netze (NE)', seiteData.netze || null, 'm²',
-    '= Fläche',
-    () => { const fl = computeCardFlaeche(card); return fl > 0 ? fl : null; },
-    true
-  ));
+  // Netze und Planen: Vorschlags-m² = Gerüstfläche der Seite (wie beim
+  // KS-Feld). Beide aus derselben Definition (HUELLEN).
+  HUELLEN.forEach(h => {
+    section.appendChild(createSingleAcc(
+      h.acc, h.label, seiteData[h.feld] || null, 'm²',
+      '= Fläche',
+      () => { const fl = computeCardFlaeche(card); return fl > 0 ? fl : null; },
+      true
+    ));
+  });
 
   // L1-Sync
   section._syncL1 = function() {
@@ -2843,7 +2862,8 @@ function updateSummary() {
       const eff = (!isNaN(v) && v > 0) ? effektiveLaenge(v, lage) : null;
       detailParts.push('IG' + (lageStr ? ' (' + lageStr + ')' : '') + (eff !== null ? ': ' + fmtNum(round2(eff)) + ' m' : ''));
     });
-    [{ acc: 'df', label: 'DF', unit: 'm' }, { acc: 'gt', label: 'GT', unit: 'm' }, { acc: 'ft', label: 'FT', unit: 'm' }, { acc: 'ne', label: 'NE', unit: 'm²' }].forEach(({ acc, label, unit }) => {
+    [{ acc: 'df', label: 'DF', unit: 'm' }, { acc: 'gt', label: 'GT', unit: 'm' }, { acc: 'ft', label: 'FT', unit: 'm' },
+     ...HUELLEN.map(h => ({ acc: h.acc, label: h.kurz, unit: 'm²' }))].forEach(({ acc, label, unit }) => {
       const toggle = card.querySelector('.accessory-toggle[data-acc="' + acc + '"]');
       if (!toggle || !toggle.classList.contains('active')) return;
       const lenInp = card.querySelector('.accessory-length-input[data-acc="' + acc + '"]');
@@ -3098,7 +3118,8 @@ function generatePDF() {
   secHead('Gerüstfläche');
 
   let totalArea = 0;
-  const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0, ne: 0 };
+  const totals = { konsolen: {}, ig: {}, df: 0, gt: 0, ft: 0, tt: 0,
+                   huellen: Object.fromEntries(HUELLEN.map(h => [h.feld, 0])) };
 
   seiten.forEach((seite, idx) => {
     const name = seite.name === '__manual__' ? seite.manualName : seite.name;
@@ -3221,7 +3242,10 @@ function generatePDF() {
     if (seite.gittertraeger     && seite.gittertraeger.laenge     != null) totals.gt += seite.gittertraeger.laenge     || 0;
     if (seite.fussgaengertunnel && seite.fussgaengertunnel.laenge != null) totals.ft += seite.fussgaengertunnel.laenge || 0;
     if (seite.treppenturm       && seite.treppenturm.hoehe        != null) totals.tt += seite.treppenturm.hoehe        || 0;
-    if (seite.netze             && seite.netze.laenge             != null) totals.ne += seite.netze.laenge             || 0;
+    HUELLEN.forEach(h => {
+      const wert = seite[h.feld];
+      if (wert && wert.laenge != null) totals.huellen[h.feld] += wert.laenge || 0;
+    });
 
     y += 2;
   });
@@ -3239,7 +3263,8 @@ function generatePDF() {
   const kKeys  = Object.keys(totals.konsolen).sort((a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b));
   const igKeys = Object.keys(totals.ig).sort((a, b) => (a === 'alle' ? -1 : b === 'alle' ? 1 : Number(a) - Number(b)));
   const hasAcc = kKeys.length > 0 || igKeys.length > 0 || totals.df > 0 ||
-    totals.gt > 0 || totals.ft > 0 || totals.tt > 0 || totals.ne > 0;
+    totals.gt > 0 || totals.ft > 0 || totals.tt > 0 ||
+    HUELLEN.some(h => totals.huellen[h.feld] > 0);
 
   if (hasAcc || zusatz.length > 0) {
     y += 1;
@@ -3256,7 +3281,11 @@ function generatePDF() {
     if (totals.gt > 0) pdfRow('Gitterträger',    fmtNum(round2(totals.gt)) + ' m');
     if (totals.ft > 0) pdfRow('Fußgängertunnel', fmtNum(round2(totals.ft)) + ' m');
     if (totals.tt > 0) pdfRow('Treppenturm',     fmtNum(round2(totals.tt)) + ' m (H)');
-    if (totals.ne > 0) pdfRow('Netze',           fmtNum(round2(totals.ne)) + ' m²');
+    // Netze und Planen: je eine eigene Summenzeile – nie zusammengelegt.
+    HUELLEN.forEach(h => {
+      const summe = totals.huellen[h.feld];
+      if (summe > 0) pdfRow(h.summe, fmtNum(round2(summe)) + ' m²');
+    });
     zusatz.forEach(z => {
       const mengeStr = z.menge !== null ? fmtNum(z.menge) + ' ' + z.einheit : '–';
       const label    = (z.art || '–') + (z.notiz ? '  (' + z.notiz + ')' : '');
