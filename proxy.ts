@@ -28,9 +28,10 @@ export const config = {
   matcher: [
     // Alles außer Next.js-Interna und den wenigen statischen Dateien im
     // Projekt. Wichtig: `/app` und alles darunter fällt NICHT unter diese
-    // Ausnahme – die Aufmaß-App liegt nicht in `public/`, ihre Dateien
-    // kommen aus dem geschützten Route Handler und müssen die Middleware
-    // passieren, auch wenn sie auf `.js` oder `.css` enden.
+    // Ausnahme – die Anwendungen (start/, aufmass/, aufmass-2d/, shared/)
+    // liegen nicht in `public/`, ihre Dateien kommen aus dem geschützten
+    // Route Handler und müssen die Middleware passieren, auch wenn sie auf
+    // `.js` oder `.css` enden.
     '/((?!_next/static|_next/image|favicon\\.ico|robots\\.txt).*)',
     '/(api|trpc)(.*)',
     // Clerks eigener Proxy-Pfad – muss die Middleware erreichen.

@@ -2,7 +2,7 @@ import type { Appearance } from '@clerk/types';
 
 /**
  * Clerk im AufmaßX-Design. Die Werte sind dieselben Tokens wie in
- * legacy-app/core.css – die Anmeldung soll aussehen wie die App, in die sie
+ * shared/tokens.css – die Anmeldung soll aussehen wie die App, in die sie
  * führt, und nicht wie ein fremdes Formular davor.
  */
 export const clerkErscheinung: Appearance = {

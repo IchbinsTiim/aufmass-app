@@ -52,12 +52,16 @@ for (const datei of verfolgt) {
 assert(echteSchluessel.length === 0,
   'kein Clerk-Secret-Key im Quellcode: ' + JSON.stringify(echteSchluessel));
 
-// Die Aufmaß-App darf nicht unter public/ liegen – von dort läge sie am
+// Die Anwendungen dürfen nicht unter public/ liegen – von dort lägen sie am
 // Server vorbei im Netz.
 assert(!verfolgt.some(d => d.startsWith('public/')),
-  'nichts von der Anwendung liegt in public/');
-assert(verfolgt.some(d => d.startsWith('legacy-app/')),
-  'die Aufmaß-App liegt in legacy-app/ und wird ausgeliefert');
+  'nichts von den Anwendungen liegt in public/');
+for (const ordner of ['start/', 'aufmass/', 'aufmass-2d/', 'shared/']) {
+  assert(verfolgt.some(d => d.startsWith(ordner)),
+    `${ordner} liegt im Repository und wird über die geschützte Route ausgeliefert`);
+}
+assert(!verfolgt.some(d => d.startsWith('legacy-app/')),
+  'den gemeinsamen Ordner legacy-app/ gibt es nicht mehr');
 
 // Die alte, ungeschützte Veröffentlichung über GitHub Pages darf es nicht
 // mehr geben: sie wäre eine zweite, anmeldefreie Ausgabe derselben App.
@@ -93,7 +97,7 @@ try {
   // Weiterleitungsadresse selbst, die im Rumpf eines 307 wiederholt wird.
   const MARKER = [
     'planSvg', 'modSwitcher', 'AufmassModul', 'ZweiDModul',
-    'hub-tile', 'geruest.aufmass.projekte'
+    'hub-tile', 'geruest.aufmass.projekte', 'geruest.2d.zeichnungen'
   ];
 
   const geschuetzt = [
@@ -101,16 +105,27 @@ try {
     '/app',
     '/app/',
     '/app/index.html',
-    '/app/core.js',
+    '/app/start/index.html',
+    '/app/start/start.js',
+    '/app/aufmass',
+    '/app/aufmass/',
+    '/app/aufmass/index.html',
+    '/app/aufmass/script.js',
+    '/app/aufmass/basis.js',
+    '/app/aufmass/style.css',
+    '/app/aufmass-2d',
+    '/app/aufmass-2d/index.html',
+    '/app/aufmass-2d/viewer2d.js',
+    '/app/aufmass-2d/viewer2d.css',
+    '/app/shared/tokens.css',
+    '/app/shared/speicher-migration.js',
+    // Adressen der früheren gemeinsamen Seite
     '/app/script.js',
     '/app/viewer2d.js',
-    '/app/shell.js',
-    '/app/core.css',
-    '/app/style.css',
-    '/app/viewer2d.css',
     '/app/start.html',
     '/app/viewer2d.html',
     '/konto',
+    '/api/konto',
     '/kein-zugang',
     '/admin/einladungen',
     // Die Mitarbeiterverwaltung zeigt Namen, E-Mail-Adressen und
@@ -152,15 +167,21 @@ try {
       `${pfad} leitet weiter statt zu antworten (${antwort.status})`);
   }
 
-  // ── 5. Pfad-Ausbruch aus dem App-Ordner ──────────────────────────────────
-  // Der Route Handler liest Dateien vom Dateisystem. Er darf dabei den
-  // Ordner legacy-app/ unter keinen Umständen verlassen.
+  // ── 5. Pfad-Ausbruch aus den App-Ordnern ─────────────────────────────────
+  // Der Route Handler liest Dateien vom Dateisystem. Er darf dabei die
+  // Ordner start/, aufmass/, aufmass-2d/ und shared/ unter keinen Umständen
+  // verlassen – auch nicht von einer App in die andere oder ins Projekt.
   const ausbrueche = [
     '/app/../package.json',
     '/app/..%2Fpackage.json',
     '/app/%2e%2e/proxy.ts',
     '/app/../../etc/passwd',
-    '/app/../.env.local'
+    '/app/../.env.local',
+    '/app/aufmass/../package.json',
+    '/app/aufmass/..%2F..%2Fpackage.json',
+    '/app/shared/%2e%2e/proxy.ts',
+    '/app/lib/zugang.ts',
+    '/app/tests/harness.mjs'
   ];
   for (const pfad of ausbrueche) {
     const antwort = await hole(pfad);

@@ -24,7 +24,7 @@ const DATEIEN = [
   'r4-aufmass-positionen.mjs',
   'r5-bordbretter.mjs',
   'r6-blaetter-verbreiterung.mjs',
-  'r7-shell-routing.mjs',
+  'r7-app-trennung.mjs',
   'r8-2d-projektliste.mjs',
   'r9-2d-zeichnungen.mjs',
   'r10-werkzeugmenue.mjs',
@@ -40,7 +40,8 @@ const DATEIEN = [
   'r19-rollen-rechte.mjs',
   'r20-pdf-beschriftung.mjs',
   'r21-zeichnung-navigation.mjs',
-  'r22-netz-plane-stirnseite.mjs'
+  'r22-netz-plane-stirnseite.mjs',
+  'r23-cloud-app-trennung.mjs'
 ];
 
 const fehlgeschlagen = [];

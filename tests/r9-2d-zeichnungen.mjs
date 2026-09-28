@@ -1,39 +1,15 @@
-// Runde 9 – Zeichnungen im 2D-Modul anlegen und löschen:
+// Runde 9 – Zeichnungen in der 2D-Aufmaß-App anlegen und löschen:
 // Primärknopf, Anlege-Dialog, leere Zeichenfläche, Persistenz über einen
 // Reload, Löschen einzeln und in Mehrfachauswahl, „Rückgängig", geöffnete
 // Zeichnung wird beim Löschen sauber geschlossen, Umbenennen/Duplizieren/
 // Verschieben sowie Ordner anlegen und löschen.
-import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
 import { chromium } from 'playwright';
-import { assert } from './harness.mjs';
+import { serve, assert } from './harness.mjs';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'legacy-app');
-const STUB = path.join(path.dirname(new URL(import.meta.url).pathname), 'jspdf-stub.js');
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
-
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://x');
-  if (url.pathname === '/__jspdf.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); res.end(fs.readFileSync(STUB)); return; }
-  if (url.pathname === '/__fonts.css') { res.writeHead(200, { 'Content-Type': 'text/css' }); res.end(''); return; }
-  // Die App verweist auf ihre Dateien unter `/app/…` – so liefert sie der
-  // geschützte Route Handler der Next.js-Hülle aus. Der Testserver bildet
-  // dieselbe Adresse auf den Ordner ab.
-  const _pfad = decodeURIComponent(url.pathname).replace(/^\/app(\/|$)/, '/');
-  const p = path.join(ROOT, _pfad);
-  if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
-  let body = fs.readFileSync(p);
-  if (p.endsWith('.html')) body = body.toString()
-    .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/jspdf\/[^"]+/, '/__jspdf.js')
-    .replace(/https:\/\/fonts\.googleapis\.com\/css2[^"]*/, '/__fonts.css')
-    .replace(/<link rel="preconnect"[^>]*>/g, '');
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
-  res.end(body);
-});
-await new Promise(r => server.listen(0, r));
-const PORT = server.address().port;
-const URL_ = h => `http://127.0.0.1:${PORT}/index.html${h}`;
+// Die beiden Anwendungen sind eigene Seiten: /app/aufmass und
+// /app/aufmass-2d (#/projekte = Zeichnungsübersicht, #/zeichnung = Zeichnung).
+const { server, port: PORT } = await serve();
+const URL_ = pfad => `http://127.0.0.1:${PORT}${pfad}`;
 
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -41,8 +17,8 @@ const logs = [];
 page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
 
-// Bestand: zwei Projekte mit Zeichnung, ein Ordner. Dieser Bestand muss den
-// gesamten Ablauf unverändert überstehen.
+// Bestand: zwei Zeichnungen, ein Ordner – im Speicher der 2D-App. Dieser
+// Bestand muss den gesamten Ablauf unverändert überstehen.
 const SEED = () => {
   const z = (tiefe, felder) => ({
     depth: tiefe,
@@ -55,10 +31,9 @@ const SEED = () => {
   // gespeicherten Stand zeigen, nicht wieder den Ausgangsbestand.
   if (localStorage.getItem('__r9_seed') === '1') return;
   localStorage.setItem('__r9_seed', '1');
-  localStorage.setItem('geruest.aufmass.ordner', JSON.stringify([{ id: 'f-hof', name: 'Hofbau' }]));
-  const basis = { status: 'in_bearbeitung', erstellt: '2026-03-01', geruesttyp: 'fassade',
-                  seiten: [], technik: {}, logistik: {}, zusatzpositionen: [] };
-  localStorage.setItem('geruest.aufmass.projekte', JSON.stringify([
+  localStorage.setItem('geruest.2d.ordner', JSON.stringify([{ id: 'f-hof', name: 'Hofbau' }]));
+  const basis = { erstellt: '2026-03-01' };
+  localStorage.setItem('geruest.2d.zeichnungen', JSON.stringify([
     { ...basis, id: 'p-hof', name: 'Hofstraße 4', folderId: 'f-hof', geaendert: '2026-03-05',
       anschrift: { strasse: 'Hofstraße', nummer: '4', plz: '70173', ort: 'Stuttgart' }, zeichnung2d: z(0.73, 3) },
     { ...basis, id: 'p-alt', name: 'Altbau West', folderId: null, geaendert: '2026-03-02',
@@ -70,9 +45,9 @@ await page.addInitScript(SEED);
 const karten = () => page.$$eval('#tdProjectGrid .td-project-card',
   els => els.map(e => e.querySelector('.td-project-name').textContent));
 const gespeicherte = () => page.evaluate(() =>
-  JSON.parse(localStorage.getItem('geruest.aufmass.projekte') || '[]').map(p => p.name));
+  JSON.parse(localStorage.getItem('geruest.2d.zeichnungen') || '[]').map(p => p.name));
 const zurListe = async () => {
-  await page.goto(URL_('#/2d/projekte'));
+  await page.goto(URL_('/app/aufmass-2d#/projekte'));
   await page.waitForFunction(() => document.body.dataset.modul === '2d' && !document.getElementById('td-projekte').classList.contains('hidden'));
   await page.waitForTimeout(250);
 };
@@ -105,7 +80,7 @@ assert(ordnerAuswahl.includes('Ohne Ordner') && ordnerAuswahl.includes('Hofbau')
 await page.fill('#tdNeuName', 'Baustelle Nord');
 await page.selectOption('#tdNeuOrdner', { label: 'Hofbau' });
 await page.click('#tdNeuAnlegen');
-await page.waitForFunction(() => location.hash === '#/2d');
+await page.waitForFunction(() => location.hash === '#/zeichnung');
 await page.waitForTimeout(500);
 
 // ── 3. Die neue Zeichnung ist leer ───────────────────────────────────────
@@ -128,7 +103,7 @@ assert((await karten()).includes('Baustelle Nord'), 'die neue Zeichnung steht in
 await page.click('#tdFolderBar .td-folder-chip:has-text("Hofbau")');
 await page.waitForTimeout(250);
 assert((await karten()).includes('Baustelle Nord'), 'sie liegt im gewählten Ordner „Hofbau"');
-await page.click('#tdFolderBar .td-folder-chip:has-text("Alle Projekte")');
+await page.click('#tdFolderBar .td-folder-chip:has-text("Alle Zeichnungen")');
 await page.waitForTimeout(250);
 
 // ── 5. Sie überlebt einen Reload ─────────────────────────────────────────
@@ -140,7 +115,7 @@ assert((await gespeicherte()).includes('Baustelle Nord'), 'und steht auch im Spe
 
 // ── 6. Anlegen, während eine andere Zeichnung offen ist ──────────────────
 await page.click('#tdProjectGrid .td-project-card:has-text("Hofstraße 4")');
-await page.waitForFunction(() => location.hash === '#/2d');
+await page.waitForFunction(() => location.hash === '#/zeichnung');
 await page.waitForTimeout(400);
 assert(await page.evaluate(() => state.sections.reduce((n, s) => n + s.bays.length, 0)) === 3,
   'zuerst ist eine gezeichnete Zeichnung geöffnet (3 Felder)');
@@ -197,7 +172,7 @@ assert(!(await karten()).includes('Während offen'), 'nach dem Reload bleibt sie
 
 // ── 10. Wird die geöffnete Zeichnung gelöscht, schließt der Editor ──────
 await page.click(`#tdProjectGrid .td-project-card:has-text("Baustelle Nord")`);
-await page.waitForFunction(() => location.hash === '#/2d');
+await page.waitForFunction(() => location.hash === '#/zeichnung');
 await page.waitForTimeout(400);
 assert(await page.evaluate(() => linkedProjectId) === neueId, '„Baustelle Nord" ist geöffnet');
 await page.click('#tdMenuBtn');
@@ -209,7 +184,7 @@ await page.click('#tdLoeschBestaetigen');
 await page.waitForTimeout(400);
 assert(await page.evaluate(() => linkedProjectId) === null,
   'der Editor hängt nicht mehr an der gelöschten Zeichnung');
-assert(await page.evaluate(() => localStorage.getItem('geruest.app.aktuellesProjekt')) === null,
+assert(await page.evaluate(() => localStorage.getItem('geruest.2d.aktuelleZeichnung')) === null,
   'auch der Zeiger „zuletzt geöffnet" ist aufgeräumt – keine verwaisten Verweise');
 assert(await page.isVisible('#td-projekte'), 'die Übersicht ist wieder zu sehen');
 
@@ -252,7 +227,7 @@ assert((await karten()).includes('Altbau West neu'), 'Umbenennen wirkt in der Li
 await kartenMenu('Altbau West neu', 'Duplizieren');
 assert((await karten()).includes('Altbau West neu (Kopie)'), 'Duplizieren legt eine Kopie an');
 assert(await page.evaluate(() => {
-  const l = JSON.parse(localStorage.getItem('geruest.aufmass.projekte'));
+  const l = JSON.parse(localStorage.getItem('geruest.2d.zeichnungen'));
   const o = l.find(p => p.name === 'Altbau West neu');
   const k = l.find(p => p.name === 'Altbau West neu (Kopie)');
   return o && k && o.id !== k.id &&
@@ -265,7 +240,7 @@ await page.click('#floatingMenu .floating-menu-item:has-text("In Ordner verschie
 await page.waitForTimeout(200);
 await page.click('#floatingMenu .floating-menu-item:has-text("Hofbau")');
 await page.waitForTimeout(300);
-assert(await page.evaluate(() => JSON.parse(localStorage.getItem('geruest.aufmass.projekte'))
+assert(await page.evaluate(() => JSON.parse(localStorage.getItem('geruest.2d.zeichnungen'))
   .find(p => p.name === 'Altbau West neu (Kopie)').folderId) === 'f-hof',
   'Verschieben trägt den Ordner ein');
 
@@ -284,10 +259,10 @@ await page.waitForTimeout(300);
 assert(!(await page.isVisible('#tdFolderBar .td-folder-chip:has-text("Sanierung")')), 'der Ordner ist gelöscht');
 
 // ── 14. Der Bestand ist unverändert und öffnet sich ─────────────────────
-await page.click('#tdFolderBar .td-folder-chip:has-text("Alle Projekte")');
+await page.click('#tdFolderBar .td-folder-chip:has-text("Alle Zeichnungen")');
 await page.waitForTimeout(250);
 await page.click('#tdProjectGrid .td-project-card:has-text("Hofstraße 4")');
-await page.waitForFunction(() => location.hash === '#/2d');
+await page.waitForFunction(() => location.hash === '#/zeichnung');
 await page.waitForTimeout(500);
 z = await page.evaluate(() => ({
   felder: state.sections.reduce((n, s) => n + s.bays.length, 0), tiefe: state.depth
@@ -297,8 +272,8 @@ assert(z.felder === 3 && z.tiefe === 0.73,
 
 // ── 15. Leerzustand bietet das Anlegen an ──────────────────────────────
 await page.evaluate(() => {
-  localStorage.setItem('geruest.aufmass.projekte', '[]');
-  localStorage.removeItem('geruest.app.aktuellesProjekt');
+  localStorage.setItem('geruest.2d.zeichnungen', '[]');
+  localStorage.removeItem('geruest.2d.aktuelleZeichnung');
 });
 await zurListe();
 assert(await page.isVisible('#tdEmptyNeuBtn'), 'der Leerzustand hat einen Knopf zum Anlegen');
@@ -319,8 +294,8 @@ const dateiNeu = async () => {
   await page.click('#projNeuBtn');
 };
 const gespeicherterName = () => page.evaluate(() =>
-  (JSON.parse(localStorage.getItem('geruest.aufmass.projekte') || '[]')
-    .find(p => p.id === localStorage.getItem('geruest.app.aktuellesProjekt')) || {}).name);
+  (JSON.parse(localStorage.getItem('geruest.2d.zeichnungen') || '[]')
+    .find(p => p.id === localStorage.getItem('geruest.2d.aktuelleZeichnung')) || {}).name);
 
 /* Tippt eine Änderung und hält den laufenden Autosave an.
    Ohne das entschiede die 700-ms-Frist darüber, ob der Dialog überhaupt
@@ -421,7 +396,9 @@ await page.waitForTimeout(2500);
 assert(!(await alleFotos()).includes('ph-waise'),
   'der Aufräumlauf beim Start entfernt Fotos ohne Projekt');
 
-// ── 18. Beide Module arbeiten auf demselben Bestand ────────────────────
+// ── 18. Die beiden Anwendungen teilen keinen Bestand ────────────────────
+// Früher standen Zeichnungen als Projekte auch im Aufmaß-Modul. Seit der
+// Trennung sind es getrennte Anwendungen mit getrennten Daten.
 await zurListe();
 await page.click('#tdNeuBtn');
 await page.waitForSelector('#tdNeuOverlay:not(.hidden)');
@@ -429,25 +406,19 @@ await page.fill('#tdNeuName', 'Quergeprüft');
 await page.click('#tdNeuAnlegen');
 await page.waitForTimeout(400);
 
-await page.click('a.back-link[href="#/aufmass"]').catch(() => {});
-await page.goto(URL_('#/aufmass'));
-await page.waitForFunction(() => document.body.dataset.modul === 'aufmass');
+await page.goto(URL_('/app/aufmass'));
+await page.waitForFunction(() => document.body.dataset.modul === 'aufmass' && typeof AufmassModul !== 'undefined');
 await page.waitForTimeout(400);
 const aufmassKarten = () => page.$$eval('#projectGrid .project-card2-name', els => els.map(e => e.textContent));
-assert((await aufmassKarten()).includes('Quergeprüft'),
-  'die im 2D-Modul angelegte Zeichnung steht auch im Aufmaß-Modul');
-
-// Das ⋯-Menü der Projektkarte (jetzt aus core.js) funktioniert unverändert.
-page.once('dialog', d => d.accept());
-await page.click('#projectGrid .project-card2:has-text("Quergeprüft") .project-card2-menu-btn');
-await page.waitForSelector('#floatingMenu');
-await page.click('#floatingMenu .floating-menu-item:has-text("Löschen")');
-await page.waitForTimeout(400);
-assert(!(await aufmassKarten()).includes('Quergeprüft'), 'Löschen im Aufmaß-Modul wirkt dort sofort');
+assert(!(await aufmassKarten()).includes('Quergeprüft'),
+  'die im 2D-Aufmaß angelegte Zeichnung steht NICHT in der Aufmaß-App');
+assert(await page.evaluate(() => localStorage.getItem('geruest.aufmass.projekte') === null
+  || !JSON.parse(localStorage.getItem('geruest.aufmass.projekte')).some(p => p.name === 'Quergeprüft')),
+  'auch im Speicher der Aufmaß-App gibt es sie nicht');
 
 await zurListe();
-assert(!(await karten()).includes('Quergeprüft'),
-  'und die Zeichnungsliste des 2D-Moduls zeigt es ebenfalls nicht mehr');
+assert((await karten()).includes('Quergeprüft'),
+  'in der Zeichnungsübersicht der 2D-App ist sie weiterhin da');
 
 const errs = logs.filter(l => l.includes('pageerror') || (l.includes('[error]') && !l.includes('404')));
 assert(errs.length === 0, 'keine JS-Fehler im gesamten Ablauf: ' + errs.join(' | '));

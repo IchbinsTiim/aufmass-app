@@ -7,14 +7,15 @@ import type { Abfrage } from '../einladungen/kern.ts';
  * Anwendung überhaupt ein eigener Datensatz ist – sonst listet man Dinge auf,
  * die es gar nicht gibt:
  *
- *   Projekt      `cloud_projekte`. Enthält die ganze Projektakte: Anschrift,
- *                Technik, Aufmaßseiten UND die zugehörige 2D-Zeichnung.
+ *   Projekt      `cloud_projekte` mit `app = 'aufmass'`: die Projektakte der
+ *                Aufmaß-App (Anschrift, Technik, Aufmaßseiten).
  *   Aufmaß       kein eigener Datensatz, sondern der Teil `seiten` im
  *                Projekt. Deshalb wird es je Projekt ausgewiesen – mit der
  *                Zahl der Seiten und Positionen, damit die Zeile etwas sagt.
- *   Zeichnung    zweierlei: die benannten Speicherstände in
- *                `cloud_zeichnungen` und die laufende Zeichnung im Projekt
- *                selbst (`inhalt -> zeichnung2d`). Beides wird gezeigt und
+ *   Zeichnung    zweierlei: die Zeichnungen der 2D-Aufmaß-App
+ *                (`cloud_projekte` mit `app = '2d'`, die Zeichnung selbst in
+ *                `inhalt -> zeichnung2d`) und die benannten Speicherstände in
+ *                `cloud_zeichnungen`. Beides wird gezeigt und
  *                auseinandergehalten.
  *
  * Alle Abfragen laufen über `erstellt_von`. Für Projekte, die vor der
@@ -24,6 +25,8 @@ import type { Abfrage } from '../einladungen/kern.ts';
 
 export type ProjektZeile = {
   id: string;
+  /** Zu welcher Anwendung der Datensatz gehört. */
+  app: 'aufmass' | '2d';
   titel: string;
   erstelltAm: string;
   geaendertAm: string;
@@ -67,6 +70,7 @@ export async function projekteVonMitarbeiter(
   if (!abfrage) return [];
   const zeilen = await abfrage(
     `SELECT p.id,
+            p.app,
             p.titel,
             p.owner_user_id,
             p.erstellt_am,
@@ -99,6 +103,7 @@ export async function projekteVonMitarbeiter(
   );
   return zeilen.map(z => ({
     id: String(z.id),
+    app: z.app === '2d' ? '2d' as const : 'aufmass' as const,
     titel: String(z.titel || '').trim() || 'Ohne Namen',
     erstelltAm: alsText(z.erstellt_am),
     geaendertAm: alsText(z.geaendert_am),
@@ -142,7 +147,7 @@ export async function kennzahlenVonMitarbeiter(
   if (!abfrage) return { projekte: 0, zeichnungen: 0, zuletzt: null };
   const zeilen = await abfrage(
     `SELECT
-       (SELECT count(*) FROM cloud_projekte    WHERE erstellt_von = $1) AS projekte,
+       (SELECT count(*) FROM cloud_projekte    WHERE erstellt_von = $1 AND app = 'aufmass') AS projekte,
        (SELECT count(*) FROM cloud_zeichnungen WHERE erstellt_von = $1) AS zeichnungen,
        (SELECT max(geaendert_am) FROM cloud_projekte
          WHERE erstellt_von = $1 OR geaendert_von = $1)                 AS zuletzt`,

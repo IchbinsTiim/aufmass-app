@@ -4,10 +4,9 @@
 //  Konstanten & Zustand
 // ============================================================
 
-// Speicher-Schlüssel: liegen zentral in core.js (Namensraum geruest.aufmass.*).
-// `GK.aktuellesProjekt` teilen sich beide Module – so wissen Aufmaß und
-// 2D-Aufmaß, welche Projektakte (inkl. 2D-Zeichnung) gerade bearbeitet wird,
-// und greifen auf dieselbe Projektliste zu.
+// Speicher-Schlüssel: stehen in basis.js (Namensraum geruest.aufmass.*).
+// Die Projekte gehören allein dieser App – die 2D-Aufmaß-App führt ihre
+// Zeichnungen in einem eigenen, getrennten Speicher.
 const STORAGE_KEY = GK.projekte;
 const FOLDERS_STORAGE_KEY = GK.ordner;
 
@@ -135,13 +134,12 @@ function setUeberstandWert(v) {
 //  localStorage
 // ============================================================
 
-// Ergänzt ältere Projekte (vor der Projektverwaltung mit Ordnern/Status/2D-
-// Zeichnung) um die neuen Felder, ohne bestehende Daten zu verändern.
+// Ergänzt ältere Projekte (vor der Projektverwaltung mit Ordnern/Status) um
+// die neuen Felder, ohne bestehende Daten zu verändern.
 function migrateProjectMeta(p) {
   if (p.name === undefined)        p.name = '';
   if (p.status === undefined)      p.status = 'in_bearbeitung';
   if (p.folderId === undefined)    p.folderId = null;
-  if (p.zeichnung2d === undefined) p.zeichnung2d = null;
   if (p.notizen === undefined)     p.notizen = '';
   if (p.archiviert !== undefined) { // sehr alte Übergangsdaten
     if (p.archiviert) p.status = 'archiviert';
@@ -162,7 +160,7 @@ function loadProjects() {
 
 function saveProjects() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-  // Das 2D-Modul hält seine Liste aus demselben Speicher – Bescheid geben.
+  // Der Cloud-Abgleich sichert die Änderung (siehe cloud.js).
   meldeDatenAenderung('aufmass');
 }
 
@@ -191,19 +189,6 @@ function getProjectName(project) {
 
 function getFolder(folderId) {
   return folders.find(f => f.id === folderId) || null;
-}
-
-/** Zählt Felder + Gesamtfläche (m²) der optional verknüpften 2D-Zeichnung. */
-function get2dStats(project) {
-  const z = project.zeichnung2d;
-  if (!z || !Array.isArray(z.sections)) return { felder: 0, flaeche: 0 };
-  let felder = 0, flaeche = 0;
-  z.sections.forEach(sec => (sec.bays || []).forEach(bay => {
-    felder++;
-    const heights = [bay.hL, bay.hR].filter(h => h != null && !isNaN(h) && h > 0);
-    if (heights.length && bay.len) flaeche += bay.len * Math.min(...heights);
-  }));
-  return { felder, flaeche: round2(flaeche) };
 }
 
 // ============================================================
@@ -587,8 +572,7 @@ function migrateSeite(seite) {
 // ============================================================
 //  Toast
 // ============================================================
-// showToast() steht jetzt in core.js und wird von beiden Modulen gemeinsam
-// genutzt (vorher zwei identische Kopien). Verhalten unverändert.
+// showToast() steht in basis.js. Verhalten unverändert.
 
 // ============================================================
 //  Screen-Wechsel
@@ -727,8 +711,7 @@ function deleteFolderPrompt(folderId) {
   renderProjectOverview();
 }
 
-// closeFloatingMenu() / openFloatingMenu() stehen jetzt in core.js – die
-// Zeichnungsliste des 2D-Moduls benutzt dasselbe Menü.
+// closeFloatingMenu() / openFloatingMenu() stehen in basis.js.
 
 function openFolderManageMenu(folder, anchorEl) {
   openFloatingMenu(anchorEl, [
@@ -814,11 +797,6 @@ function deleteProjectFromOverview(proj) {
   if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === id) {
     localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
   }
-  // Zum Projekt gehören auch Fotos (IndexedDB) und ggf. eine im 2D-Modul
-  // geöffnete Zeichnung – beides wird hier mit aufgeräumt, sonst bleiben
-  // verwaiste Datensätze bzw. ein Editor auf einem gelöschten Projekt zurück.
-  if (typeof entferneFotosZuProjekt === 'function') entferneFotosZuProjekt(id);
-  if (typeof zeichnungenEntfallen === 'function')  zeichnungenEntfallen([id]);
   renderProjectOverview();
   showToast('Projekt gelöscht');
   });
@@ -832,7 +810,6 @@ async function deleteProjectNachCloudFreigabe(proj, fortsetzen) {
 function openProjectActionMenu(proj, anchorEl) {
   const items = [
     { label: 'Öffnen', onClick: () => requestOpenProject(proj) },
-    { label: 'Öffnen mit…', onClick: () => requestOpenProjectMitAuswahl(proj) },
     { label: 'Umbenennen', onClick: () => renameProjectPrompt(proj) },
     { label: 'Duplizieren', onClick: () => duplicateProject(proj) },
     { label: 'In Ordner verschieben…', onClick: () => openMoveToFolderMenu(proj, anchorEl) },
@@ -854,12 +831,7 @@ function createProjectCard(proj) {
     [proj.anschrift?.strasse, proj.anschrift?.nummer].filter(Boolean).join(' '),
     [proj.anschrift?.plz, proj.anschrift?.ort].filter(Boolean).join(' ')
   ].filter(Boolean).join(', ');
-  const stats2d = get2dStats(proj);
   const statsParts = [seitenAnzahl + ' Seite' + (seitenAnzahl !== 1 ? 'n' : '')];
-  if (proj.zeichnung2d) {
-    statsParts.push(stats2d.felder + ' Feld' + (stats2d.felder !== 1 ? 'er' : ''));
-    statsParts.push(fmtNum(stats2d.flaeche) + ' m²');
-  }
   const vzList = Array.isArray(proj.technik?.verwendungszweck) ? proj.technik.verwendungszweck : [];
   const ersteller = overviewState.ansicht === 'alle' ? window.CloudSpeicher?.ersteller(proj) : null;
 
@@ -926,20 +898,8 @@ function renderProjectOverview() {
 // ============================================================
 
 // Zentrale Stelle für "dieses Projekt jetzt öffnen": öffnet direkt den
-// Projekt-Editor. Wer aus der Übersicht kommt, hat das Modul am
-// Startbildschirm bereits gewählt – hier noch einmal zu fragen wäre ein
-// Klick zu viel.
+// Projekt-Editor.
 function requestOpenProject(proj) {
-  openProject(proj.id);
-}
-
-// Variante mit vorgeschalteter Auswahl „Aufmaß oder 2D-Aufmaß?" (früher der
-// Auswahl-Dialog des Startbildschirms). Erreichbar über das ⋯-Menü einer
-// Projektkarte – damit lässt sich ein Projekt aus der Liste heraus direkt in
-// der 2D-Zeichnung öffnen, ohne den Umweg über den Editor. Die Shell hängt
-// sich dafür in `window.onProjectOpenRequest` ein.
-function requestOpenProjectMitAuswahl(proj) {
-  if (typeof window.onProjectOpenRequest === 'function') { window.onProjectOpenRequest(proj); return; }
   openProject(proj.id);
 }
 
@@ -958,8 +918,7 @@ function createNewProject() {
     seiten: [],
     technik: { lastklasse: '3', breitenklasse: 'W06' },
     logistik: {},
-    zusatzpositionen: [],
-    zeichnung2d: null
+    zusatzpositionen: []
   };
   projects.push(proj);
   saveProjects();
@@ -1000,7 +959,6 @@ function openProject(projectId, opts) {
 
   renderSeiten((proj.seiten || []).map(migrateSeite));
   renderZusatzpositionen(proj.zusatzpositionen || []);
-  update2dSummary(proj);
   updateSummary();
   if (!opts || !opts.keepScreen) showScreen('projectScreen');
 }
@@ -1014,18 +972,6 @@ function setProjectStatus(status) {
 function collectProjectStatus() {
   const active = document.querySelector('.status-btn.active');
   return active ? active.dataset.status : 'in_bearbeitung';
-}
-
-/** Zeigt Kennzahlen der verknüpften 2D-Zeichnung (Felder/Fläche) im Projekt an. */
-function update2dSummary(proj) {
-  const el = document.getElementById('zeichnung2dSummary');
-  if (!el) return;
-  const stats = get2dStats(proj);
-  if (!proj.zeichnung2d) {
-    el.textContent = 'Noch keine 2D-Zeichnung vorhanden.';
-  } else {
-    el.textContent = `${stats.felder} Feld${stats.felder === 1 ? '' : 'er'} gezeichnet · Gesamtfläche ${fmtNum(stats.flaeche)} m²`;
-  }
 }
 
 // ============================================================
@@ -1264,7 +1210,7 @@ function collectSeiten() {
 // ============================================================
 
 /** Liest den kompletten Formularzustand ein und schreibt ihn in das Projekt
- *  (mutiert proj direkt – die 2D-Zeichnung des 2D-Zeichners bleibt unberührt).
+ *  (mutiert proj direkt – Felder, die das Formular nicht kennt, bleiben unberührt).
  *  Wird sowohl vom manuellen "Speichern" als auch vom Auto-Save genutzt. */
 function collectProjectFromForm(proj) {
   proj.name              = document.getElementById('fieldProjektname').value.trim();
@@ -3463,34 +3409,22 @@ function goToOverview() {
   showScreen('homeScreen');
 }
 
-function open2dViewer() {
-  const proj = getCurrentProject();
-  if (!proj) return;
-  flushAutosave();
-  localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, proj.id);
-  // Früher ein Seitenwechsel zu viewer2d.html – in der zusammengeführten App
-  // ein Routenwechsel innerhalb derselben Seite. Der 2D-Zeichner lädt beim
-  // Aktivieren die Zeichnung des verknüpften Projekts nach.
-  Shell.gehe('#/2d');
-}
-
 function initApp() {
   loadProjects();
   loadFolders();
 
-  // Das 2D-Modul schreibt in dieselbe Projektliste (neue Zeichnung, Löschen,
-  // Umbenennen, Verschieben). Ohne dieses Nachladen liefe die Übersicht hier
-  // auf einem veralteten Stand weiter – und der nächste Schreibvorgang würde
-  // die Änderung des anderen Moduls überschreiben.
+  // Der Cloud-Abgleich schreibt neuere Stände anderer Geräte in die
+  // Projektliste. Ohne dieses Nachladen liefe die Übersicht hier auf einem
+  // veralteten Stand weiter – und der nächste Schreibvorgang würde die
+  // Änderung überschreiben.
   document.addEventListener(GERUEST_DATEN_EVENT, e => {
     if (e.detail && e.detail.quelle === 'aufmass') return;
     AufmassModul.frischeDatenLaden();
   });
 
-  // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt (z. B. Rücksprung
-  // aus dem 2D-Zeichner) – genau dort weitermachen, wo man aufgehört hat.
-  // `?resume=1` bleibt als Einstieg erhalten (alte Lesezeichen); innerhalb der
-  // Shell übernimmt zusätzlich `AufmassModul.oeffneProjekt(id)`.
+  // Direkter Wiedereinstieg ins zuletzt bearbeitete Projekt – genau dort
+  // weitermachen, wo man aufgehört hat. `?resume=1` bleibt als Einstieg
+  // erhalten (alte Lesezeichen).
   const resumeId = new URLSearchParams(window.location.search).get('resume')
     ? localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY)
     : null;
@@ -3517,6 +3451,9 @@ function initApp() {
   }
 
   document.getElementById('newProjectBtn')?.addEventListener('click', createNewProject);
+  // Gesamt-Sicherung aller Projekte (JSON) – stand früher zusätzlich in der
+  // Fußzeile des Startbildschirms, der seit der Trennung keine Daten kennt.
+  document.getElementById('backupAlleBtn')?.addEventListener('click', exportAllProjectsBackup);
 
   // Die folgenden Elemente existieren nur auf Seiten mit eingebettetem
   // Projekt-Editor (#projectScreen, z. B. index.html). Auf reinen
@@ -3538,7 +3475,6 @@ function initApp() {
     document.getElementById('importFileInput').click();
   });
   document.getElementById('importFileInput')?.addEventListener('change', handleImportFile);
-  document.getElementById('open2dBtn')?.addEventListener('click', open2dViewer);
 
   document.getElementById('addZusatzBtn')?.addEventListener('click', () => {
     const container = document.getElementById('zusatzContainer');
@@ -3623,13 +3559,11 @@ function initApp() {
 }
 
 // ============================================================
-//  Modul-Schnittstelle zur Shell
+//  App-Schnittstelle und Start
 // ============================================================
-// Früher startete dieses Programm selbst per DOMContentLoaded. In der
-// zusammengeführten App entscheidet die Shell (shell.js), wann das Modul
-// aufgebaut (`mount`) und wann es sichtbar wird (`aktiviere`). Aufgebaut wird
-// nur einmal – dadurch bleibt beim Wechsel Hub ↔ Modul der gesamte Zustand
-// (geöffnetes Projekt, Formularinhalte, Scrollposition) erhalten.
+// Die Aufmaß-App ist eine eigene Seite (/app/aufmass) und startet sich selbst.
+// Das Objekt bündelt, was der Cloud-Abgleich und die Tests von außen
+// brauchen: neu einlesen, sofort speichern, Projekt öffnen.
 
 const AufmassModul = (() => {
   let gemountet = false;
@@ -3645,19 +3579,9 @@ const AufmassModul = (() => {
       initApp();
     },
 
-    /** Modul wird sichtbar. Die Projektliste kann zwischenzeitlich vom
-     *  2D-Modul verändert worden sein (Zeichnung gespeichert) – deshalb neu
-     *  einlesen und die Kennzahlen der 2D-Zeichnung auffrischen. */
-    aktiviere() {
-      this.mount();
-      this.frischeDatenLaden();
-      const proj = getCurrentProject();
-      if (proj) update2dSummary(proj);
-    },
-
     /** Liest Projekte und Ordner neu aus dem Speicher und frischt die
-     *  Übersicht auf – nötig, sobald das 2D-Modul Zeichnungen angelegt,
-     *  gelöscht oder verschoben hat. */
+     *  Übersicht auf – nötig, sobald der Cloud-Abgleich neuere Stände
+     *  eingespielt hat. */
     frischeDatenLaden() {
       if (!gemountet) return;
       loadProjects();
@@ -3666,9 +3590,9 @@ const AufmassModul = (() => {
       renderBackupReminder();
     },
 
-    /** Modul wird verlassen: gebündelte Autosave-Schreibvorgänge sofort
-     *  ausführen, damit nichts verloren geht. */
-    deaktiviere() {
+    /** Gebündelte Autosave-Schreibvorgänge sofort ausführen, damit beim
+     *  Verlassen der Seite nichts verloren geht. */
+    sichern() {
       if (!gemountet) return;
       flushAutosave();
       closeFloatingMenu();
@@ -3679,13 +3603,13 @@ const AufmassModul = (() => {
       return gemountet && autosaveTimer !== null;
     },
 
-    /** Öffnet ein Projekt direkt im Editor (vom Hub/Auswahldialog aus). */
+    /** Öffnet ein Projekt direkt im Editor. */
     oeffneProjekt(id) {
       this.mount();
       openProject(id);
     },
 
-    /** Zurück zur Projektübersicht innerhalb des Moduls. */
+    /** Zurück zur Projektübersicht. */
     zeigeUebersicht() {
       this.mount();
       goToOverview();
@@ -3698,3 +3622,26 @@ const AufmassModul = (() => {
     }
   };
 })();
+
+// ── Start ────────────────────────────────────────────────────────────────
+function starteAufmassApp() {
+  AufmassModul.mount();
+
+  // Beim Verlassen der Seite (Tab schließen, anderes Programm, Neuladen)
+  // alles sofort schreiben. Nachgefragt wird nur, wenn das nicht mehr ging.
+  window.addEventListener('pagehide', () => AufmassModul.sichern());
+  window.addEventListener('beforeunload', e => {
+    if (!AufmassModul.hatUngespeicherte()) return;
+    AufmassModul.sichern();
+    if (!AufmassModul.hatUngespeicherte()) return;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', starteAufmassApp);
+} else {
+  starteAufmassApp();
+}

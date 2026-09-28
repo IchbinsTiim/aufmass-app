@@ -78,10 +78,10 @@ Bildschirmtastatur), wird alle 220 ms nachgemessen und nachgezogen.
 
 | Datei | Rolle |
 |---|---|
-| `legacy-app/tutorial.js` | Ablauf, die elf Schritte, Hervorhebung, Aufräumen; Schnittstelle `window.Tutorial2D` |
-| `legacy-app/tutorial.css` | „?"-Knopf, Abdunkelung, Ring, Erklärkarte – Farben und Radien aus den Design-Tokens |
-| `legacy-app/index.html` | ein Knopf in der Werkzeugleiste, ein `<link>`, ein `<script>` |
-| `legacy-app/core.js` | ein Speicher-Schlüssel mehr (`GK.tutorial2d`) |
+| `aufmass-2d/tutorial.js` | Ablauf, die elf Schritte, Hervorhebung, Aufräumen; Schnittstelle `window.Tutorial2D` |
+| `aufmass-2d/tutorial.css` | „?"-Knopf, Abdunkelung, Ring, Erklärkarte – Farben und Radien aus den Design-Tokens |
+| `aufmass-2d/index.html` | ein Knopf in der Werkzeugleiste, ein `<link>`, ein `<script>` |
+| `aufmass-2d/basis.js` | ein Speicher-Schlüssel mehr (`GK.tutorial2d`) |
 | `tests/r18-tutorial.mjs` | Abnahmetest |
 
 Keine neue Bibliothek, kein Build-Schritt, keine neue Abhängigkeit – wie im

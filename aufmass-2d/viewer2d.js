@@ -817,13 +817,15 @@ let bulkKonsMeter   = null;
 let bulkHL          = null;
 let bulkHR          = null;
 
-// ── Projektverwaltung (gemeinsam mit der Aufmaß-Hauptapp) ───────────────────
-// Wird der 2D-Zeichner aus einem Projekt heraus geöffnet, teilt er sich die
-// Projektliste (inkl. Ordner/Status/Adresse) mit script.js/index.html: die
-// Zeichnung wird direkt im Projektdatensatz gespeichert (zeichnung2d) statt
-// nur als lose Datei.
-const PROJECTS_STORAGE_KEY = GK.projekte;
-// CURRENT_PROJECT_STORAGE_KEY: siehe core.js (von beiden Modulen genutzt).
+// ── Zeichnungsverwaltung ────────────────────────────────────────────────────
+// Die 2D-Aufmaß-App führt ihre Zeichnungen in einer EIGENEN Liste
+// (geruest.2d.zeichnungen) mit eigenen Ordnern (geruest.2d.ordner) – getrennt
+// von den Projekten der Aufmaß-App. Ein Datensatz trägt Name, Ordner,
+// Anschrift (für den PDF-Kopf) und die Zeichnung selbst unter `zeichnung2d`.
+// Intern heißen die Datensätze aus der Zeit vor der Trennung weiter
+// „Projekt" (linkedProjectId, loadLinkedProjects …).
+const PROJECTS_STORAGE_KEY = GK.zeichnungen;
+// CURRENT_PROJECT_STORAGE_KEY: siehe basis.js (zuletzt geöffnete Zeichnung).
 let linkedProjectId = null;
 let autosave2dTimer = null;
 // Stand der Zeichnung, wie er zuletzt im Projekt stand. Daran – und nicht am
@@ -842,10 +844,8 @@ function loadLinkedProjects() {
 }
 
 /**
- * Schreibt die Projektliste zurück – die einzige Stelle im 2D-Modul, die das
- * tut. Sie meldet die Änderung auch dem Aufmaß-Modul, das dieselbe Liste im
- * Speicher hält; ohne diese Meldung liefe dort ein veralteter Stand weiter
- * und würde beim nächsten Schreiben die Änderung von hier überschreiben.
+ * Schreibt die Zeichnungsliste zurück – die einzige Stelle in der App, die
+ * das tut. Die Meldung danach stößt den Cloud-Abgleich an.
  * @returns {boolean} false, wenn der Speicher die Daten nicht annimmt.
  */
 function schreibeLinkedProjects(list) {
@@ -1075,7 +1075,7 @@ function raeumeVerwaisteFotosAuf() {
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 
-// showToast() steht in core.js – identische Fassung, von beiden Modulen genutzt.
+// showToast() steht in basis.js.
 
 // ── Rückgängig / Wiederholen ────────────────────────────────────────────────
 
@@ -5880,7 +5880,7 @@ function openProjektSheet() {
     closeSheet(); neueZeichnungStarten();
   });
   sheet.querySelector('#projWechselBtn').addEventListener('click', () => {
-    closeSheet(); Shell.gehe('#/2d/projekte');
+    closeSheet(); Navigation2d.zurUebersicht();
   });
   sheet.querySelector('#savePlanBtn').addEventListener('click', () => { closeSheet(); savePlan(); });
   sheet.querySelector('#loadPlanBtn').addEventListener('click', () => { closeSheet(); triggerLoad(); });
@@ -12600,8 +12600,6 @@ function init() {
   // Vergleichsbasis übernommen wurde, und der erste Undo-Schritt ginge verloren.
   lastUndoSnapshot = serializeUndoState();
   document.getElementById('projectName').value = state.project;
-  // Der Rücksprung ins Aufmaß-Modul ist in der zusammengeführten App ein
-  // Routenwechsel; die Shell setzt das Ziel der Kopfzeile selbst.
   syncBackLink();
 
   document.getElementById('addSectionBtn').addEventListener('click', () => {
@@ -12648,11 +12646,11 @@ function init() {
 
   verknuepfeZeichnungsDialoge();
 
-  // Das Aufmaß-Modul verwaltet dieselben Projekte. Ändert es dort etwas,
-  // zeigt die Liste hier sonst einen veralteten Stand.
+  // Der Cloud-Abgleich spielt neuere Stände anderer Geräte ein. Ohne neu
+  // einzulesen, zeigte die Liste hier einen veralteten Stand.
   document.addEventListener(GERUEST_DATEN_EVENT, e => {
     if (e.detail && e.detail.quelle === '2d') return;
-    if (window.location.hash === '#/2d/projekte') renderProjektListe();
+    if (Navigation2d.istUebersicht()) renderProjektListe();
   });
 
   // Fotos ohne Projekt (Seite wurde während der Rückgängig-Frist neu geladen)
@@ -12660,8 +12658,8 @@ function init() {
   setTimeout(() => raeumeVerwaisteFotosAuf(), 1500);
 
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
-  // ID mit td-Präfix: „exportPdfBtn" gehört im zusammengeführten Dokument
-  // bereits dem Aufmaß-Modul (PDF des Angebots).
+  // ID mit td-Präfix – aus der Zeit, als beide Anwendungen in einem Dokument
+  // lagen; Tests und Tutorial kennen den Knopf unter diesem Namen.
   document.getElementById('td-exportPdfBtn').addEventListener('click', exportPdf);
 
   // ── Bordbrett ───────────────────────────────────────────────────────────
@@ -12815,38 +12813,20 @@ function init() {
 }
 
 /* ── Rücksprung-Ziel der Kopfzeile ──────────────────────────────────────────
-   Der Pfeil führt dorthin, WO DER NUTZER HERKAM: aus der Zeichnungsübersicht
-   zurück in die Zeichnungsübersicht, aus dem Aufmaß zurück ins Aufmaß, sonst
-   auf den Startbildschirm.
-
-   Früher entschied das allein `linkedProjectId`: Jede Zeichnung, die zu einem
-   Projekt gehört – also praktisch jede –, schickte den Pfeil nach
-   `#/aufmass`. Wer aus der Zeichnungsübersicht kam, landete damit im anderen
-   Programm, ohne es gewollt zu haben. Die Herkunft kennt die Shell
-   (Shell.zurueckZiel); hier steht nur noch, wie sie beschriftet wird.
-
-   Ein Ziel außerhalb von AufmaßX kommt dabei nicht vor: `zurueckZiel()`
-   liefert ausschließlich Routen dieser Anwendung, im Zweifel den
-   Startbildschirm.                                                         */
-
-const ZURUECK_NAMEN = {
-  '#/':            'Zurück zum Startbildschirm',
-  '#/2d/projekte': 'Zurück zur Zeichnungsübersicht',
-  '#/aufmass':     'Zurück zum Aufmaß',
-  '#/2d':          'Zurück zum Startbildschirm'
-};
+   Der Pfeil in der Zeichnung führt in die Zeichnungsübersicht DIESER App –
+   dort wird eine Zeichnung gewählt, dorthin geht es zurück. Aus der
+   Übersicht führt „← Start" auf den Startbildschirm. Ein Ziel in der
+   Aufmaß-App gibt es nicht: die beiden Anwendungen sind getrennt.          */
 
 function syncBackLink() {
   const backLink = document.querySelector('#td-zeichnung .back-link');
   if (!backLink) return;
-  const ziel = (typeof Shell !== 'undefined' && Shell.zurueckZiel)
-    ? Shell.zurueckZiel() : '#/';
-  const sicher = ZURUECK_NAMEN[ziel] ? ziel : '#/';
-  backLink.setAttribute('href', sicher);
+  const text = 'Zurück zur Zeichnungsübersicht';
+  backLink.setAttribute('href', Navigation2d.UEBERSICHT);
   // Nur der Pfeil: in der schmalen Leiste zählt jeder Millimeter, das Ziel
   // steht im Tooltip und in der Vorlesehilfe.
-  backLink.setAttribute('title', ZURUECK_NAMEN[sicher]);
-  backLink.setAttribute('aria-label', ZURUECK_NAMEN[sicher]);
+  backLink.setAttribute('title', text);
+  backLink.setAttribute('aria-label', text);
 }
 
 /**
@@ -12945,7 +12925,7 @@ function oeffneZeichnung(id) {
   normalizeState();
   uebernehmeDokumentInOberflaeche();
 
-  Shell.gehe('#/2d');
+  Navigation2d.zurZeichnung();
   aktualisiereZeichenflaeche();
 }
 
@@ -12957,28 +12937,23 @@ function schliesseZeichnung() {
   localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
   uebernehmeDokumentInOberflaeche();
   renderAllNow();
-  Shell.gehe('#/2d/projekte');
+  Navigation2d.zurUebersicht();
 }
 
-/** Wird gerufen, wenn Zeichnungen verschwinden (auch aus dem Aufmaß-Modul
- *  heraus): Ist eine davon gerade offen, schließt der Editor sauber. */
+/** Wird gerufen, wenn Zeichnungen verschwinden: Ist eine davon gerade offen,
+ *  schließt der Editor sauber. */
 function zeichnungenEntfallen(ids) {
   if (!linkedProjectId || !Array.isArray(ids) || ids.indexOf(linkedProjectId) < 0) return;
   schliesseZeichnung();
 }
 
 // ============================================================================
-//  Projektliste des 2D-Moduls
+//  Zeichnungsübersicht
 // ============================================================================
-// Gezeichnet wird immer für ein bestimmtes Projekt. Vorher übernahm der
-// Zeichner stillschweigend das zuletzt geöffnete – welches das war, stand
-// nirgends, und ein anderes ließ sich hier gar nicht auswählen.
-//
-// Diese Liste zeigt dieselben Projekte und dieselbe Ordnerstruktur wie das
-// Aufmaß-Modul, aber auf das Zeichnen zugeschnitten: an jeder Karte steht,
-// ob und wie viel schon gezeichnet ist. Die Daten kommen direkt aus dem
-// gemeinsamen Speicher (siehe core.js) – das Modul greift dafür nicht in das
-// Aufmaß-Modul hinein.
+// Gezeichnet wird immer in einer bestimmten Zeichnung. Die Übersicht zeigt
+// die Zeichnungen DIESER App mit ihren eigenen Ordnern: an jeder Karte steht,
+// ob und wie viel schon gezeichnet ist. Die Daten liegen im Speicher der
+// 2D-App (siehe basis.js) – mit der Aufmaß-App teilt sie nichts.
 
 let tdSuche       = '';
 let tdOrdnerId    = '';       // '' = alle, '__ohne__' = ohne Ordner, sonst Ordner-ID
@@ -13064,7 +13039,7 @@ function tdRenderOrdnerLeiste() {
     bar.appendChild(b);
   };
 
-  chip('', 'Alle Projekte', projekte.length);
+  chip('', 'Alle Zeichnungen', projekte.length);
   const ohne = projekte.filter(p => !p.folderId).length;
   if (ohne || ordner.length) chip('__ohne__', 'Ohne Ordner', ohne);
   ordner.forEach(o => chip(o.id, o.name || 'Ordner', projekte.filter(p => p.folderId === o.id).length));
@@ -13227,7 +13202,7 @@ function renderProjektListe() {
 
 /** Projekt auswählen und dessen Zeichnung öffnen. */
 function oeffneProjektZumZeichnen(id) {
-  if (id === linkedProjectId) { Shell.gehe('#/2d'); return; }
+  if (id === linkedProjectId) { Navigation2d.zurZeichnung(); return; }
   mitGesichertenAenderungen(() => oeffneZeichnung(id));
 }
 
@@ -13282,6 +13257,9 @@ function oeffneZeichnungsMenu(proj, anchor) {
         tdAuswahl.add(proj.id);
         renderProjektListe();
       } },
+    // Freigeben hing früher am Aufmaß-Projekt, das die Zeichnung enthielt.
+    // Seit der Trennung hat die Zeichnung ihre eigene Freigabe.
+    { label: 'Für Mitarbeiter freigeben…', onClick: () => window.CloudSpeicher?.freigeben(proj) },
     '---',
     { label: 'Löschen', danger: true, onClick: () => frageZeichnungenLoeschen([proj.id]) }
   ]);
@@ -13310,11 +13288,9 @@ function oeffneVerschiebenMenu(proj, anchor) {
 // ============================================================================
 //  Zeichnungen anlegen, löschen, umbenennen, duplizieren, verschieben
 // ============================================================================
-// Bis hierher war die Liste eine Einbahnstraße: lesen ja, schreiben nein. Die
-// folgenden Funktionen arbeiten auf demselben Speicher und in demselben
-// Format wie das Aufmaß-Modul – ein Projektdatensatz, in dem die Zeichnung
-// unter `zeichnung2d` steckt. Damit bleibt jeder vorhandene Datensatz gültig,
-// eine Migration ist nicht nötig.
+// Ein Datensatz je Zeichnung, die Zeichnung selbst steckt unter
+// `zeichnung2d` – dasselbe Format, in dem die Speicher-Migration die
+// Zeichnungen aus dem früheren gemeinsamen Projektspeicher übernommen hat.
 
 function tdGenId(prefix) {
   return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
@@ -13345,24 +13321,16 @@ function tdVorgabeOrdner() {
   return (offen && offen.folderId) || null;
 }
 
-/** Legt den Projektdatensatz an (Format wie im Aufmaß-Modul). */
+/** Legt den Datensatz einer Zeichnung an. */
 function erzeugeZeichnung(name, folderId) {
   const heute = new Date().toISOString().slice(0, 10);
   const proj = {
-    id: tdGenId('proj'),
+    id: tdGenId('z2d'),
     name: (name || '').trim(),
-    status: 'in_bearbeitung',
     folderId: folderId || null,
     erstellt: heute,
     geaendert: heute,
     anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
-    geruesttyp: 'fassade',
-    geruesttypName: '',
-    seiten: [],
-    technik: { lastklasse: '3', breitenklasse: 'W06' },
-    logistik: {},
-    zusatzpositionen: [],
-    notizen: '',
     zeichnung2d: leereZeichnung()
   };
   const liste = loadLinkedProjects();
@@ -13470,7 +13438,8 @@ function dupliziereZeichnung(proj) {
   if (!rec) return;
   const heute = new Date().toISOString().slice(0, 10);
   const kopie = JSON.parse(JSON.stringify(rec));
-  kopie.id        = tdGenId('proj');
+  kopie.id        = tdGenId('z2d');
+  delete kopie.ausAufmass;        // Herkunftsvermerk gehört nur zum Original
   kopie.name      = (tdProjektName(rec) + ' (Kopie)').trim();
   kopie.erstellt  = heute;
   kopie.geaendert = heute;
@@ -13771,14 +13740,13 @@ function zeigeZeichnung() {
 }
 
 // ============================================================================
-//  Modul-Schnittstelle zur Shell
+//  App-Schnittstelle
 // ============================================================================
-// Früher startete der Zeichner selbst per DOMContentLoaded. Jetzt entscheidet
-// die Shell, wann aufgebaut (`mount`) und wann sichtbar geschaltet wird
-// (`aktiviere`). Der Aufbau passiert bewusst erst beim ersten Öffnen des
-// Moduls: die Kamera braucht eine sichtbare Zeichenfläche, um korrekt auf den
-// Inhalt einzupassen. Danach bleibt das Modul im Speicher – wer zeichnet, zum
-// Hub wechselt und zurückkommt, findet seine Zeichnung unverändert vor.
+// Die Navigation der App (navigation.js) entscheidet, wann aufgebaut
+// (`mount`) und welcher der beiden Bildschirme gezeigt wird (`aktiviere`):
+// die Zeichnungsübersicht oder die Zeichnung. Aufgebaut wird einmal, sobald
+// die Zeichenfläche sichtbar ist – die Kamera braucht sie, um korrekt auf den
+// Inhalt einzupassen.
 
 const ZweiDModul = (() => {
   let gemountet = false;
@@ -13796,8 +13764,8 @@ const ZweiDModul = (() => {
     aktiviere() {
       this.mount();
 
-      // Route entscheidet, welcher Bildschirm des Moduls zu sehen ist.
-      if (window.location.hash === '#/2d/projekte') { zeigeProjektListe(); return; }
+      // Route entscheidet, welcher Bildschirm der App zu sehen ist.
+      if (Navigation2d.istUebersicht()) { zeigeProjektListe(); return; }
 
       // Ohne gewähltes Projekt gibt es nichts zu zeichnen – dann zuerst die
       // Liste anbieten, statt wortlos eine leere Fläche zu zeigen. Gibt es
@@ -13805,15 +13773,15 @@ const ZweiDModul = (() => {
       const gewaehlt = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
       const bekannt  = gewaehlt && loadLinkedProjects().some(p => p.id === gewaehlt);
       if (!bekannt && loadLinkedProjects().length) {
-        Shell.gehe('#/2d/projekte');
+        Navigation2d.zurUebersicht();
         return;
       }
 
       zeigeZeichnung();
 
-      // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
-      // gehört zu diesem Projekt eine andere Zeichnung. Der Wechsel läuft über
-      // dieselbe Funktion wie überall sonst – ein Dokument, ein Aufbau.
+      // Zeigt der Merker inzwischen auf eine andere Zeichnung (etwa aus einem
+      // zweiten Tab), läuft der Wechsel über dieselbe Funktion wie überall
+      // sonst – ein Dokument, ein Aufbau.
       const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) || null;
       if (id !== linkedProjectId) {
         flushAutosave2d();
@@ -13826,12 +13794,10 @@ const ZweiDModul = (() => {
       aktualisiereZeichenflaeche();
     },
 
-    deaktiviere() {
+    /** Alles sofort schreiben – beim Verlassen der Seite. */
+    sichern() {
       if (!gemountet) return;
       flushAutosave2d();
-      // Offene Sheets/Menüs/Overlays hängen am <body> und würden sonst über
-      // dem anderen Modul stehen bleiben.
-      schliesseOffeneOberflaechen();
     },
 
     hatUngespeicherte() {

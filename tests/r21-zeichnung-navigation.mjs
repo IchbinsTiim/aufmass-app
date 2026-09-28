@@ -7,8 +7,10 @@
 //   1. Unter den Feldern steht kein Achsentext mehr. Die Zuordnung zeigt die
 //      FARBE; der Achsname erscheint nur noch dort, wo er eine Frage
 //      beantwortet – an der Auswahl.
-//   2. Der Zurück-Pfeil führt zurück, WO MAN HERKAM, und niemals ungewollt
-//      ins andere Modul.
+//   2. Der Zurück-Pfeil führt in die Zeichnungsübersicht DIESER App – und
+//      niemals in die andere Anwendung. (Seit der Trennung der Anwendungen
+//      gibt es innerhalb der 2D-App genau zwei Bildschirme: Übersicht und
+//      Zeichnung.)
 //
 // Dazu der Nachweis, dass nichts verloren gegangen ist: Feldbezeichnungen
 // gibt es weiterhin in Feldübersicht, Auswahl-Anzeige und Feld-Blatt, und die
@@ -159,77 +161,56 @@ console.log('\n  Zurück-Pfeil');
 
 const zurueck = async () => page.evaluate(() => {
   const a = document.querySelector('#td-zeichnung .back-link');
-  return { href: a?.getAttribute('href'), titel: a?.getAttribute('title'),
-           ziel: Shell.zurueckZiel() };
+  return { href: a?.getAttribute('href'), titel: a?.getAttribute('title') };
 });
 
-// a) Direkt geöffnet (Deep-Link, Neuladen): Startbildschirm.
+// a) Direkt geöffnet (Deep-Link, Neuladen): in die Zeichnungsübersicht.
 const direkt = await zurueck();
-assert(direkt.href === '#/' && direkt.ziel === '#/',
-  `ohne bekannte Herkunft führt der Pfeil auf den Startbildschirm (${direkt.href})`);
+assert(direkt.href === '#/projekte',
+  `ohne bekannte Herkunft führt der Pfeil in die Zeichnungsübersicht (${direkt.href})`);
+assert(/Zeichnungsübersicht/.test(direkt.titel || ''), `und sagt das auch (${direkt.titel})`);
 
-// b) Aus der Zeichnungsübersicht heraus geöffnet – der häufigste Weg. Genau
-//    hier landete man früher im Aufmaß-Modul, also im anderen Programm.
-await page.evaluate(() => Shell.gehe('#/2d/projekte'));
+// b) Aus der Zeichnungsübersicht heraus geöffnet – der häufigste Weg.
+await page.evaluate(() => Navigation2d.zurUebersicht());
 await page.waitForTimeout(150);
-await page.evaluate(() => Shell.gehe('#/2d'));
+await page.evaluate(() => Navigation2d.zurZeichnung());
 await page.waitForTimeout(250);
 const ausListe = await zurueck();
-assert(ausListe.href === '#/2d/projekte',
+assert(ausListe.href === '#/projekte',
   `aus der Zeichnungsübersicht führt er dorthin zurück (${ausListe.href})`);
-assert(/Zeichnungsübersicht/.test(ausListe.titel || ''),
-  `und sagt das auch (${ausListe.titel})`);
 
-// c) Aus dem Aufmaß heraus geöffnet: zurück ins Aufmaß – das war die Absicht
-//    des Nutzers, nicht ein Versehen.
-await page.evaluate(() => Shell.gehe('#/aufmass'));
-await page.waitForTimeout(200);
-await page.evaluate(() => Shell.gehe('#/2d'));
-await page.waitForTimeout(250);
-const ausAufmass = await zurueck();
-assert(ausAufmass.href === '#/aufmass',
-  `aus dem Aufmaß führt er ins Aufmaß zurück (${ausAufmass.href})`);
-
-// d) Vom Startbildschirm heraus: dorthin zurück.
-await page.evaluate(() => Shell.gehe('#/'));
-await page.waitForTimeout(200);
-await page.evaluate(() => Shell.gehe('#/2d'));
-await page.waitForTimeout(250);
-const ausHub = await zurueck();
-assert(ausHub.href === '#/', `vom Startbildschirm zurück zum Startbildschirm (${ausHub.href})`);
-
-// e) Ein verknüpftes Projekt ändert daran NICHTS mehr – früher schickte
+// c) Eine Zeichnung mit Datensatz ändert daran nichts – früher schickte
 //    genau das den Pfeil ins andere Modul.
-const mitProjekt = await page.evaluate(async () => {
-  Shell.gehe('#/2d/projekte');
-  await new Promise(r => setTimeout(r, 120));
-  Shell.gehe('#/2d');
-  await new Promise(r => setTimeout(r, 200));
-  linkedProjectId = 'irgendein-projekt';
+const mitProjekt = await page.evaluate(() => {
+  linkedProjectId = 'irgendeine-zeichnung';
   syncBackLink();
   const a = document.querySelector('#td-zeichnung .back-link');
   linkedProjectId = null;
   return a?.getAttribute('href');
 });
-assert(mitProjekt === '#/2d/projekte',
-  `auch eine Zeichnung mit Projekt führt zurück zur Herkunft, nicht ins Aufmaß (${mitProjekt})`);
+assert(mitProjekt === '#/projekte',
+  `auch eine gespeicherte Zeichnung führt zurück in die Übersicht, nicht ins Aufmaß (${mitProjekt})`);
 
-// f) Eine unbekannte Adresse wird nicht zur Herkunft – sonst zeigte der Pfeil
-//    irgendwohin. Sie landet ohnehin auf dem Startbildschirm, und genau
-//    dorthin führt danach auch der Pfeil.
-await page.evaluate(() => { window.location.hash = '#/gibtesnicht'; });
-await page.waitForTimeout(200);
-await page.evaluate(() => Shell.gehe('#/2d'));
+// d) Der Pfeil wirkt wirklich.
+await page.click('#td-zeichnung .back-link');
+await page.waitForFunction(() => location.hash === '#/projekte'
+  && !document.getElementById('td-projekte').classList.contains('hidden'));
+assert(true, 'ein Tipp auf den Pfeil zeigt die Zeichnungsübersicht');
+await page.evaluate(() => Navigation2d.zurZeichnung());
 await page.waitForTimeout(250);
-const ausUnbekannt = await zurueck();
-assert(ausUnbekannt.href === '#/' && ausUnbekannt.ziel === '#/',
-  `eine unbekannte Adresse führt zurück auf den Startbildschirm (${ausUnbekannt.href})`);
 
-// g) Das Ziel ist immer eine Route DIESER Anwendung – nie ein absoluter Link
-//    in die alte App.
-const zieleGesehen = [direkt, ausListe, ausAufmass, ausHub, ausUnbekannt].map(z => z.href);
-assert(zieleGesehen.every(z => z && z.startsWith('#/')),
-  `jedes Rücksprungziel bleibt in AufmaßX (${[...new Set(zieleGesehen)].join(', ')})`);
+// e) Eine unbekannte Adresse zeigt die Übersicht – nie eine leere Seite.
+await page.evaluate(() => { window.location.hash = '#/gibtesnicht'; });
+await page.waitForFunction(() => !document.getElementById('td-projekte').classList.contains('hidden')
+  || !document.getElementById('td-zeichnung').classList.contains('hidden'));
+assert(await page.evaluate(() => Navigation2d.istUebersicht()),
+  'eine unbekannte Adresse gilt als Zeichnungsübersicht');
+
+// f) Das Ziel ist immer ein Bildschirm DIESER App – nie ein Link in die
+//    Aufmaß-App.
+const zieleGesehen = [direkt, ausListe].map(z => z.href).concat(mitProjekt);
+assert(zieleGesehen.every(z => z === '#/projekte'),
+  `jedes Rücksprungziel bleibt in der 2D-Aufmaß-App (${[...new Set(zieleGesehen)].join(', ')})`);
 
 assert(ctx.logs.filter(l => l.startsWith('[pageerror]')).length === 0,
   'keine JS-Fehler: ' + ctx.logs.filter(l => l.startsWith('[pageerror]')).join(' | '));

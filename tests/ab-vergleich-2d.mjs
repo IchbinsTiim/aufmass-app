@@ -10,12 +10,47 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const ALT_ROOT = path.join(process.argv[2], 'aufmass_final_app');
-const NEU_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'legacy-app');
+// Welche Fassung liegt in einer Arbeitskopie? Drei Stände sind bekannt:
+//   aufmass_final_app/   zwei getrennte Seiten vor dem Zusammenführen
+//   legacy-app/          eine Suite, beide Module in einem Dokument (#/2d, #/aufmass)
+//   aufmass/ + aufmass-2d/  zwei getrennte Anwendungen (heute)
+function fassung(wurzel) {
+  if (fs.existsSync(path.join(wurzel, 'aufmass_final_app')))
+    return { name: 'zwei Seiten (vor dem Zusammenführen)', ordner: { '': path.join(wurzel, 'aufmass_final_app') },
+             ziel: 'viewer2d.html' };
+  if (fs.existsSync(path.join(wurzel, 'legacy-app')))
+    return { name: 'Suite (ein Dokument)', ordner: { '': path.join(wurzel, 'legacy-app') },
+             ziel: 'app#/2d' };
+  return { name: 'getrennte Anwendungen', ordner: {
+             start: path.join(wurzel, 'start'), aufmass: path.join(wurzel, 'aufmass'),
+             'aufmass-2d': path.join(wurzel, 'aufmass-2d'), shared: path.join(wurzel, 'shared') },
+           ziel: 'app/aufmass-2d#/zeichnung' };
+}
+const ALT = fassung(path.resolve(process.argv[2]));
+const NEU = fassung(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
 const STUB     = path.join(path.dirname(new URL(import.meta.url).pathname), 'jspdf-stub.js');
 const MIME     = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
-function serve(root) {
+/** URL-Pfad → Datei. Mit einem Ordner unter '' liegt alles direkt unter /app
+ *  (bzw. unter / für die Fassung vor dem Zusammenführen); sonst entscheidet
+ *  das erste Segment nach /app, und /app selbst ist die Startseite. */
+function datei(ordner, pfad) {
+  if (ordner['']) {
+    const wurzel = ordner[''];
+    let rel = pfad.replace(/^\/app(\/|$)/, '/');
+    if (rel === '/' ) rel = '/index.html';
+    const p = path.join(wurzel, rel);
+    return p.startsWith(wurzel) ? p : null;
+  }
+  const m = /^\/app(?:\/(.*))?$/.exec(pfad);
+  if (!m) return null;
+  const [kopf = 'start', ...rest] = (m[1] || '').split('/').filter(Boolean);
+  if (!ordner[kopf]) return null;
+  const p = path.resolve(ordner[kopf], rest.join('/') || 'index.html');
+  return p.startsWith(ordner[kopf]) ? p : null;
+}
+
+function serve(ordner) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/__jspdf.js') {
@@ -26,12 +61,8 @@ function serve(root) {
     if (url.pathname === '/__fonts.css') {
       res.writeHead(200, { 'Content-Type': 'text/css' }); res.end('/* keine Webschriften */'); return;
     }
-    // Die App verweist auf ihre Dateien unter `/app/…` – so liefert sie der
-    // geschützte Route Handler der Next.js-Hülle aus. Der Testserver bildet
-    // dieselbe Adresse auf den Ordner ab.
-    const _pfad = decodeURIComponent(url.pathname).replace(/^\/app(\/|$)/, '/');
-    const p = path.join(root, _pfad);
-    if (!p.startsWith(root) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
+    const p = datei(ordner, decodeURIComponent(url.pathname));
+    if (!p || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
     let body = fs.readFileSync(p);
     if (p.endsWith('.html')) {
       body = body.toString()
@@ -147,8 +178,8 @@ async function lauf(root, hash) {
   return { werte, fehler };
 }
 
-const alt = await lauf(ALT_ROOT, 'viewer2d.html');
-const neu = await lauf(NEU_ROOT, 'index.html#/2d');
+const alt = await lauf(ALT.ordner, ALT.ziel);
+const neu = await lauf(NEU.ordner, NEU.ziel);
 
 let abweichungen = 0;
 function pruefe(name, a, b) {
@@ -160,7 +191,7 @@ function pruefe(name, a, b) {
   console.log('      nachher: ' + String(sb).slice(0, 400));
 }
 
-console.log('\nA/B-VERGLEICH  vorher (zwei Apps)  ↔  nachher (zusammengeführt)\n');
+console.log(`\nA/B-VERGLEICH  vorher (${ALT.name})  ↔  nachher (${NEU.name})\n`);
 console.log('Rechenergebnisse:');
 Object.keys(alt.werte).forEach(k => pruefe(k, alt.werte[k], neu.werte[k]));
 

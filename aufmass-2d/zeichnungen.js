@@ -5,9 +5,9 @@
   dialog.className = 'zeichnungs-bestand';
   dialog.style.cssText = 'width:min(680px,94vw);max-height:85vh;overflow:auto;border:1px solid #cad4df;border-radius:16px;padding:24px;color:#172b40;background:#fff';
   dialog.innerHTML = `<form method="dialog"><button style="float:right" aria-label="Schließen">✕</button></form>
-    <h2 id="bestandTitel">Zeichnungen im Projekt</h2>
-    <p>Öffnen legt eine bearbeitbare Kopie als neues Projekt an. Benannte Speicherstände bleiben unverändert. Die laufende Zeichnung wird weiterhin automatisch lokal gesichert.</p>
-    <p id="bestandQuelle"></p><label>Zielprojekt <select id="bestandProjekt" style="width:100%;padding:10px;margin:8px 0"></select></label>
+    <h2 id="bestandTitel">Gespeicherte Zeichnungsstände</h2>
+    <p>Öffnen legt eine bearbeitbare Kopie als neue Zeichnung an. Benannte Speicherstände bleiben unverändert. Die laufende Zeichnung wird weiterhin automatisch lokal gesichert.</p>
+    <p id="bestandQuelle"></p><label>Zeichnung <select id="bestandProjekt" style="width:100%;padding:10px;margin:8px 0"></select></label>
     <label>Name der Zeichnung <input id="bestandName" maxlength="120" style="width:100%;box-sizing:border-box;padding:10px;margin:8px 0" placeholder="z. B. Nordfassade – Stand 1"></label>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0"><button type="button" id="bestandSpeichern">Zeichnung speichern</button>
     <label>Zeichnung hochladen <input id="bestandDatei" type="file" accept=".json,application/json"></label></div>
@@ -33,12 +33,12 @@
   async function liste() {
     const token = ++generation;
     el('Liste').replaceChildren();
-    if (!el('Projekt').value) { meldung('Bitte zuerst ein Projekt anlegen.'); return; }
+    if (!el('Projekt').value) { meldung('Bitte zuerst eine Zeichnung anlegen.'); return; }
     meldung('Gespeicherte Zeichnungen werden geladen …');
     try {
       const data = await request(endpoint());
       if (token !== generation) return;
-      meldung(data.zeichnungen.length ? '' : 'Noch keine gespeicherten Zeichnungen in diesem Projekt.');
+      meldung(data.zeichnungen.length ? '' : 'Für diese Zeichnung gibt es noch keine gespeicherten Stände.');
       for (const z of data.zeichnungen) {
         const row = document.createElement('article'); row.style.cssText='border-top:1px solid #ddd;padding:14px 0';
         const title = document.createElement('strong'); title.textContent=z.name;
@@ -50,7 +50,7 @@
           try {
             const data = await request(endpoint() + '?zeichnung=' + encodeURIComponent(z.id));
             window.ZeichnungsBestand.oeffnen(data.zeichnungen[0].inhalt, z.name);
-            dialog.close(); showToast('Zeichnung als neues Projekt geöffnet – Original bleibt erhalten');
+            dialog.close(); showToast('Zeichnung als Kopie geöffnet – Original bleibt erhalten');
           } catch (error) { meldung(error.message); } finally { sperren(false); }
         });
         row.append(title,meta,open);el('Liste').append(row);
@@ -60,7 +60,7 @@
   async function speichern(inhalt, quelle, dateiname) {
     if (busy) return;
     const name = el('Name').value.trim();
-    if (!name || !el('Projekt').value) { meldung('Bitte Projekt und Zeichnungsnamen angeben.'); return; }
+    if (!name || !el('Projekt').value) { meldung('Bitte Zeichnung und Namen des Speicherstands angeben.'); return; }
     sperren(true);
     try {
       const signatur = JSON.stringify({projekt:el('Projekt').value,name,inhalt,quelle,dateiname});
@@ -90,7 +90,9 @@
   document.querySelectorAll('[data-zeichnungen]').forEach(button => button.addEventListener('click', () => {
     if (busy) return;
     aktuell = window.ZeichnungsBestand.aktuell();
-    const projects = JSON.parse(localStorage.getItem(GK.projekte) || '[]');
+    // Die Zeichnungen DIESER App (siehe basis.js) – die Aufmaß-App führt ihre
+    // Projekte getrennt davon.
+    const projects = JSON.parse(localStorage.getItem(GK.zeichnungen) || '[]');
     el('Projekt').replaceChildren();
     projects.forEach(p => { const option = document.createElement('option');option.value=p.id;option.textContent=p.name || 'Unbenannt';el('Projekt').append(option); });
     if (aktuell.projektId) el('Projekt').value=aktuell.projektId;

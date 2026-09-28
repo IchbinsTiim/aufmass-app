@@ -1,0 +1,601 @@
+/* ===========================================================================
+   Aufmaß-App – Oberfläche
+   ---------------------------------------------------------------------------
+   Wird nach style.css geladen und legt das Erscheinungsbild über das
+   gewachsene Stylesheet der App: Farbe, Schrift, Radius, Tiefe, Bewegung.
+   Werte kommen aus den gemeinsamen Design-Tokens (shared/tokens.css); alles
+   hier gehört allein der Aufmaß-App.
+
+   Aufbau
+     0  Grundfläche und Umschalter-Pille
+     A  Rahmen der App
+     B  Aufmaß
+     D  Bauteile (Toast, Menüs, Bildlaufleisten)
+   =========================================================================== */
+
+/* ===========================================================================
+   0  Grundfläche und Umschalter-Pille
+   =========================================================================== */
+
+html, body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-text);
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Platz für die Umschalter-Pille ─────────────────────────────────────────
+   Die App bekommt oben Platz für die schwebende Pille. Bewusst nur die
+   Deckkraft animiert, kein transform: die Zeichenfläche wird beim
+   Sichtbarwerden vermessen – ein laufendes scale() würde das verfälschen. */
+#am-root {
+  padding-top: calc(var(--touch) + 18px + env(safe-area-inset-top, 0px));
+  animation: app-auf var(--t-lang) var(--federnd) both;
+}
+
+@keyframes app-auf {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ===========================================================================
+   Modul-Umschalter – kompakte Pille oben links, immer sichtbar
+   =========================================================================== */
+
+.mod-switcher {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: calc(10px + env(safe-area-inset-left, 0px));
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: var(--r-pille);
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--schatten-m);
+  transition: box-shadow var(--t-normal) var(--federnd);
+}
+
+.mod-switcher-home {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--r-pille);
+  text-decoration: none;
+  flex: none;
+}
+
+.mod-switcher-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent-aufmass) 0 50%, var(--accent-2d) 50% 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .25) inset;
+  transition: transform var(--t-normal) var(--federnd);
+}
+.mod-switcher-home:hover .mod-switcher-mark { transform: rotate(-8deg) scale(1.08); }
+.mod-switcher-home:active .mod-switcher-mark { transform: scale(.94); }
+
+.mod-switcher-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+  border-left: 1px solid var(--hairline);
+}
+
+.mod-tab {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding: 0 16px;
+  border-radius: var(--r-pille);
+  font-family: var(--font-display);
+  font-size: .88rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--t-normal) var(--federnd), background var(--t-normal) var(--federnd);
+}
+
+.mod-tab:hover { color: var(--text); }
+.mod-tab:active { transform: scale(.97); }
+
+/* Weicher Farbwechsel: die aktive Zunge trägt die Modulfarbe. */
+.mod-tab[data-ziel="aufmass"].aktiv {
+  color: var(--accent-kontrast);
+  background: var(--accent-aufmass);
+}
+.mod-tab[data-ziel="2d"].aktiv {
+  color: var(--accent-kontrast);
+  background: var(--accent-2d);
+}
+
+/* Auf dem Startbildschirm liegt der Umschalter im Fluss der Seite. */
+body[data-modul="hub"] .mod-switcher { box-shadow: var(--schatten-s); }
+
+@media (max-width: 720px) {
+  .mod-tab { padding: 0 12px; font-size: .82rem; }
+}
+
+/* ===========================================================================
+   A  Rahmen der App
+   =========================================================================== */
+
+/* Höhe der Kopfzone, in der die Umschalter-Pille schwebt. */
+:root { --chrome-h: calc(var(--touch) + 18px + env(safe-area-inset-top, 0px)); }
+
+/* Damit beim Scrollen nichts unter der Pille hervorblitzt, liegt über der
+   Kopfzone ein weicher Verlauf in der Grundfarbe. */
+body[data-modul="aufmass"]::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--chrome-h);
+  background: linear-gradient(to bottom, var(--bg-deep) 62%, rgba(14, 22, 38, 0));
+  z-index: 850;
+  pointer-events: none;
+}
+
+/* Die App bringt ihren eigenen Hintergrund mit – auch hinter dem Modul. */
+body { background: var(--bg-deep); }
+
+/* ===========================================================================
+   B  Modul 1 – Aufmaß
+   =========================================================================== */
+
+#am-root .screen { min-height: calc(100dvh - var(--chrome-h)); }
+
+/* ── Kopfzeile ───────────────────────────────────────────────────────────── */
+
+/* Deutlich blickdichter als eine reine Glasfläche: unter der Kopfzeile läuft
+   der Inhalt durch, und Beschriftungen müssen jederzeit lesbar bleiben. */
+#am-root .app-header {
+  top: var(--chrome-h);
+  padding: 12px 16px;
+  min-height: 56px;
+  background: rgba(14, 22, 38, .88);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border-bottom: 1px solid var(--hairline);
+}
+
+#am-root .app-header h1,
+#am-root .header-title h1 {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+/* ── Karten ──────────────────────────────────────────────────────────────── */
+
+#am-root .card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  box-shadow: var(--schatten-s);
+}
+
+#am-root .card-title {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .14em;
+  color: var(--muted-schwach);
+}
+
+/* ── Schaltflächen ───────────────────────────────────────────────────────── */
+
+#am-root .btn {
+  min-height: var(--touch);
+  border-radius: var(--r-control);
+  font-family: var(--font-text);
+  font-weight: 600;
+  transition: background var(--t-kurz) var(--federnd),
+              transform var(--t-kurz) var(--federnd),
+              opacity var(--t-kurz) var(--federnd);
+}
+#am-root .btn-sm { min-height: 36px; }
+#am-root .btn:active { transform: scale(.97); }
+
+#am-root .btn-primary {
+  background: var(--accent);
+  color: var(--accent-kontrast);
+  box-shadow: 0 4px 14px rgba(255, 201, 60, .18);
+}
+#am-root .btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+#am-root .btn-secondary {
+  background: rgba(255, 255, 255, .07);
+  color: var(--text);
+  border: 1px solid var(--hairline);
+}
+#am-root .btn-secondary:hover { background: rgba(255, 255, 255, .11); }
+
+#am-root .btn-ghost { color: var(--accent); }
+#am-root .btn-danger-ghost { color: var(--gefahr); }
+
+/* ── Eingaben ────────────────────────────────────────────────────────────── */
+
+#am-root .form-input,
+#am-root .seite-select,
+#am-root .seite-manual-input {
+  min-height: var(--touch);
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--text);
+}
+#am-root .form-input::placeholder { color: var(--muted-schwach); }
+#am-root .form-input:focus,
+#am-root .seite-select:focus,
+#am-root .seite-manual-input:focus {
+  background: var(--surface-hoch);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-weich);
+}
+
+#am-root .form-textarea { min-height: 92px; font-family: var(--font-text); }
+
+/* Feldbeschriftungen im normalen Satzbild. Das gesperrte Versal-Bild bleibt
+   den Kartenüberschriften vorbehalten – zwei Ebenen in Großbuchstaben
+   übereinander lesen sich unruhig. */
+#am-root .form-label,
+#am-root .form-subhead {
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Alle Maße und Mengen in gleichbreiten Ziffern – Zahlenkolonnen stehen so
+   exakt untereinander. */
+#am-root input[type="number"],
+#am-root .seite-manual-input,
+#am-root .summary-table td,
+#am-root .project-card2-stats,
+#am-root .project-card2-dates,
+#am-root .ks-input,
+#am-root .accessory-length-input,
+#am-root .meas-extra-input {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ── Auswahl-Knöpfe (Gerüsttyp, Status, Verwendungszweck) ────────────────── */
+
+#am-root .type-btn,
+#am-root .chip-btn,
+#am-root .folder-chip,
+#am-root .logistik-toggle-btn {
+  min-height: var(--touch);
+  border: 1px solid var(--hairline);
+  background: var(--surface-tief);
+  color: var(--muted);
+  border-radius: var(--r-control);
+  transition: background var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              color var(--t-kurz) var(--federnd);
+}
+#am-root .folder-chip { border-radius: var(--r-pille); }
+
+#am-root .type-btn.active,
+#am-root .chip-btn.active,
+#am-root .folder-chip.active,
+#am-root .logistik-toggle-btn.active,
+#am-root .logistik-toggle-btn[data-active="1"] {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent);
+}
+
+/* ── Projektkarten ───────────────────────────────────────────────────────── */
+
+#am-root .project-card2 {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte);
+  transition: transform var(--t-normal) var(--federnd),
+              border-color var(--t-normal) var(--federnd),
+              box-shadow var(--t-normal) var(--federnd);
+}
+#am-root .project-card2:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-rand);
+  box-shadow: var(--schatten-m);
+}
+
+#am-root .project-card2-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+#am-root .project-card2-line { color: var(--muted); }
+#am-root .project-card2-addr { color: var(--text); }
+#am-root .project-card2-stats { color: var(--accent); }
+#am-root .project-card2-dates { color: var(--muted-schwach); font-size: .68rem; }
+#am-root .project-card2-menu-btn {
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--r-control);
+}
+
+/* Farbige Marken: auf dunklem Grund als getönte Fläche mit heller Schrift. */
+#am-root .project-card2-badge.fassade { background: rgba(96, 165, 250, .16); color: #93C5FD; }
+#am-root .project-card2-badge.dach    { background: rgba(244, 114, 182, .16); color: #F9A8D4; }
+#am-root .project-card2-badge.sonder  { background: rgba(52, 211, 153, .16);  color: #6EE7B7; }
+
+#am-root .project-card2-status.status-in_bearbeitung { background: rgba(255, 201, 60, .16); color: var(--accent-aufmass); }
+#am-root .project-card2-status.status-abgeschlossen  { background: rgba(61, 220, 151, .16); color: var(--erfolg); }
+#am-root .project-card2-status.status-archiviert     { background: rgba(159, 179, 200, .14); color: var(--muted); }
+
+#am-root .project-card2-vz-tag {
+  background: rgba(255, 255, 255, .06);
+  color: var(--muted);
+  border: 1px solid var(--hairline);
+}
+
+/* ── Hausseiten / Abschnitte ─────────────────────────────────────────────── */
+
+#am-root .seite-card {
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+}
+#am-root .seite-header { background: transparent; min-height: var(--touch); }
+#am-root .seite-header:active { background: rgba(255, 255, 255, .04); }
+#am-root .seite-number {
+  background: var(--accent-weich);
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+#am-root .seite-title { font-weight: 600; color: var(--text); }
+#am-root .seite-preview { color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ── Warnungen und Hinweise ──────────────────────────────────────────────── */
+
+#am-root .laenge-warn,
+#am-root .laenge-warn-gesamt {
+  background: rgba(255, 180, 84, .12);
+  border-color: rgba(255, 180, 84, .38);
+  color: var(--warnung);
+}
+#am-root .summary-warn { color: var(--warnung); }
+
+/* Hinweis direkt an einer Position (Treppenturm) – dieselbe Sprache wie die
+   übrigen Warnungen im Aufmaß. */
+#am-root .acc-hinweis {
+  background: rgba(255, 180, 84, .12);
+  border: 1px solid rgba(255, 180, 84, .38);
+  border-radius: var(--r-karte-klein);
+}
+#am-root .acc-hinweis-titel,
+#am-root .acc-hinweis-liste { color: var(--warnung); }
+
+/* ── Laser-Korrektur (nur Höhenmaße) ─────────────────────────────────────── */
+
+#am-root .hkorr-ctrl {
+  border: 1px dashed var(--hairline);
+  background: var(--surface-tief);
+  border-radius: var(--r-karte-klein);
+}
+#am-root .hkorr-ctrl.aktiv {
+  border-style: solid;
+  border-color: var(--accent-rand);
+  background: var(--accent-weich);
+}
+#am-root .hkorr-label { color: var(--muted); }
+#am-root .hkorr-feld  { color: var(--accent); }
+#am-root .hkorr-btn {
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: var(--r-control);
+  transition: background var(--t-kurz) var(--federnd),
+              border-color var(--t-kurz) var(--federnd),
+              color var(--t-kurz) var(--federnd);
+}
+#am-root .hkorr-btn.active {
+  background: var(--accent-weich);
+  border-color: var(--accent-rand);
+  color: var(--accent);
+}
+#am-root .hkorr-reset { color: var(--muted); }
+#am-root .hkorr-calc {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+#am-root .backup-reminder {
+  background: rgba(255, 201, 60, .10);
+  border: 1px solid rgba(255, 201, 60, .30);
+  border-radius: var(--r-karte-klein);
+  color: var(--accent-aufmass);
+}
+#am-root .backup-reminder-text { color: var(--accent-aufmass); }
+#am-root .backup-reminder-export {
+  background: var(--accent-aufmass);
+  color: var(--accent-kontrast);
+  min-height: 36px;
+  border-radius: var(--r-pille);
+}
+#am-root .backup-reminder-dismiss {
+  color: var(--accent-aufmass);
+  width: 32px; height: 32px;
+}
+
+/* Zubehör: Konsolen, Lagen, Giebel (bisher orange auf hellem Grund) */
+#am-root .konsole-btn-df,
+#am-root .acc-lage-calc,
+#am-root .giebel-sep { color: var(--warnung); }
+#am-root .konsole-btn-df.active,
+#am-root .lage-btn.active,
+#am-root .giebel-btn.active {
+  background: rgba(255, 180, 84, .14);
+  border-color: rgba(255, 180, 84, .42);
+  color: var(--warnung);
+}
+
+#am-root .ks-input,
+#am-root .ks-reset-btn {
+  border-color: var(--accent-rand);
+  background: var(--surface-tief);
+  color: var(--text);
+}
+#am-root .ks-reset-btn:active { background: var(--accent-weich); }
+
+#am-root .meas-remove-btn:hover { background: rgba(255, 107, 107, .16); color: var(--gefahr); }
+
+/* ── Zusammenfassung ─────────────────────────────────────────────────────── */
+
+#am-root .summary-table td { border-color: var(--hairline); color: var(--text); }
+#am-root .summary-side-name { color: var(--text); font-weight: 600; }
+#am-root .summary-side-detail { color: var(--muted); }
+#am-root .summary-total-row td { color: var(--accent); font-weight: 700; }
+#am-root .summary-empty,
+#am-root .no-sides-hint,
+#am-root .ueberstand-setting-hint,
+#am-root .empty-state p { color: var(--muted-schwach); }
+#am-root .empty-state h2 { font-family: var(--font-display); color: var(--text); }
+#am-root .empty-icon-box {
+  background: var(--surface-hoch);
+  border: 1px solid var(--hairline);
+}
+
+#am-root .ueberstand-setting {
+  background: var(--surface-tief);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+}
+
+/* ===========================================================================
+   D  Gemeinsame Bauteile
+   =========================================================================== */
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+
+.toast {
+  bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pille);
+  color: var(--text);
+  box-shadow: var(--schatten-m);
+  font-family: var(--font-text);
+}
+
+/* ── Toast mit Aktion („Rückgängig") ──────────────────────────────────── */
+.toast-aktion {
+  margin-left: 14px;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: var(--r-pille);
+  background: transparent;
+  color: var(--accent-2d);
+  font-family: inherit;
+  font-size: .84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.toast-aktion:hover { background: rgba(255, 255, 255, .1); }
+/* Nur der Toast mit Knopf nimmt Zeiger an – sonst blockiert er die Fläche. */
+.toast--aktion { pointer-events: auto; }
+
+
+/* ── Schwebendes Menü der Projektkarten ──────────────────────────────────── */
+
+.floating-menu {
+  background: var(--glas);
+  backdrop-filter: var(--glas-blur);
+  -webkit-backdrop-filter: var(--glas-blur);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-karte-klein);
+  box-shadow: var(--schatten-l);
+  overflow: hidden;
+}
+.floating-menu-item {
+  min-height: var(--touch);
+  color: var(--text);
+}
+.floating-menu-item:hover { background: rgba(255, 255, 255, .07); }
+.floating-menu-item:active { background: rgba(255, 255, 255, .11); }
+.floating-menu-sep { background: var(--hairline); }
+.floating-menu-overlay { background: transparent; }
+
+/* ── Bildlaufleisten ─────────────────────────────────────────────────────── */
+
+* { scrollbar-color: rgba(159, 179, 200, .35) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: rgba(159, 179, 200, .28);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(159, 179, 200, .45); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+
+/* ===========================================================================
+   Handy
+   =========================================================================== */
+
+@media (max-width: 720px) {
+  #am-root .screen-content { padding: 14px 14px 40px; }
+
+}
+
+/* ===========================================================================
+   Fußzeile der Projektübersicht: Cloud-Abgleich und Gesamt-Sicherung
+   (früher in der Fußzeile des Startbildschirms)
+   =========================================================================== */
+
+.am-fuss {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 26px;
+  font-size: .8rem;
+  color: var(--muted-schwach);
+}
+.am-fuss-sep { opacity: .5; }
+.am-fuss-btn {
+  min-height: var(--touch);
+  padding: 5px 14px;
+  border-radius: var(--r-pille);
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, .03);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--t-kurz) var(--federnd), border-color var(--t-kurz) var(--federnd);
+}
+.am-fuss-btn:hover { color: var(--text); border-color: var(--hairline-stark); }
+.am-fuss-btn:active { transform: scale(.97); }
+.am-fuss-status { white-space: nowrap; }
+.am-fuss-status[data-status="ok"] { color: var(--erfolg); }
+.am-fuss-status[data-status="fehler"] { color: #e9b261; }
+.am-fuss-status[data-status="laeuft"] { color: var(--accent); }

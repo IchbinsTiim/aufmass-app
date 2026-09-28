@@ -23,12 +23,14 @@ gelaufen ist – alle 46 Tests bestanden.
 - `einladungscodes` – Einmal-Einladungscodes (Hash, Rolle, Status, Ablauf).
 - `einladung_versuche` – Fehlversuche beim Einlösen, Grundlage der Sperre
   nach zu vielen Fehleingaben.
-- `cloud_projekte` – Die gesamte Projektakte (einschließlich der
-  Aufmaßzeichnung) eines Eigentümers, mit Versionsnummer gegen versehentliches
-  Überschreiben bei paralleler Bearbeitung.
+- `cloud_projekte` – Die Datensätze beider Anwendungen, getrennt über die
+  Spalte `app`: Aufmaß-Projekte (`'aufmass'`) und 2D-Zeichnungen (`'2d'`),
+  jeweils mit Versionsnummer gegen versehentliches Überschreiben bei
+  paralleler Bearbeitung.
 - `cloud_projekt_freigaben` – Mitarbeiterfreigaben pro Projekt, jeweils mit
   Lese- oder Bearbeitungsrecht.
-- `cloud_ordner` – Persönliche Ordner des Eigentümers.
+- `cloud_ordner` – Persönliche Ordner des Eigentümers, ebenfalls je
+  Anwendung (`app`).
 - `cloud_zeichnungen` – Benannte, unveränderliche 2D-Speicherstände.
 - `rollen` – Frei definierbare Rollen mit ihren Rechten (`rechte` als
   JSON-Liste von Schlüsseln aus `lib/rollen.ts`, oder `["*"]` für „darf
@@ -54,6 +56,23 @@ Die Migration legt `rollen` und `aktivitaeten` an, ergänzt `erstellt_von` /
 Altbestand den Eigentümer als Ersteller nach. Sie ist wiederholbar und setzt
 eine bereits angepasste Rolle nicht zurück; geprüft wird das in
 `tests/r19-rollen-rechte.mjs` gegen ein echtes Postgres im Speicher.
+
+### Trennung der Anwendungen (2026-09-28)
+
+```bash
+psql "$DATABASE_URL" -f db/migrations/20260928_app_trennung.sql
+```
+
+**Vor dem Ausrollen des Codes ausführen** – der Code fragt nach der neuen
+Spalte `app`. Aufmaß und 2D-Aufmaß sind seitdem getrennte Anwendungen:
+`cloud_projekte.app` und `cloud_ordner.app` sind `'aufmass'` oder `'2d'`,
+und jede App sieht nur ihren Namensraum. Die Migration übernimmt den
+Altbestand in einer Transaktion: je laufende Zeichnung (`inhalt ->
+'zeichnung2d'`) ein eigener Datensatz `z2d_<Projekt-ID>` im Namensraum `2d`,
+dazu der Ordner (`z2d_<Ordner-ID>`), die Freigaben und die benannten
+Speicherstände aus `cloud_zeichnungen`. Erst danach verliert das
+Aufmaß-Projekt das Feld `zeichnung2d`; seine Revision bleibt. Wiederholbar,
+ein zweiter Lauf ändert nichts – geprüft in `tests/r23-cloud-app-trennung.mjs`.
 
 ## Was hier bewusst NICHT enthalten ist
 

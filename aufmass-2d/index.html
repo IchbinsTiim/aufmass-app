@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="color-scheme" content="dark" />
+  <title>2D-Aufmaß – Gerüst zeichnen</title>
+
+  <!-- Schriften werden asynchron nachgeladen: fehlt die Verbindung (Baustelle,
+       Funkloch), startet die App sofort mit den Systemschriften weiter. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+
+  <!-- Reihenfolge zählt: zuerst die gemeinsamen Design-Tokens, dann die
+       Stylesheets dieser App. Alles außer den Tokens gehört allein der
+       2D-Aufmaß-App. -->
+  <link rel="stylesheet" href="/app/shared/tokens.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass-2d/basis.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass-2d/viewer2d.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass-2d/oberflaeche.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass-2d/zeichnungen.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass-2d/tutorial.css?v=20260928" />
+</head>
+<body data-modul="2d">
+
+  <!-- Umschalter: kompakte Pille oben links. Reine Verweise auf die beiden
+       getrennten Anwendungen – jede ist eine eigene Seite mit eigenen Daten. -->
+  <nav id="modSwitcher" class="mod-switcher" aria-label="Anwendung wechseln">
+    <a href="/app" class="mod-switcher-home" id="modHomeBtn" title="Zum Startbildschirm" aria-label="Zum Startbildschirm">
+      <span class="mod-switcher-mark" aria-hidden="true"></span>
+    </a>
+    <div class="mod-switcher-tabs" role="tablist">
+      <a href="/app/aufmass" class="mod-tab" data-ziel="aufmass" role="tab" aria-selected="false">Aufmaß</a>
+      <a href="/app/aufmass-2d" class="mod-tab aktiv" data-ziel="2d" role="tab" aria-selected="true">2D</a>
+      <span class="mod-tab-indicator" aria-hidden="true"></span>
+    </div>
+  </nav>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       2D-Aufmaß-App (Gerüst-Zeichnung) – /app/aufmass-2d
+         #/projekte    Zeichnungsübersicht
+         #/zeichnung   die geöffnete Zeichnung
+       ══════════════════════════════════════════════════════════════════ -->
+  <section id="td-root" class="td-scope" aria-label="2D-Aufmaß">
+
+
+    <!-- Zeichnungsübersicht  →  #/projekte
+         Die Zeichnungen dieser App mit ihren eigenen Ordnern: jede Karte
+         zeigt, ob und wie viel schon gezeichnet ist. -->
+    <div id="td-projekte" class="td-projekte hidden">
+      <header class="td-projekte-kopf">
+        <a href="/app" class="back-link">← Start</a>
+        <div class="td-projekte-titelzeile">
+          <div class="td-projekte-titeltext">
+            <h1>Welche Zeichnung öffnen?</h1>
+            <p>Tippen Sie eine Zeichnung an, um sie zu öffnen, oder legen Sie eine neue an.</p>
+          </div>
+          <!-- Immer sichtbar, nie gesperrt – auch während eine andere
+               Zeichnung im Editor offen ist. -->
+          <button type="button" id="tdNeuBtn" class="td-neu-btn">
+            <span aria-hidden="true">＋</span> Neue Zeichnung
+          </button>
+        </div>
+      </header>
+
+      <div class="td-projekte-leiste"><button type="button" class="td-leiste-btn" data-zeichnungen>Gespeicherte Zeichnungen / Upload</button>
+        <input type="search" id="tdProjectSearch" class="td-projekte-suche"
+               placeholder="Suche nach Name, Kunde, Adresse…" />
+        <button type="button" id="tdAuswahlBtn" class="td-leiste-btn" aria-pressed="false"
+                title="Mehrere Zeichnungen auswählen und löschen">Auswählen</button>
+      </div>
+
+      <div id="tdBulkBar" class="td-bulk-bar hidden">
+        <span id="tdBulkInfo" class="td-bulk-info">0 Zeichnungen ausgewählt</span>
+        <button type="button" id="tdBulkAlle" class="td-leiste-btn">Alle</button>
+        <button type="button" id="tdBulkLoeschen" class="td-leiste-btn gefahr" disabled>Löschen</button>
+      </div>
+
+      <div id="tdFolderBar" class="td-folder-bar"></div>
+      <div id="tdProjectGrid" class="td-project-grid"></div>
+
+      <div id="tdProjectEmpty" class="td-projekte-leer hidden">
+        <div class="td-projekte-leer-icon">📐</div>
+        <div class="td-projekte-leer-titel">Noch keine Zeichnung vorhanden</div>
+        <p>Legen Sie hier direkt eine leere Zeichnung an – die Zeichenfläche startet vollständig leer.</p>
+        <div class="td-projekte-leer-aktionen">
+          <button type="button" id="tdEmptyNeuBtn" class="td-projekte-leer-btn primaer">
+            <span aria-hidden="true">＋</span> Neue Zeichnung
+          </button>
+        </div>
+      </div>
+
+      <div id="tdProjectNoHits" class="td-projekte-leer hidden">
+        <div class="td-projekte-leer-icon">🔍</div>
+        <div class="td-projekte-leer-titel">Keine Treffer</div>
+        <p>Keine Zeichnung passt zu dieser Suche oder diesem Ordner.</p>
+      </div>
+
+      <!-- Cloud-Abgleich der Zeichnungen dieser App. -->
+      <footer class="td-fuss">
+        <button type="button" class="td-leiste-btn" id="cloudAktualisierenBtn">Cloud aktualisieren</button>
+        <span class="td-fuss-status" id="cloudStatus" aria-live="polite">Cloud wird verbunden …</span>
+      </footer>
+    </div>
+
+    <!-- Die Zeichnung selbst  →  #/zeichnung -->
+    <div id="td-zeichnung">
+    <!-- ══════════════════════════════════════════════════════════════════
+         Werkzeugleiste – EINE Zeile, so flach wie möglich.
+
+         Auf dem iPad ist Bildschirmfläche die knappste Ressource: alles, was
+         hier steht, fehlt der Zeichnung. Deshalb liegen Rücksprung, Name der
+         Zeichnung und die Werkzeuge in derselben Leiste, und alles, was man
+         einmal pro Zeichnung braucht (Gerüsttiefe, Vorlagen, Datei, Projekt-
+         wechsel), liegt hinter EINEM Knopf „Projekt".
+         ══════════════════════════════════════════════════════════════════ -->
+    <div id="toolbar" role="toolbar" aria-label="Werkzeuge">
+
+      <div class="tb-titel">
+        <a href="#/projekte" class="back-link" title="Zurück zur Zeichnungsübersicht" aria-label="Zurück zur Zeichnungsübersicht">←</a><button type="button" class="td-leiste-btn" data-zeichnungen>Zeichnung speichern</button>
+        <input type="text" id="projectName" class="tb-name"
+               placeholder="Zeichnung benennen…" aria-label="Name der Zeichnung"
+               autocomplete="off" spellcheck="false" />
+        <!-- Hauptmenü hinter dem Projektnamen: Gerüsttiefe, Vorlagen,
+             Zeichnung wechseln, Datei. Früher der Knopf „Projekt" mitten in
+             der Werkzeugleiste – dort kostete er einen Platz, den das
+             Zeichnen besser braucht. -->
+        <button type="button" id="tdMenuBtn" class="tb-menue-btn" aria-haspopup="dialog"
+                title="Menü: Gerüsttiefe, Vorlagen, Zeichnung wechseln, Datei"
+                aria-label="Hauptmenü">
+          <span aria-hidden="true">⌄</span>
+        </button>
+      </div>
+
+      <div class="tb-tools">
+        <button type="button" id="addSectionBtn" class="tb-btn primaer wichtig" title="Feld hinzufügen">
+          <span class="tb-ico" aria-hidden="true">＋</span><span class="tb-txt">Feld</span>
+        </button>
+        <!-- Eine Achse anzulegen ist die zweithäufigste Handlung nach „Feld
+             setzen" – deshalb steht sie fest in der Leiste und nicht im
+             Werkzeug-Panel zwischen zwanzig Chips. -->
+        <button type="button" id="addAchseBtn" class="tb-btn wichtig" title="Neue Achse anlegen (ausgewählte Felder wandern gleich hinein)">
+          <span class="tb-ico" aria-hidden="true">＋</span><span class="tb-txt">Achse</span>
+        </button>
+
+        <span class="tb-trenner" aria-hidden="true"></span>
+
+        <button type="button" id="undoBtn" class="tb-btn nur-ico"
+                title="Rückgängig (Strg/Cmd+Z)" aria-label="Rückgängig" disabled>
+          <span class="tb-ico" aria-hidden="true">↶</span>
+        </button>
+        <button type="button" id="redoBtn" class="tb-btn nur-ico"
+                title="Wiederholen (Strg/Cmd+Umschalt+Z)" aria-label="Wiederholen" disabled>
+          <span class="tb-ico" aria-hidden="true">↷</span>
+        </button>
+
+        <span class="tb-trenner" aria-hidden="true"></span>
+
+        <button type="button" id="fitViewBtn" class="tb-btn" title="Alle Felder anzeigen">
+          <span class="tb-ico" aria-hidden="true">⤢</span><span class="tb-txt">Alle</span>
+        </button>
+        <button type="button" id="snapToggleBtn" class="tb-btn aktiv" aria-pressed="true"
+                title="Magnet: An – Felder rasten aneinander ein">
+          <span class="tb-ico" aria-hidden="true">🧲</span><span class="tb-txt">Magnet</span>
+        </button>
+        <button type="button" id="bordbrettBtn" class="tb-btn wichtig" aria-pressed="false"
+                title="Bordbrett: Linie auf der Feldkante ziehen oder Kante antippen">
+          <span class="tb-ico" aria-hidden="true">▤</span><span class="tb-txt">Bordbrett</span>
+        </button>
+
+        <span class="tb-trenner" id="tbTrennerProjekt" aria-hidden="true"></span>
+
+        <button type="button" id="td-exportPdfBtn" class="tb-btn primaer" title="PDF erzeugen">
+          <span class="tb-ico" aria-hidden="true">⤓</span><span class="tb-txt">PDF</span>
+        </button>
+
+        <span class="tb-trenner" id="tbTrennerWerkzeug" aria-hidden="true"></span>
+
+        <!-- Hilfe: startet das geführte Tutorial DIREKT in der Zeichnung (es
+             hebt die echten Knöpfe hervor, es gibt keine zweite Oberfläche
+             dafür). Bewusst dezent – nur ein Fragezeichen, keine Füllfarbe,
+             kein Wort – und bewusst hier, wo gearbeitet wird. Er trägt
+             absichtlich NICHT die Klasse `tb-btn`: die Soll-Belegung der
+             Werkzeuge („Feld … Werkzeuge") bleibt damit unverändert. -->
+        <button type="button" id="tutorialBtn" class="tb-hilfe-btn"
+                title="Tutorial: die 2D-App Schritt für Schritt"
+                aria-label="Tutorial starten">?</button>
+
+        <!-- Der Pfeil öffnet das Werkzeug-Panel: Auswahl, Abmessungen,
+             Zusatzbauteile, Aktionen. Er bleibt bewusst der LETZTE Knopf der
+             Leiste – dort sucht man ein „mehr". -->
+        <button type="button" id="werkzeugBtn" class="tb-btn werkzeug-btn"
+                aria-expanded="false" aria-controls="werkzeugPanel"
+                title="Werkzeuge: Auswahl, Abmessungen, Zusatzbauteile, Aktionen">
+          <span class="tb-ico wz-pfeil" aria-hidden="true">›</span><span class="tb-txt">Werkzeuge</span>
+          <span class="wz-badge hidden" id="werkzeugBadge" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="tb-werte">
+        <span class="area-readout" id="areaReadout"
+              title="Feldlänge × kleinere der beiden Höhen, über alle Felder summiert">0,00 m²</span>
+        <span class="bb-readout hidden" id="bordbrettReadout"
+              title="Summe der markierten Bordbrett-Kanten">0,00 m</span>
+        <span class="warnings-readout hidden" id="warningsReadout"
+              title="Felder mit fehlenden oder unvollständigen Angaben"></span>
+      </div>
+
+      <input type="file" id="loadFileInput" accept="application/json" style="display:none" />
+    </div>
+
+    <div id="appLayout">
+      <!-- Left: section editor (Feldliste). Abschnitte und Sammelbearbeitung
+           sind ins Werkzeug-Menü gewandert – dort sind sie auf jedem Gerät
+           erreichbar, auch wenn diese Leiste im Handy-Modus entfällt. -->
+      <aside id="sidePanel">
+        <div id="sectionsContainer"></div>
+        <p id="noSectionsHint" class="hint">Tippen Sie auf „Feld hinzufügen“ oder wählen Sie eine Vorlage.</p>
+      </aside>
+      <!-- Schmaler Griff am Rand der Feldliste: ein Tipp klappt sie ein bzw.
+           aus, ein Wisch nach links/rechts tut dasselbe. Eingeklappt bleibt
+           nur dieser Streifen stehen – die volle Zeichenfläche gehört dann
+           der Zeichnung. Der Zustand überlebt Sitzung und Projektwechsel. -->
+      <button type="button" id="feldlisteGriff" class="feldliste-griff"
+              aria-controls="sidePanel" aria-expanded="true"
+              title="Feldübersicht ein-/ausklappen" aria-label="Feldübersicht ein-/ausklappen">
+        <span class="fg-chevron" aria-hidden="true">‹</span>
+      </button>
+
+      <!-- Right: SVG canvas -->
+      <div id="viewerPanel">
+        <!-- Auswahl-Anzeige: oben MITTIG als schmale Pille. Sie nennt die
+             genaue Zahl der ausgewählten Felder und ihre Achsen. Eigene,
+             feste Zone – das Achslabel steht am Objekt, die Aktionsleiste
+             unten; überlagern kann sich damit nichts. -->
+        <div id="selectionInfo" class="selection-info hidden"></div>
+        <!-- Kontextsensitive Aktionsleiste: erscheint, sobald ein Feld
+             ausgewählt ist. Sie sitzt am UNTEREN Rand der Zeichenfläche über
+             die volle Breite – auf dem iPad daumennah – und nicht im
+             Werkzeug-Panel, weil die Auswahl im Plan passiert und die Aktion
+             dort hingehört, wo hingeschaut wird. Verdeckt wird nichts: die
+             Zeichenfläche gibt ihr ihren Streifen ab. -->
+        <div id="mehrfachBar" class="mehrfach-bar hidden" role="toolbar"
+             aria-label="Aktionen für die ausgewählten Felder"></div>
+        <svg id="planSvg" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="svgGrid" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
+              <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#eef" stroke-width="0.6"/>
+            </pattern>
+            <pattern id="svgGrid5" x="0" y="0" width="500" height="500" patternUnits="userSpaceOnUse">
+              <rect width="500" height="500" fill="url(#svgGrid)"/>
+              <path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dde" stroke-width="1.5"/>
+            </pattern>
+          </defs>
+          <rect id="gridBg" fill="url(#svgGrid5)" />
+          <g id="planGroup"></g>
+        </svg>
+        <div id="emptyHint" class="empty-hint">
+          <div class="empty-state">
+            <div class="empty-icon">📐</div>
+            <div class="empty-title">Noch keine Felder erfasst</div>
+            <button class="empty-add-btn" id="emptyAddBtn">Feld&nbsp;hinzufügen</button>
+          </div>
+        </div>
+        <button id="zoomResetBtn" class="zoom-reset-btn hidden" type="button" title="Alle Felder anzeigen (Ansicht zurücksetzen)">⟲</button>
+
+        <!-- Bedienleiste im Bordbrett-Modus. Bleibt stehen, solange gezeichnet
+             wird – ein Toast wäre nach zwei Sekunden weg. -->
+        <div id="bordbrettBar" class="bordbrett-bar hidden">
+          <span id="bordbrettBarInfo" class="bordbrett-bar-info">Bordbrett 0,00 m</span>
+          <span class="bordbrett-bar-hint">Auf der Feldkante ziehen – Anfang und Ende dürfen mitten im Feld liegen. Eine Kante antippen belegt sie ganz. Ein Tipp auf die Linie setzt einen Stützpunkt (ziehen zum Verschieben, lange tippen zum Entfernen); außerhalb dieses Modus öffnet derselbe Tipp Länge, Seite, Lagen und Achse.</span>
+          <div class="bordbrett-bar-actions">
+            <button id="bordbrettLeerenBtn" type="button" class="secondary">Alle entfernen</button>
+            <button id="bordbrettFertigBtn" type="button" class="primary">Fertig</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════════════════
+           Werkzeug-Menü – alles, was seltener als beim Zeichnen selbst
+           gebraucht wird, aber trotzdem ohne Suchen erreichbar sein muss.
+
+           Es liegt NEBEN der Zeichenfläche (breite Geräte) bzw. als Blatt
+           darunter (Handy) und ist bewusst nicht modal: die Mehrfachauswahl
+           wird durch Antippen der Felder im Plan bedient, das Menü bleibt
+           dabei offen und zeigt live, was ausgewählt ist. Geschlossen kostet
+           es keinen Millimeter Zeichenfläche.
+
+           Alle Blöcke steuern dieselbe Kernlogik an wie bisher
+           (bulkMode/bulkSelected, state.abschnitte, POSITIONS) – es gibt
+           keine zweite Auswahl- oder Achsenverwaltung.
+           ══════════════════════════════════════════════════════════════ -->
+      <aside id="werkzeugPanel" aria-label="Werkzeuge">
+        <!-- Sticky-Kopf: Titel + Schließen. Er scrollt nicht mit, damit der
+             Weg zurück nie gesucht werden muss. Der Griff links davon nimmt
+             die Wischgeste nach rechts entgegen. -->
+        <div class="wz-kopf">
+          <span class="wz-griff" aria-hidden="true"></span>
+          <span class="wz-titel">Werkzeuge</span>
+          <button type="button" id="werkzeugCloseBtn" class="wz-close"
+                  title="Werkzeug-Panel schließen" aria-label="Werkzeug-Panel schließen">✕</button>
+        </div>
+        <div class="wz-inhalt">
+          <div id="wzAuswahl"    class="wz-gruppe"></div>
+          <div id="wzMasse"      class="wz-gruppe"></div>
+          <div id="wzBauteile"   class="wz-gruppe"></div>
+          <div id="bulkBar"      class="wz-gruppe"></div>
+          <!-- Im Handy-Modus ziehen Bordbrett und PDF aus der Werkzeugleiste
+               hierher um – dieselben Knöpfe, nur an einem Ort, an dem sie
+               nicht aus dem Bildschirm laufen. -->
+          <div id="wzAktionen" class="wz-gruppe hidden">
+            <div class="wz-kopfzeile">
+              <span class="wz-kopf-ico" aria-hidden="true">⚙</span>
+              <span class="wz-kopf-txt">Weitere Werkzeuge</span>
+            </div>
+            <div id="wzAktionenSlot" class="wz-aktionen-slot"></div>
+          </div>
+          <div id="abschnittBar" class="wz-gruppe"></div>
+          <!-- Im Handy-Modus zieht die Feldliste (#sidePanel) hier ein,
+               weil die Seitenleiste dort entfällt. Ein Umhängen desselben
+               Elements – keine zweite Liste. -->
+          <div id="wzFelder"     class="wz-felder-slot"></div>
+          <div id="wzAnsicht"    class="wz-gruppe"></div>
+        </div>
+      </aside>
+    </div>
+    </div>
+  </section>
+
+
+  <!-- Bay editor popup / Bottom-Sheets werden per JS an <body> gehängt -->
+
+  <!-- Neue Zeichnung anlegen (Name + Zielordner) -->
+  <div id="tdNeuOverlay" class="td-dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tdNeuTitel">
+    <div class="td-dialog">
+      <h2 class="td-dialog-titel" id="tdNeuTitel">Neue Zeichnung</h2>
+      <p class="td-dialog-text">Name und Ordner festlegen – die Zeichenfläche startet vollständig leer.</p>
+      <label class="td-dialog-feld">
+        <span>Name</span>
+        <input type="text" id="tdNeuName" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="td-dialog-feld">
+        <span>Ordner</span>
+        <select id="tdNeuOrdner"></select>
+      </label>
+      <div class="td-dialog-aktionen">
+        <button type="button" class="td-dialog-btn" id="tdNeuAbbrechen">Abbrechen</button>
+        <button type="button" class="td-dialog-btn primaer" id="tdNeuAnlegen">Anlegen &amp; öffnen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Löschen bestätigen -->
+  <div id="tdLoeschOverlay" class="td-dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tdLoeschTitel">
+    <div class="td-dialog">
+      <h2 class="td-dialog-titel" id="tdLoeschTitel">Zeichnung löschen?</h2>
+      <p class="td-dialog-text" id="tdLoeschText"></p>
+      <ul class="td-dialog-liste hidden" id="tdLoeschListe"></ul>
+      <div class="td-dialog-aktionen">
+        <button type="button" class="td-dialog-btn" id="tdLoeschAbbrechen">Abbrechen</button>
+        <button type="button" class="td-dialog-btn gefahr" id="tdLoeschBestaetigen">Löschen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ungespeicherte Änderungen vor dem Dokumentwechsel -->
+  <div id="tdSpeichernOverlay" class="td-dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tdSpeichernTitel">
+    <div class="td-dialog">
+      <h2 class="td-dialog-titel" id="tdSpeichernTitel">Ungespeicherte Änderungen</h2>
+      <p class="td-dialog-text" id="tdSpeichernText"></p>
+      <div class="td-dialog-aktionen drei">
+        <button type="button" class="td-dialog-btn" id="tdSpeichernAbbrechen">Abbrechen</button>
+        <button type="button" class="td-dialog-btn gefahr" id="tdSpeichernVerwerfen">Verwerfen</button>
+        <button type="button" class="td-dialog-btn primaer" id="tdSpeichernSichern">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastEl" class="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Einmalige Übernahme des früheren gemeinsamen Speichers – läuft vor
+       jedem App-Code (siehe shared/speicher-migration.js). -->
+  <script src="/app/shared/speicher-migration.js?v=20260928"></script>
+  <script src="/app/aufmass-2d/basis.js?v=20260928"></script>
+  <script src="/app/aufmass-2d/viewer2d.js?v=20260928"></script>
+  <script src="/app/aufmass-2d/cloud.js?v=20260928"></script>
+  <script src="/app/aufmass-2d/zeichnungen.js?v=20260928"></script>
+  <!-- Das Tutorial liegt bewusst NACH viewer2d.js: es ruft dessen Funktionen
+       (closeSheet, openAddSheet, setWerkzeugPanel) auf, statt sie nachzubauen. -->
+  <script src="/app/aufmass-2d/tutorial.js?v=20260928"></script>
+  <!-- Zuletzt: die Navigation startet die App. -->
+  <script src="/app/aufmass-2d/navigation.js?v=20260928"></script>
+</body>
+</html>

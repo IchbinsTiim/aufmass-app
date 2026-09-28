@@ -4,7 +4,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'legacy-app');
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+// Wie der geschützte Route Handler (app/app/[[...pfad]]/route.ts): erstes
+// Segment unter /app → Ordner; /app selbst ist die Startseite.
+const ORDNER = { start: 'start', aufmass: 'aufmass', 'aufmass-2d': 'aufmass-2d', shared: 'shared' };
+const MIT_STARTSEITE = new Set(['start', 'aufmass', 'aufmass-2d']);
+
+/** URL-Pfad → Datei im Projekt (oder null). */
+export function dateiZuPfad(pfad) {
+  const m = /^\/app(?:\/(.*))?$/.exec(pfad);
+  if (!m) return null;
+  const segmente = (m[1] || '').split('/').filter(Boolean);
+  const [kopf = 'start', ...rest] = segmente;
+  if (!ORDNER[kopf]) return null;
+  let relativ = rest.join('/');
+  if (!relativ) { if (!MIT_STARTSEITE.has(kopf)) return null; relativ = 'index.html'; }
+  const wurzel = path.join(ROOT, ORDNER[kopf]);
+  const ziel = path.resolve(wurzel, relativ);
+  if (!ziel.startsWith(wurzel + path.sep)) return null;
+  return ziel;
+}
 // Chromium-Pfad: PLAYWRIGHT_CHROMIUM oder die von Playwright verwaltete Installation.
 const EXE = process.env.PLAYWRIGHT_CHROMIUM || undefined;
 const MIME = {
@@ -15,12 +34,10 @@ const MIME = {
 export async function serve() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    // Die App verweist auf ihre Dateien unter `/app/…` – so liefert sie der
-    // geschützte Route Handler der Next.js-Hülle aus. Der Testserver bildet
-    // dieselbe Adresse auf den Ordner ab.
-    const _pfad = decodeURIComponent(url.pathname).replace(/^\/app(\/|$)/, '/');
-    let p = path.join(ROOT, _pfad);
-    if (!p.startsWith(ROOT)) { res.writeHead(403).end(); return; }
+    // Die Anwendungen verweisen auf ihre Dateien unter `/app/…` – so liefert
+    // sie der geschützte Route Handler der Next.js-Hülle aus. Der Testserver
+    // bildet dieselben Adressen auf dieselben Ordner ab.
+    const p = dateiZuPfad(decodeURIComponent(url.pathname));
     // jsPDF vom CDN lokal stubben, damit Tests offline laufen.
     if (url.pathname === '/__jspdf.js') {
       res.writeHead(200, { 'Content-Type': 'text/javascript' });
@@ -34,7 +51,7 @@ export async function serve() {
       res.end('/* Testlauf ohne Webschriften */');
       return;
     }
-    if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
+    if (!p || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404).end('nf'); return; }
     let body = fs.readFileSync(p);
     if (p.endsWith('.html')) {
       body = body.toString()
@@ -57,16 +74,17 @@ export async function open({ width = 1280, height = 900 } = {}) {
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
   await page.addInitScript(() => localStorage.setItem('av_deviceMode', 'ipad'));
-  // Zusammengeführte App: ein Einstiegspunkt, das 2D-Modul liegt auf #/2d.
-  await page.goto(`http://127.0.0.1:${port}/index.html#/2d`);
-  await page.waitForFunction(() => document.body.dataset.modul === '2d' && !!document.getElementById('planSvg'));
+  // Die 2D-Aufmaß-App ist eine eigene Seite; die Zeichnung liegt auf #/zeichnung.
+  await page.goto(`http://127.0.0.1:${port}/app/aufmass-2d#/zeichnung`);
+  await page.waitForFunction(() => document.body.dataset.modul === '2d' && !!document.getElementById('planSvg')
+    && typeof ZweiDModul !== 'undefined' && !document.getElementById('td-zeichnung').classList.contains('hidden'));
   return {
     page, logs,
     async close() { await browser.close(); server.close(); }
   };
 }
 
-/** Öffnet das Aufmaß-Programm (Modul 1 der zusammengeführten App) mit leerem Speicher. */
+/** Öffnet die Aufmaß-App (eigene Seite /app/aufmass) mit leerem Speicher. */
 export async function openAufmass({ width = 1280, height = 900 } = {}) {
   const { server, port } = await serve();
   const browser = await chromium.launch(EXE ? { executablePath: EXE } : {});
@@ -74,7 +92,7 @@ export async function openAufmass({ width = 1280, height = 900 } = {}) {
   const logs = [];
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
-  await page.goto(`http://127.0.0.1:${port}/index.html#/aufmass`);
+  await page.goto(`http://127.0.0.1:${port}/app/aufmass`);
   await page.waitForFunction(() => document.body.dataset.modul === 'aufmass'
     && !!document.getElementById('projectGrid') && typeof window.jspdf !== 'undefined');
   return {

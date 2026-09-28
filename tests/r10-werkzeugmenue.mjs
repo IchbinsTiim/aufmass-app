@@ -206,11 +206,11 @@ await page.waitForTimeout(150);
 assert(await page.evaluate(() => !bulkMode && bulkSelected.size === 0), 'Mehrfachauswahl beendet');
 
 // ── 10. Speichern / Laden erhält Achsen, Positionen und Höhen ─────────────
-// Der echte Weg: Zeichnung ins Projekt schreiben, Editor leeren, neu laden.
+// Der echte Weg: Zeichnung in ihren Datensatz schreiben, Editor leeren, neu laden.
 const vorher = await page.evaluate(() => {
   const proj = { id: 'p-probe', name: 'Probe', geaendert: '2026-01-01' };
-  localStorage.setItem('geruest.aufmass.projekte', JSON.stringify([proj]));
-  localStorage.setItem('geruest.app.aktuellesProjekt', 'p-probe');
+  localStorage.setItem('geruest.2d.zeichnungen', JSON.stringify([proj]));
+  localStorage.setItem('geruest.2d.aktuelleZeichnung', 'p-probe');
   linkedProjectId = 'p-probe';
   writeToLinkedProject();
   return JSON.stringify({ a: state.abschnitte, b: allBaysFlat(), t: state.depth });
