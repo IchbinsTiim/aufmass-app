@@ -57,8 +57,9 @@ CREATE INDEX IF NOT EXISTS einladung_versuche_kennung_idx
 -- Cloud-Projekte ------------------------------------------------------------
 --
 -- Der Browser bleibt ein schneller, lokaler Zwischenspeicher. Diese Tabellen
--- sind die gemeinsame, dauerhafte Projektakte: Aufmaß und 2D-Zeichnung liegen
--- weiterhin gemeinsam in `inhalt`, genau wie bisher im lokalen Projektobjekt.
+-- sind die dauerhafte Ablage beider Anwendungen – getrennt über die Spalte
+-- `app` (siehe „Trennung der Anwendungen" am Ende): Aufmaß-Projekte und
+-- 2D-Zeichnungen sind eigene Datensätze, jeder vollständig in `inhalt`.
 -- `revision` verhindert, dass ein älterer Stand einen inzwischen geänderten
 -- Cloud-Stand unbemerkt überschreibt.
 
@@ -214,3 +215,22 @@ INSERT INTO rollen (id, name, beschreibung, rechte, system, sortierung) VALUES
   ('nur-lesen', 'Nur Lesen', 'Darf ansehen und drucken, aber nichts ändern.',
    '["pdf.exportieren"]'::jsonb, false, 90)
 ON CONFLICT (id) DO NOTHING;
+
+-- Trennung der Anwendungen ---------------------------------------------------
+--
+-- Wortgleich mit Schritt 1 aus db/migrations/20260928_app_trennung.sql. Jede
+-- Anwendung hat ihren eigenen Namensraum: 'aufmass' (Projekte der Aufmaß-App)
+-- bzw. '2d' (Zeichnungen der 2D-Aufmaß-App). Ein Datensatz wechselt nie die
+-- Anwendung; die Übernahme eines Altbestands steht nur in der Migration.
+ALTER TABLE cloud_projekte ADD COLUMN IF NOT EXISTS app text NOT NULL DEFAULT 'aufmass';
+ALTER TABLE cloud_ordner   ADD COLUMN IF NOT EXISTS app text NOT NULL DEFAULT 'aufmass';
+
+ALTER TABLE cloud_projekte DROP CONSTRAINT IF EXISTS cloud_projekte_app_gueltig;
+ALTER TABLE cloud_projekte ADD CONSTRAINT cloud_projekte_app_gueltig CHECK (app IN ('aufmass', '2d'));
+ALTER TABLE cloud_ordner   DROP CONSTRAINT IF EXISTS cloud_ordner_app_gueltig;
+ALTER TABLE cloud_ordner   ADD CONSTRAINT cloud_ordner_app_gueltig CHECK (app IN ('aufmass', '2d'));
+
+CREATE INDEX IF NOT EXISTS cloud_projekte_app_owner_idx
+  ON cloud_projekte (app, owner_user_id, geaendert_am DESC);
+CREATE INDEX IF NOT EXISTS cloud_ordner_app_owner_idx
+  ON cloud_ordner (app, owner_user_id, geaendert_am DESC);

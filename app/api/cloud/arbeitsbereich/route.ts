@@ -1,43 +1,39 @@
 import { NextResponse } from 'next/server';
-import { CloudFehler, arbeitsbereichAuflisten } from '@/lib/projekte/cloud';
+import { CloudFehler, arbeitsbereichAuflisten, cloudApp } from '@/lib/projekte/cloud';
 import { cloudZugriff } from '@/lib/projekte/zugriff';
-import { ALLE_RECHTE, RECHT_KEYS, rolleBeschriftung } from '@/lib/rollen';
+import { kontoAuskunft } from '@/lib/projekte/konto';
 import { rollenHolen } from '@/lib/zugang';
 import { mitarbeiterListe } from '@/lib/mitarbeiter/verzeichnis';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET() {
+/**
+ * Arbeitsbereich EINER Anwendung: `?app=aufmass` (Vorgabe) liefert die
+ * Aufmaß-Projekte und -Ordner, `?app=2d` die Zeichnungen und Ordner der
+ * 2D-Aufmaß-App. Die beiden Anwendungen sehen nie die Daten der anderen.
+ */
+export async function GET(request: Request) {
   try {
+    const app = cloudApp(new URL(request.url).searchParams.get('app'));
     const zugriff = await cloudZugriff();
     const [arbeitsbereich, rollen] = await Promise.all([
-      arbeitsbereichAuflisten(zugriff.userId, zugriff.istAdmin),
+      arbeitsbereichAuflisten(zugriff.userId, zugriff.istAdmin, app),
       rollenHolen()
     ]);
     /* Das Konto kommt mit derselben Antwort.
-       Die Aufmaß-App liegt unter /app und kennt weder Clerk noch die
-       Rollentabelle; sie braucht aber zwei Auskünfte: wie der angemeldete
-       Benutzer heißt und was er darf – sonst könnte sie den Zugang zur
-       Mitarbeiterverwaltung nicht anbieten (oder böte ihn jedem an). Ein
-       eigener Endpunkt dafür wäre eine zweite Anfrage bei jedem Start; hier
-       kostet die Auskunft nichts, weil die Anfrage ohnehin läuft.
-       Sie ist reine ANZEIGE-Information: Jede Seite und jede Route prüft ihr
-       Recht selbst noch einmal. */
+       Die Anwendungen unter /app kennen weder Clerk noch die Rollentabelle;
+       sie brauchen aber zwei Auskünfte: wie der angemeldete Benutzer heißt
+       und was er darf. Ein eigener Endpunkt dafür wäre eine zweite Anfrage
+       bei jedem Start; hier kostet die Auskunft nichts, weil die Anfrage
+       ohnehin läuft. (Die Startseite, die keine Daten lädt, fragt dafür
+       /api/konto.) Sie ist reine ANZEIGE-Information: Jede Seite und jede
+       Route prüft ihr Recht selbst noch einmal. */
     const projects = await erstellerErgaenzen(arbeitsbereich.projects, zugriff.userId, zugriff.istAdmin);
     return NextResponse.json({
       ...arbeitsbereich,
       projects,
-      konto: {
-        userId: zugriff.userId,
-        rolle: zugriff.rolle,
-        rolleName: rolleBeschriftung(zugriff.rolle, rollen),
-        // Administratoren tragen intern nur den Platzhalter "*". Für die
-        // Oberfläche werden daraus die konkreten Rechte, damit sie dieselben
-        // vorgesehenen Funktionen wie eine eigene, gleichberechtigte Rolle
-        // sieht. Die Route selbst prüft weiterhin serverseitig.
-        rechte: zugriff.rechte.has(ALLE_RECHTE) ? RECHT_KEYS : [...zugriff.rechte]
-      }
+      konto: kontoAuskunft(zugriff, rollen)
     }, {
       headers: { 'Cache-Control': 'private, no-store' }
     });

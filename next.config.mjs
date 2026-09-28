@@ -1,16 +1,23 @@
 /**
  * Next.js-Konfiguration für AufmaßX.
  *
- * Die eigentliche Aufmaß-App liegt unverändert in `legacy-app/` – bewusst
- * NICHT in `public/`. Alles unter `public/` liefert Vercel als statische
- * Datei am Server vorbei aus; die App wäre damit ohne Anmeldung abrufbar.
- * Stattdessen liest der geschützte Route Handler `app/app/[[...pfad]]`
- * die Dateien zur Laufzeit vom Dateisystem. Damit sie im Serverless-Bündel
- * landen, müssen sie hier ausdrücklich mitgegeben werden.
+ * Die beiden Anwendungen liegen in eigenen Ordnern – `aufmass/` (Aufmaß)
+ * und `aufmass-2d/` (2D-Aufmaß) –, dazu die Startseite `start/` und die
+ * gemeinsamen technischen Grundlagen `shared/`. Bewusst NICHT in `public/`:
+ * alles unter `public/` liefert Vercel als statische Datei am Server vorbei
+ * aus; die Anwendungen wären damit ohne Anmeldung abrufbar. Stattdessen
+ * liest der geschützte Route Handler `app/app/[[...pfad]]` die Dateien zur
+ * Laufzeit vom Dateisystem. Damit sie im Serverless-Bündel landen, müssen
+ * sie hier ausdrücklich mitgegeben werden.
  */
 const nextConfig = {
   outputFileTracingIncludes: {
-    '/app/[[...pfad]]': ['./legacy-app/**/*']
+    '/app/[[...pfad]]': [
+      './start/**/*',
+      './aufmass/**/*',
+      './aufmass-2d/**/*',
+      './shared/**/*'
+    ]
   },
 
   async redirects() {
@@ -21,8 +28,14 @@ const nextConfig = {
       { source: '/aufmass_final_app', destination: '/app', permanent: true },
       { source: '/aufmass_final_app/index.html', destination: '/app', permanent: true },
       { source: '/aufmass_final_app/start.html', destination: '/app', permanent: true },
-      { source: '/aufmass_final_app/viewer2d.html', destination: '/app', permanent: true },
-      { source: '/aufmass_final_app/:pfad*', destination: '/app', permanent: true }
+      { source: '/aufmass_final_app/viewer2d.html', destination: '/app/aufmass-2d', permanent: true },
+      { source: '/aufmass_final_app/:pfad*', destination: '/app', permanent: true },
+      // Adressen aus der Zeit, als beide Programme in einem Dokument lagen.
+      // (Die Hash-Routen /app#/aufmass und /app#/2d sieht der Server nicht –
+      // die leitet die Startseite selbst weiter, siehe start/start.js.)
+      { source: '/app/index.html', destination: '/app', permanent: true },
+      { source: '/app/start.html', destination: '/app', permanent: true },
+      { source: '/app/viewer2d.html', destination: '/app/aufmass-2d', permanent: true }
     ];
   },
 

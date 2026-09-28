@@ -40,7 +40,10 @@
   ],
   "exclude": [
     "node_modules",
-    "legacy-app",
+    "start",
+    "aufmass",
+    "aufmass-2d",
+    "shared",
     "tests"
   ]
 }

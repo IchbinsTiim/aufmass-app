@@ -42,7 +42,12 @@ const KONSOLE_TYPES_2D = ['0,19', '0,30', '0,50', '0,70', '1,09'];
 const POSITIONS = [
   { key: 'konsole',       label: 'Konsole',          short: 'K',    color: '#cc7a00', konsole: true },
   { key: 'innengelaender',label: 'Innengeländer',    short: 'IG',   color: '#2f9e44', unit: 'lagen' },
-  { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a', unit: 'm2' },
+  // Netz und Plane sind dieselbe Art Bauteil – eine Bekleidung der Gerüstfläche
+  // in m². Beide tragen `huelle:true` und laufen damit durch dieselbe Logik
+  // (Flächenvorschlag, Stirnseite im Eckfeld, Auflistung, PDF). Getrennt sind
+  // nur Bezeichnung, Farbe und Summenzeile.
+  { key: 'netz',          label: 'Netz',             short: 'Netz', color: '#5a6b7a', unit: 'm2', huelle: true },
+  { key: 'plane',         label: 'Plane',            short: 'Plane', color: '#3b7ca8', unit: 'm2', huelle: true },
   { key: 'dachfang',      label: 'Dachfang',         short: 'DF',   color: '#b08900', unit: 'm' },
   { key: 'treppenturm',   label: 'Treppenturm',      short: 'TT',   color: '#8e44ec', unit: 'stgm' },
   { key: 'durchgang',     label: 'Tunnelrahmen',     short: 'TR',   color: '#1f5f9e', unit: 'stk' },
@@ -149,12 +154,27 @@ function bayFlaecheM2(bay) {
   return bay.len * Math.min(...heights);
 }
 
-/** Vorschlagswert für Netz-m²: Länge × kleinere Höhe (wie Gerüstfläche).
- *  Ohne gesetzte Höhe gibt es keinen Vorschlag (null). */
-function netzArea(bay) {
+/** Ist die Positionsart eine Bekleidung der Gerüstfläche (Netz, Plane)?
+ *  Alles, was für Netz gilt, gilt über diese eine Abfrage auch für Plane. */
+function istHuelle(cat) {
+  const p = POS_BY_KEY[cat];
+  return !!(p && p.huelle);
+}
+
+/** Die Bekleidungs-Arten (Netz, Plane) in Katalog-Reihenfolge. */
+function huellenArten() {
+  return POSITIONS.filter(p => p.huelle);
+}
+
+/** Vorschlagswert für Netz-/Plane-m²: Länge × kleinere Höhe (wie
+ *  Gerüstfläche). Ohne gesetzte Höhe gibt es keinen Vorschlag (null). */
+function huelleArea(bay) {
   const flaeche = bayFlaecheM2(bay);
   return flaeche > 0 ? +flaeche.toFixed(3) : null;
 }
+
+/** Früherer Name – bleibt, damit bestehende Aufrufe weiter funktionieren. */
+function netzArea(bay) { return huelleArea(bay); }
 
 /** Gerüstfläche (m²) einer Feldmenge. */
 function sumFlaecheM2(bays) {
@@ -182,16 +202,24 @@ function updateAreaReadout() {
     + (versteckt > 0 ? ' (+' + versteckt.toFixed(2).replace('.', ',') + ' ausgebl.)' : '');
 }
 
+/** Vorschlag für eine m²-Menge ohne eigenen Wert: bei Netz/Plane die
+ *  Gerüstfläche des Feldes (Länge × kleinere Höhe), sonst Länge × Gerüsttiefe. */
+function m2Vorschlag(pos, bay) {
+  if (istHuelle(pos.cat)) return huelleArea(bay);
+  const bayLen = bay && bay.len;
+  return bayLen != null ? bayArea(bayLen) : null;
+}
+
 /** Effektive Menge einer Position. Bei Einheit 'm' ohne eigenen Wert gilt
- *  standardmäßig die Feldlänge, bei 'm2' die Feldfläche (bei Netz: Länge ×
- *  kleinere Höhe, sonst Länge × Gerüsttiefe) – der Nutzer kann den Wert
- *  jederzeit überschreiben. */
+ *  standardmäßig die Feldlänge, bei 'm2' die Feldfläche (bei Netz/Plane:
+ *  Länge × kleinere Höhe, sonst Länge × Gerüsttiefe) – der Nutzer kann den
+ *  Wert jederzeit überschreiben. */
 function effQty(pos, bay) {
   if (hasOwnQty(pos)) return parseFloat(pos.qty);
   const bayLen = bay && bay.len;
   const u = pos.unit || defaultUnit(pos.cat);
   if (u === 'm'  && bayLen != null) return +bayLen;
-  if (u === 'm2') return pos.cat === 'netz' ? netzArea(bay) : (bayLen != null ? bayArea(bayLen) : null);
+  if (u === 'm2') return m2Vorschlag(pos, bay);
   return null;
 }
 
@@ -789,13 +817,15 @@ let bulkKonsMeter   = null;
 let bulkHL          = null;
 let bulkHR          = null;
 
-// ── Projektverwaltung (gemeinsam mit der Aufmaß-Hauptapp) ───────────────────
-// Wird der 2D-Zeichner aus einem Projekt heraus geöffnet, teilt er sich die
-// Projektliste (inkl. Ordner/Status/Adresse) mit script.js/index.html: die
-// Zeichnung wird direkt im Projektdatensatz gespeichert (zeichnung2d) statt
-// nur als lose Datei.
-const PROJECTS_STORAGE_KEY = GK.projekte;
-// CURRENT_PROJECT_STORAGE_KEY: siehe core.js (von beiden Modulen genutzt).
+// ── Zeichnungsverwaltung ────────────────────────────────────────────────────
+// Die 2D-Aufmaß-App führt ihre Zeichnungen in einer EIGENEN Liste
+// (geruest.2d.zeichnungen) mit eigenen Ordnern (geruest.2d.ordner) – getrennt
+// von den Projekten der Aufmaß-App. Ein Datensatz trägt Name, Ordner,
+// Anschrift (für den PDF-Kopf) und die Zeichnung selbst unter `zeichnung2d`.
+// Intern heißen die Datensätze aus der Zeit vor der Trennung weiter
+// „Projekt" (linkedProjectId, loadLinkedProjects …).
+const PROJECTS_STORAGE_KEY = GK.zeichnungen;
+// CURRENT_PROJECT_STORAGE_KEY: siehe basis.js (zuletzt geöffnete Zeichnung).
 let linkedProjectId = null;
 let autosave2dTimer = null;
 // Stand der Zeichnung, wie er zuletzt im Projekt stand. Daran – und nicht am
@@ -814,10 +844,8 @@ function loadLinkedProjects() {
 }
 
 /**
- * Schreibt die Projektliste zurück – die einzige Stelle im 2D-Modul, die das
- * tut. Sie meldet die Änderung auch dem Aufmaß-Modul, das dieselbe Liste im
- * Speicher hält; ohne diese Meldung liefe dort ein veralteter Stand weiter
- * und würde beim nächsten Schreiben die Änderung von hier überschreiben.
+ * Schreibt die Zeichnungsliste zurück – die einzige Stelle in der App, die
+ * das tut. Die Meldung danach stößt den Cloud-Abgleich an.
  * @returns {boolean} false, wenn der Speicher die Daten nicht annimmt.
  */
 function schreibeLinkedProjects(list) {
@@ -1047,7 +1075,7 @@ function raeumeVerwaisteFotosAuf() {
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 
-// showToast() steht in core.js – identische Fassung, von beiden Modulen genutzt.
+// showToast() steht in basis.js.
 
 // ── Rückgängig / Wiederholen ────────────────────────────────────────────────
 
@@ -5047,13 +5075,13 @@ function openEditSheet(si, bi) {
     qtyInp.type = 'number'; qtyInp.className = 'pos-detail-qty';
     qtyInp.min = '0'; qtyInp.step = 'any'; qtyInp.inputMode = 'decimal';
     // Bei Einheit 'm' zeigt der Platzhalter die Feldlänge, bei 'm2' die Fläche
-    // an (bei Netz: Länge × kleinere Höhe, sonst Länge × Gerüsttiefe) –
+    // an (bei Netz/Plane: Länge × kleinere Höhe, sonst Länge × Gerüsttiefe) –
     // Vorschlagswert, den der Nutzer jederzeit überschreiben kann.
     const syncPlaceholder = () => {
       const u = pos.unit || defaultUnit(pos.cat);
       if (u === 'm'  && bay.len) { qtyInp.placeholder = fmtQty(bay.len); return; }
       if (u === 'm2') {
-        const suggestion = pos.cat === 'netz' ? netzArea(bay) : (bay.len ? bayArea(bay.len) : null);
+        const suggestion = m2Vorschlag(pos, bay);
         qtyInp.placeholder = suggestion != null ? fmtQty(suggestion) : 'Anz.';
         return;
       }
@@ -5090,11 +5118,50 @@ function openEditSheet(si, bi) {
     return row;
   };
 
+  /* Netz/Plane an einem ECKFELD: die Stirnseite (Gerüstbreite × Feldhöhe)
+     lässt sich direkt hier an diesem Feld mit abrechnen. Dieselbe Einstellung
+     steht am Eck-Symbol; gespeichert ist sie an der Ecke (state.ecken), damit
+     sie immer nur an EINEM der beiden Eckfelder sitzt. */
+  const makeStirnRows = pos => eckenVonFeld(bay).map(ecke => {
+    const felder  = eckFelder(ecke);
+    const eigenSi = felder.find(f => f.bay && f.bay.id === bay.id).si;
+    const partner = felder.find(f => f.si !== eigenSi);
+
+    const row = document.createElement('label');
+    row.className = 'pos-stirn-row';
+    row.dataset.cat = pos.cat;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'pos-stirn-cb';
+    const txt = document.createElement('span');
+    txt.className = 'pos-stirn-text';
+
+    const sync = () => {
+      const gewaehlt = eckStirnSi(ecke, pos.cat);
+      cb.checked = gewaehlt === eigenSi;
+      const woanders = gewaehlt != null && gewaehlt !== eigenSi && partner && partner.bay
+        ? ` – derzeit an Feld ${bayName(partner.bay)}` : '';
+      txt.textContent = `Gerüstbreite / Stirnseite an diesem Eckfeld mit abrechnen`
+        + ` (+ ${stirnText(stirnMasse(bay))})${woanders}`;
+    };
+    cb.addEventListener('change', () => {
+      setEckStirnseite(ecke.key, pos.cat, cb.checked ? state.sections[eigenSi].id : null);
+      sync();
+      renderAll();
+    });
+    sync();
+    row.appendChild(cb); row.appendChild(txt);
+    return row;
+  });
+
   function buildPosDetails() {
     posDetailWrap.innerHTML = '';
     bay.positions
       .filter(pos => { const p = POS_BY_KEY[pos.cat]; return p && !p.konsole; })
-      .forEach(pos => posDetailWrap.appendChild(makePosDetailRow(pos)));
+      .forEach(pos => {
+        posDetailWrap.appendChild(makePosDetailRow(pos));
+        if (istHuelle(pos.cat)) makeStirnRows(pos).forEach(r => posDetailWrap.appendChild(r));
+      });
     syncWarnBanner();
   }
   buildPosDetails();
@@ -5510,6 +5577,22 @@ function openEckSheet(key) {
   umRow.className = 'eck-choice-row';
   sheet.appendChild(umRow);
 
+  // ── Stirnseite bei Netz / Plane ─────────────────────────────────────────
+  // Unabhängig von der Eckenart: an welchem der beiden Eckfelder wird die
+  // Gerüstbreite (Stirnseite) zusätzlich vernetzt bzw. verplant?
+  const stLabel = document.createElement('div');
+  stLabel.className = 'sheet-section-label';
+  stLabel.textContent = 'Gerüstbreite / Stirnseite mit abrechnen';
+  sheet.appendChild(stLabel);
+
+  const stHint = document.createElement('p');
+  stHint.className = 'pdf-sheet-note';
+  sheet.appendChild(stHint);
+
+  const stWrap = document.createElement('div');
+  stWrap.className = 'eck-stirn-liste';
+  sheet.appendChild(stWrap);
+
   const actRow = document.createElement('div');
   actRow.className = 'sheet-actions';
   const okBtn = document.createElement('button');
@@ -5519,12 +5602,67 @@ function openEckSheet(key) {
   actRow.appendChild(okBtn);
   sheet.appendChild(actRow);
 
+  /** Eine Wahlmöglichkeit im Stil der übrigen Eck-Entscheidungen. */
+  const wahlKnopf = (titel, unter, aktiv, aktion) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'eck-choice';
+    b.classList.toggle('active', aktiv);
+    b.setAttribute('aria-pressed', String(aktiv));
+    const t1 = document.createElement('strong');
+    t1.textContent = titel;
+    const t2 = document.createElement('span');
+    t2.className = 'eck-choice-sub';
+    t2.textContent = unter;
+    b.appendChild(t1); b.appendChild(t2);
+    b.addEventListener('click', () => { aktion(); renderAll(); scheduleAutosave2d(); sync(); });
+    return b;
+  };
+
+  /** Stirnseiten-Wahl je Bekleidungsart (Netz, Plane) – nur für die Arten,
+   *  die an dieser Ecke überhaupt vorkommen. */
+  const syncStirn = e => {
+    stWrap.replaceChildren();
+    const felder = eckFelder(e).filter(f => f.bay);
+    const arten  = huellenArten().filter(p => felder.some(f => feldTraegt(f.bay, p.key)));
+    if (!arten.length) {
+      stHint.textContent = 'Verfügbar, sobald eines der beiden Eckfelder Netz oder '
+        + 'Plane trägt.';
+      return;
+    }
+    stHint.textContent = 'Ist das Eckfeld komplett vernetzt bzw. verplant, fällt '
+      + 'neben den beiden Gerüstseiten die Stirnseite eines Feldes an: Gerüstbreite '
+      + `(${fmtQty(state.depth)} m) × Höhe dieses Feldes. Sie steht als eigene `
+      + 'Zeile im Aufmaß.';
+    arten.forEach(p => {
+      const titel = document.createElement('div');
+      titel.className = 'sheet-subsection-label';
+      titel.textContent = p.label;
+      const row = document.createElement('div');
+      row.className = 'eck-choice-row';
+      row.dataset.cat = p.key;
+      const gewaehlt = eckStirnSi(e, p.key);
+      row.appendChild(wahlKnopf('Aus', 'keine Stirnseite', gewaehlt == null,
+        () => setEckStirnseite(e.key, p.key, null)));
+      felder.forEach(f => {
+        const sec = state.sections[f.si];
+        const ohne = feldTraegt(f.bay, p.key) ? '' : `Feld ohne ${p.label} · `;
+        row.appendChild(wahlKnopf(`an Feld ${bayName(f.bay)}`,
+          ohne + '+ ' + stirnText(stirnMasse(f.bay)), gewaehlt === f.si,
+          () => setEckStirnseite(e.key, p.key, sec.id)));
+      });
+      stWrap.appendChild(titel);
+      stWrap.appendChild(row);
+    });
+  };
+
   /** Baut den Inhalt aus dem aktuellen Zustand neu auf. */
   const sync = () => {
     const e = finde();
     if (!e) { closeSheet(); return; }
     const secDurch = state.sections[e.durchSi], secFuell = state.sections[e.fuellSi];
     const nameSi = state.sections[e.si].name, nameNi = state.sections[e.ni].name;
+
+    syncStirn(e);
 
     hdr.textContent = `Ecke ${nameSi} / ${nameNi}`;
     note.textContent = e.art === 'innen'
@@ -5742,7 +5880,7 @@ function openProjektSheet() {
     closeSheet(); neueZeichnungStarten();
   });
   sheet.querySelector('#projWechselBtn').addEventListener('click', () => {
-    closeSheet(); Shell.gehe('#/2d/projekte');
+    closeSheet(); Navigation2d.zurUebersicht();
   });
   sheet.querySelector('#savePlanBtn').addEventListener('click', () => { closeSheet(); savePlan(); });
   sheet.querySelector('#loadPlanBtn').addEventListener('click', () => { closeSheet(); triggerLoad(); });
@@ -7870,6 +8008,12 @@ function renderSections() {
   // Wie beim Plan: erst im Fragment aufbauen, dann einmal einhängen. Die
   // Feldliste ist mit ~30 Elementen je Feld der teuerste Teil des Neuaufbaus.
   const frag = document.createDocumentFragment();
+  // Stirnseiten (Netz/Plane im Eckfeld) einmal je Durchlauf, nicht je Feld.
+  const stirnJeFeld = new Map();
+  stirnseitenListe().forEach(st => {
+    const arr = stirnJeFeld.get(st.bay.id);
+    if (arr) arr.push(st); else stirnJeFeld.set(st.bay.id, [st]);
+  });
 
   state.sections.forEach((sec, si) => {
     const card = document.createElement('div');
@@ -8049,13 +8193,25 @@ function renderSections() {
       // Zeile 3: Positionen (Chips) + Bearbeiten
       const posLine = document.createElement('div');
       posLine.className = 'bay-pos-line';
-      if (bay.positions.length) {
+      const stirn = stirnJeFeld.get(bay.id) || [];
+      if (bay.positions.length || stirn.length) {
         bay.positions.forEach(pos => {
           const p = POS_BY_KEY[pos.cat];
           const chip = document.createElement('span');
           chip.className = 'bay-pos-chip';
           chip.textContent = posTitle(pos, bay);
           if (p) { chip.style.color = p.color; chip.style.borderColor = p.color; }
+          posLine.appendChild(chip);
+        });
+        // Stirnseite im Eckfeld: eigener Chip mit Rechenweg – sie ist eine
+        // zusätzliche Fläche und kein Teil der Feldlänge.
+        stirn.forEach(st => {
+          const p = POS_BY_KEY[st.cat];
+          const chip = document.createElement('span');
+          chip.className = 'bay-pos-chip bay-pos-stirn';
+          chip.dataset.cat = st.cat;
+          chip.textContent = `${p.label} · Stirnseite ${stirnText(st)}`;
+          chip.style.color = p.color; chip.style.borderColor = p.color;
           posLine.appendChild(chip);
         });
       } else {
@@ -8405,12 +8561,35 @@ function aggregatePositions(bays) {
       if (m != null) a.meters += m;
     });
   });
+
+  // Stirnseiten im Eckfeld (Netz/Plane): je Stirnseite eine EIGENE Zeile mit
+  // Feld und Rechenweg, direkt unter der zugehörigen Bekleidung. Sie gehört
+  // zu der Achse, an deren Feld sie angesetzt ist – und nur dorthin.
+  const inMenge = new Set(bays.map(b => b.id));
+  stirnseitenListe().forEach(st => {
+    if (!inMenge.has(st.bay.id)) return;
+    const p = POS_BY_KEY[st.cat];
+    const key = st.cat + '|stirnseite|' + st.bay.id;
+    const a = agg[key] || (agg[key] = {
+      color: p.color,
+      label: `${p.label} · Stirnseite ${bayName(st.bay)}`,
+      n: 0, lagen: 0, qtyByUnit: {}, meters: 0, masse: {},
+      sort: POSITIONS.findIndex(x => x.key === st.cat) + 0.5,
+      stirnseite: true
+    });
+    a.n++;
+    if (st.flaeche != null) a.qtyByUnit.m2 = (a.qtyByUnit.m2 || 0) + st.flaeche;
+    // In der Mengenspalte steht der Rechenweg, nicht nur das Ergebnis.
+    a.mengeText = stirnText(st);
+  });
+
   return Object.values(agg).sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label));
 }
 
 /** Mengen-Zelle einer aggregierten Position: Lagen + Mengen je Einheit. Bei
  *  Bauteilen mit eigenen Maßen (Modul-Abstützung) stehen dort die Maße. */
 function aggQtyText(a) {
+  if (a.mengeText) return a.mengeText;
   const parts = [];
   if (a.lagen) parts.push(a.lagen === 1 ? '1 Lage' : a.lagen + ' Lagen');
   UNIT_DEFS.forEach(([u, lbl]) => { if (a.qtyByUnit[u]) parts.push(fmtQty(a.qtyByUnit[u]) + ' ' + lbl); });
@@ -9382,6 +9561,7 @@ function setEckWahl(key, patch) {
   if (cur.typ === 'auto' || cur.typ == null) delete cur.typ;
   if (cur.durch == null) delete cur.durch;
   if (!cur.umlauf || !cur.umlauf.length) delete cur.umlauf;
+  if (!cur.stirnseite || !Object.keys(cur.stirnseite).length) delete cur.stirnseite;
   if (Object.keys(cur).length) state.ecken[key] = cur;
   else delete state.ecken[key];
 }
@@ -9520,6 +9700,111 @@ function eckFeldVon(si, endetAnDerEcke) {
   const sichtbar = sec.bays.filter(isBayVisible);
   const liste = sichtbar.length ? sichtbar : sec.bays;
   return endetAnDerEcke ? liste[liste.length - 1] : liste[0];
+}
+
+/* ── Stirnseite im Eckfeld (Netz / Plane) ──────────────────────────────────
+   Wird ein Eckfeld komplett vernetzt bzw. verplant, fällt neben den beiden
+   Gerüstseiten auch die STIRNSEITE eines der beiden Felder an: die Gerüst-
+   breite (= eingestellte Gerüsttiefe) über die Höhe dieses Feldes.
+
+   Die Einstellung sitzt an der Ecke – dort, wo die Frage entsteht – und ist
+   je Bekleidungsart getrennt (Netz und Plane können an derselben Ecke
+   unterschiedlich behandelt werden):
+
+     state.ecken[key].stirnseite = { netz: '<Sektions-ID>', plane: '<…>' }
+
+   Die Sektions-ID sagt, an WELCHEM der beiden Felder die Stirnseite angesetzt
+   wird (das Feld dieser Sektion an der Ecke, siehe eckFeldVon). Fehlt der
+   Eintrag, ist die Option aus – das ist der Normalfall, bestehende
+   Zeichnungen rechnen damit unverändert.
+
+   Die Stirnseite verändert weder die Feldlänge noch die Achslänge. Sie wird
+   als EIGENE Zeile ausgewiesen (Feldliste, Feld-Blatt, PDF), damit sie
+   nachvollziehbar bleibt und nicht in der Länge der Achse untergeht.       */
+
+/** Sektionsindex, an dessen Eckfeld die Stirnseite der Art `cat` angesetzt
+ *  ist – oder null (aus bzw. die Wahl zeigt nach einem Umbau ins Leere). */
+function eckStirnSi(ecke, cat) {
+  const wahl = eckWahl(ecke.key).stirnseite;
+  const id = wahl && wahl[cat];
+  if (id == null) return null;
+  const si = [ecke.si, ecke.ni].find(i => state.sections[i] &&
+    String(state.sections[i].id) === String(id));
+  return si == null ? null : si;
+}
+
+/** Stirnseite der Art `cat` an der Ecke `key` setzen (Sektions-ID) oder
+ *  mit `null` abschalten. */
+function setEckStirnseite(key, cat, secId) {
+  const cur = { ...(eckWahl(key).stirnseite || {}) };
+  if (secId == null) delete cur[cat];
+  else cur[cat] = String(secId);
+  setEckWahl(key, { stirnseite: Object.keys(cur).length ? cur : null });
+  invalidateEckenCache();
+}
+
+/** Trägt das Feld eine Position der Art `cat`? */
+function feldTraegt(bay, cat) {
+  return !!(bay && (bay.positions || []).some(x => x.cat === cat));
+}
+
+/** Die beiden Eckfelder einer Ecke: [{ si, bay }, { si, bay }]. */
+function eckFelder(ecke) {
+  return [ecke.si, ecke.ni].map(si => ({ si, bay: eckFeldVon(si, eckEndetHier(ecke, si)) }));
+}
+
+/**
+ * Maße einer Stirnseite am Feld `bay`: Gerüstbreite × Feldhöhe.
+ * Die Breite ist die eingestellte Gerüsttiefe (dynamisch, keine Konstante),
+ * die Höhe die aufmaßrelevante Höhe DIESES Feldes (siehe bayHoehe) – bei
+ * unterschiedlich hohen Feldern wird also feldweise gerechnet.
+ */
+function stirnMasse(bay) {
+  const breite = +state.depth || 0;
+  const hoehe  = bay ? bayHoehe(bay) : null;
+  return {
+    breite, hoehe,
+    flaeche: hoehe != null && breite > 0 ? +(breite * hoehe).toFixed(3) : null
+  };
+}
+
+/** Rechenweg einer Stirnseite, z. B. „0,73 × 10,00 m = 7,30 m²". */
+function stirnText(m) {
+  const h = m.hoehe != null ? m.hoehe.toFixed(2).replace('.', ',') : '?';
+  const b = m.breite.toFixed(2).replace('.', ',');
+  return `${b} × ${h} m` + (m.flaeche != null ? ` = ${fmtQty(m.flaeche)} m²` : '');
+}
+
+/**
+ * Alle wirksamen Stirnseiten der Zeichnung:
+ * `[{ key, cat, si, bay, breite, hoehe, flaeche }]`.
+ *
+ * Gezählt wird eine Stirnseite nur, solange mindestens eines der beiden
+ * Eckfelder die Bekleidung auch trägt – wird Netz bzw. Plane dort entfernt,
+ * fällt die Stirnseite von selbst mit weg (die Einstellung bleibt stehen und
+ * greift wieder, sobald die Bekleidung zurückkommt).
+ */
+function stirnseitenListe() {
+  const out = [];
+  eckenListe().forEach(ecke => {
+    if (!eckWahl(ecke.key).stirnseite) return;
+    const felder = eckFelder(ecke);
+    huellenArten().forEach(p => {
+      const si = eckStirnSi(ecke, p.key);
+      if (si == null) return;
+      if (!felder.some(f => feldTraegt(f.bay, p.key))) return;
+      const bay = felder.find(f => f.si === si).bay;
+      if (!bay) return;
+      out.push({ key: ecke.key, cat: p.key, si, bay, ...stirnMasse(bay) });
+    });
+  });
+  return out;
+}
+
+/** Ecken, an denen `bay` eines der beiden Eckfelder ist. */
+function eckenVonFeld(bay) {
+  if (!bay) return [];
+  return eckenListe().filter(ecke => eckFelder(ecke).some(f => f.bay && f.bay.id === bay.id));
 }
 
 /**
@@ -12315,8 +12600,6 @@ function init() {
   // Vergleichsbasis übernommen wurde, und der erste Undo-Schritt ginge verloren.
   lastUndoSnapshot = serializeUndoState();
   document.getElementById('projectName').value = state.project;
-  // Der Rücksprung ins Aufmaß-Modul ist in der zusammengeführten App ein
-  // Routenwechsel; die Shell setzt das Ziel der Kopfzeile selbst.
   syncBackLink();
 
   document.getElementById('addSectionBtn').addEventListener('click', () => {
@@ -12363,11 +12646,11 @@ function init() {
 
   verknuepfeZeichnungsDialoge();
 
-  // Das Aufmaß-Modul verwaltet dieselben Projekte. Ändert es dort etwas,
-  // zeigt die Liste hier sonst einen veralteten Stand.
+  // Der Cloud-Abgleich spielt neuere Stände anderer Geräte ein. Ohne neu
+  // einzulesen, zeigte die Liste hier einen veralteten Stand.
   document.addEventListener(GERUEST_DATEN_EVENT, e => {
     if (e.detail && e.detail.quelle === '2d') return;
-    if (window.location.hash === '#/2d/projekte') renderProjektListe();
+    if (Navigation2d.istUebersicht()) renderProjektListe();
   });
 
   // Fotos ohne Projekt (Seite wurde während der Rückgängig-Frist neu geladen)
@@ -12375,8 +12658,8 @@ function init() {
   setTimeout(() => raeumeVerwaisteFotosAuf(), 1500);
 
   document.getElementById('loadFileInput').addEventListener('change', onLoadFile);
-  // ID mit td-Präfix: „exportPdfBtn" gehört im zusammengeführten Dokument
-  // bereits dem Aufmaß-Modul (PDF des Angebots).
+  // ID mit td-Präfix – aus der Zeit, als beide Anwendungen in einem Dokument
+  // lagen; Tests und Tutorial kennen den Knopf unter diesem Namen.
   document.getElementById('td-exportPdfBtn').addEventListener('click', exportPdf);
 
   // ── Bordbrett ───────────────────────────────────────────────────────────
@@ -12530,38 +12813,20 @@ function init() {
 }
 
 /* ── Rücksprung-Ziel der Kopfzeile ──────────────────────────────────────────
-   Der Pfeil führt dorthin, WO DER NUTZER HERKAM: aus der Zeichnungsübersicht
-   zurück in die Zeichnungsübersicht, aus dem Aufmaß zurück ins Aufmaß, sonst
-   auf den Startbildschirm.
-
-   Früher entschied das allein `linkedProjectId`: Jede Zeichnung, die zu einem
-   Projekt gehört – also praktisch jede –, schickte den Pfeil nach
-   `#/aufmass`. Wer aus der Zeichnungsübersicht kam, landete damit im anderen
-   Programm, ohne es gewollt zu haben. Die Herkunft kennt die Shell
-   (Shell.zurueckZiel); hier steht nur noch, wie sie beschriftet wird.
-
-   Ein Ziel außerhalb von AufmaßX kommt dabei nicht vor: `zurueckZiel()`
-   liefert ausschließlich Routen dieser Anwendung, im Zweifel den
-   Startbildschirm.                                                         */
-
-const ZURUECK_NAMEN = {
-  '#/':            'Zurück zum Startbildschirm',
-  '#/2d/projekte': 'Zurück zur Zeichnungsübersicht',
-  '#/aufmass':     'Zurück zum Aufmaß',
-  '#/2d':          'Zurück zum Startbildschirm'
-};
+   Der Pfeil in der Zeichnung führt in die Zeichnungsübersicht DIESER App –
+   dort wird eine Zeichnung gewählt, dorthin geht es zurück. Aus der
+   Übersicht führt „← Start" auf den Startbildschirm. Ein Ziel in der
+   Aufmaß-App gibt es nicht: die beiden Anwendungen sind getrennt.          */
 
 function syncBackLink() {
   const backLink = document.querySelector('#td-zeichnung .back-link');
   if (!backLink) return;
-  const ziel = (typeof Shell !== 'undefined' && Shell.zurueckZiel)
-    ? Shell.zurueckZiel() : '#/';
-  const sicher = ZURUECK_NAMEN[ziel] ? ziel : '#/';
-  backLink.setAttribute('href', sicher);
+  const text = 'Zurück zur Zeichnungsübersicht';
+  backLink.setAttribute('href', Navigation2d.UEBERSICHT);
   // Nur der Pfeil: in der schmalen Leiste zählt jeder Millimeter, das Ziel
   // steht im Tooltip und in der Vorlesehilfe.
-  backLink.setAttribute('title', ZURUECK_NAMEN[sicher]);
-  backLink.setAttribute('aria-label', ZURUECK_NAMEN[sicher]);
+  backLink.setAttribute('title', text);
+  backLink.setAttribute('aria-label', text);
 }
 
 /**
@@ -12660,7 +12925,7 @@ function oeffneZeichnung(id) {
   normalizeState();
   uebernehmeDokumentInOberflaeche();
 
-  Shell.gehe('#/2d');
+  Navigation2d.zurZeichnung();
   aktualisiereZeichenflaeche();
 }
 
@@ -12672,28 +12937,23 @@ function schliesseZeichnung() {
   localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
   uebernehmeDokumentInOberflaeche();
   renderAllNow();
-  Shell.gehe('#/2d/projekte');
+  Navigation2d.zurUebersicht();
 }
 
-/** Wird gerufen, wenn Zeichnungen verschwinden (auch aus dem Aufmaß-Modul
- *  heraus): Ist eine davon gerade offen, schließt der Editor sauber. */
+/** Wird gerufen, wenn Zeichnungen verschwinden: Ist eine davon gerade offen,
+ *  schließt der Editor sauber. */
 function zeichnungenEntfallen(ids) {
   if (!linkedProjectId || !Array.isArray(ids) || ids.indexOf(linkedProjectId) < 0) return;
   schliesseZeichnung();
 }
 
 // ============================================================================
-//  Projektliste des 2D-Moduls
+//  Zeichnungsübersicht
 // ============================================================================
-// Gezeichnet wird immer für ein bestimmtes Projekt. Vorher übernahm der
-// Zeichner stillschweigend das zuletzt geöffnete – welches das war, stand
-// nirgends, und ein anderes ließ sich hier gar nicht auswählen.
-//
-// Diese Liste zeigt dieselben Projekte und dieselbe Ordnerstruktur wie das
-// Aufmaß-Modul, aber auf das Zeichnen zugeschnitten: an jeder Karte steht,
-// ob und wie viel schon gezeichnet ist. Die Daten kommen direkt aus dem
-// gemeinsamen Speicher (siehe core.js) – das Modul greift dafür nicht in das
-// Aufmaß-Modul hinein.
+// Gezeichnet wird immer in einer bestimmten Zeichnung. Die Übersicht zeigt
+// die Zeichnungen DIESER App mit ihren eigenen Ordnern: an jeder Karte steht,
+// ob und wie viel schon gezeichnet ist. Die Daten liegen im Speicher der
+// 2D-App (siehe basis.js) – mit der Aufmaß-App teilt sie nichts.
 
 let tdSuche       = '';
 let tdOrdnerId    = '';       // '' = alle, '__ohne__' = ohne Ordner, sonst Ordner-ID
@@ -12779,7 +13039,7 @@ function tdRenderOrdnerLeiste() {
     bar.appendChild(b);
   };
 
-  chip('', 'Alle Projekte', projekte.length);
+  chip('', 'Alle Zeichnungen', projekte.length);
   const ohne = projekte.filter(p => !p.folderId).length;
   if (ohne || ordner.length) chip('__ohne__', 'Ohne Ordner', ohne);
   ordner.forEach(o => chip(o.id, o.name || 'Ordner', projekte.filter(p => p.folderId === o.id).length));
@@ -12942,7 +13202,7 @@ function renderProjektListe() {
 
 /** Projekt auswählen und dessen Zeichnung öffnen. */
 function oeffneProjektZumZeichnen(id) {
-  if (id === linkedProjectId) { Shell.gehe('#/2d'); return; }
+  if (id === linkedProjectId) { Navigation2d.zurZeichnung(); return; }
   mitGesichertenAenderungen(() => oeffneZeichnung(id));
 }
 
@@ -12997,6 +13257,9 @@ function oeffneZeichnungsMenu(proj, anchor) {
         tdAuswahl.add(proj.id);
         renderProjektListe();
       } },
+    // Freigeben hing früher am Aufmaß-Projekt, das die Zeichnung enthielt.
+    // Seit der Trennung hat die Zeichnung ihre eigene Freigabe.
+    { label: 'Für Mitarbeiter freigeben…', onClick: () => window.CloudSpeicher?.freigeben(proj) },
     '---',
     { label: 'Löschen', danger: true, onClick: () => frageZeichnungenLoeschen([proj.id]) }
   ]);
@@ -13025,11 +13288,9 @@ function oeffneVerschiebenMenu(proj, anchor) {
 // ============================================================================
 //  Zeichnungen anlegen, löschen, umbenennen, duplizieren, verschieben
 // ============================================================================
-// Bis hierher war die Liste eine Einbahnstraße: lesen ja, schreiben nein. Die
-// folgenden Funktionen arbeiten auf demselben Speicher und in demselben
-// Format wie das Aufmaß-Modul – ein Projektdatensatz, in dem die Zeichnung
-// unter `zeichnung2d` steckt. Damit bleibt jeder vorhandene Datensatz gültig,
-// eine Migration ist nicht nötig.
+// Ein Datensatz je Zeichnung, die Zeichnung selbst steckt unter
+// `zeichnung2d` – dasselbe Format, in dem die Speicher-Migration die
+// Zeichnungen aus dem früheren gemeinsamen Projektspeicher übernommen hat.
 
 function tdGenId(prefix) {
   return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
@@ -13060,24 +13321,16 @@ function tdVorgabeOrdner() {
   return (offen && offen.folderId) || null;
 }
 
-/** Legt den Projektdatensatz an (Format wie im Aufmaß-Modul). */
+/** Legt den Datensatz einer Zeichnung an. */
 function erzeugeZeichnung(name, folderId) {
   const heute = new Date().toISOString().slice(0, 10);
   const proj = {
-    id: tdGenId('proj'),
+    id: tdGenId('z2d'),
     name: (name || '').trim(),
-    status: 'in_bearbeitung',
     folderId: folderId || null,
     erstellt: heute,
     geaendert: heute,
     anschrift: { strasse: '', nummer: '', plz: '', ort: '', bauherr: '', telefon: '' },
-    geruesttyp: 'fassade',
-    geruesttypName: '',
-    seiten: [],
-    technik: { lastklasse: '3', breitenklasse: 'W06' },
-    logistik: {},
-    zusatzpositionen: [],
-    notizen: '',
     zeichnung2d: leereZeichnung()
   };
   const liste = loadLinkedProjects();
@@ -13185,7 +13438,8 @@ function dupliziereZeichnung(proj) {
   if (!rec) return;
   const heute = new Date().toISOString().slice(0, 10);
   const kopie = JSON.parse(JSON.stringify(rec));
-  kopie.id        = tdGenId('proj');
+  kopie.id        = tdGenId('z2d');
+  delete kopie.ausAufmass;        // Herkunftsvermerk gehört nur zum Original
   kopie.name      = (tdProjektName(rec) + ' (Kopie)').trim();
   kopie.erstellt  = heute;
   kopie.geaendert = heute;
@@ -13486,14 +13740,13 @@ function zeigeZeichnung() {
 }
 
 // ============================================================================
-//  Modul-Schnittstelle zur Shell
+//  App-Schnittstelle
 // ============================================================================
-// Früher startete der Zeichner selbst per DOMContentLoaded. Jetzt entscheidet
-// die Shell, wann aufgebaut (`mount`) und wann sichtbar geschaltet wird
-// (`aktiviere`). Der Aufbau passiert bewusst erst beim ersten Öffnen des
-// Moduls: die Kamera braucht eine sichtbare Zeichenfläche, um korrekt auf den
-// Inhalt einzupassen. Danach bleibt das Modul im Speicher – wer zeichnet, zum
-// Hub wechselt und zurückkommt, findet seine Zeichnung unverändert vor.
+// Die Navigation der App (navigation.js) entscheidet, wann aufgebaut
+// (`mount`) und welcher der beiden Bildschirme gezeigt wird (`aktiviere`):
+// die Zeichnungsübersicht oder die Zeichnung. Aufgebaut wird einmal, sobald
+// die Zeichenfläche sichtbar ist – die Kamera braucht sie, um korrekt auf den
+// Inhalt einzupassen.
 
 const ZweiDModul = (() => {
   let gemountet = false;
@@ -13511,8 +13764,8 @@ const ZweiDModul = (() => {
     aktiviere() {
       this.mount();
 
-      // Route entscheidet, welcher Bildschirm des Moduls zu sehen ist.
-      if (window.location.hash === '#/2d/projekte') { zeigeProjektListe(); return; }
+      // Route entscheidet, welcher Bildschirm der App zu sehen ist.
+      if (Navigation2d.istUebersicht()) { zeigeProjektListe(); return; }
 
       // Ohne gewähltes Projekt gibt es nichts zu zeichnen – dann zuerst die
       // Liste anbieten, statt wortlos eine leere Fläche zu zeigen. Gibt es
@@ -13520,15 +13773,15 @@ const ZweiDModul = (() => {
       const gewaehlt = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
       const bekannt  = gewaehlt && loadLinkedProjects().some(p => p.id === gewaehlt);
       if (!bekannt && loadLinkedProjects().length) {
-        Shell.gehe('#/2d/projekte');
+        Navigation2d.zurUebersicht();
         return;
       }
 
       zeigeZeichnung();
 
-      // Wurde im Aufmaß-Modul zwischenzeitlich ein anderes Projekt geöffnet,
-      // gehört zu diesem Projekt eine andere Zeichnung. Der Wechsel läuft über
-      // dieselbe Funktion wie überall sonst – ein Dokument, ein Aufbau.
+      // Zeigt der Merker inzwischen auf eine andere Zeichnung (etwa aus einem
+      // zweiten Tab), läuft der Wechsel über dieselbe Funktion wie überall
+      // sonst – ein Dokument, ein Aufbau.
       const id = localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) || null;
       if (id !== linkedProjectId) {
         flushAutosave2d();
@@ -13541,12 +13794,10 @@ const ZweiDModul = (() => {
       aktualisiereZeichenflaeche();
     },
 
-    deaktiviere() {
+    /** Alles sofort schreiben – beim Verlassen der Seite. */
+    sichern() {
       if (!gemountet) return;
       flushAutosave2d();
-      // Offene Sheets/Menüs/Overlays hängen am <body> und würden sonst über
-      // dem anderen Modul stehen bleiben.
-      schliesseOffeneOberflaechen();
     },
 
     hatUngespeicherte() {

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="color-scheme" content="dark" />
+  <title>Aufmaß – Positionen erfassen</title>
+
+  <!-- Schriften werden asynchron nachgeladen: fehlt die Verbindung (Baustelle,
+       Funkloch), startet die App sofort mit den Systemschriften weiter. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+
+  <!-- Reihenfolge zählt: zuerst die gemeinsamen Design-Tokens, dann die
+       Stylesheets dieser App. Alles außer den Tokens gehört allein der
+       Aufmaß-App. -->
+  <link rel="stylesheet" href="/app/shared/tokens.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass/style.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass/oberflaeche.css?v=20260928" />
+</head>
+<body data-modul="aufmass">
+
+  <!-- Umschalter: kompakte Pille oben links. Reine Verweise auf die beiden
+       getrennten Anwendungen – jede ist eine eigene Seite mit eigenen Daten. -->
+  <nav id="modSwitcher" class="mod-switcher" aria-label="Anwendung wechseln">
+    <a href="/app" class="mod-switcher-home" id="modHomeBtn" title="Zum Startbildschirm" aria-label="Zum Startbildschirm">
+      <span class="mod-switcher-mark" aria-hidden="true"></span>
+    </a>
+    <div class="mod-switcher-tabs" role="tablist">
+      <a href="/app/aufmass" class="mod-tab aktiv" data-ziel="aufmass" role="tab" aria-selected="true">Aufmaß</a>
+      <a href="/app/aufmass-2d" class="mod-tab" data-ziel="2d" role="tab" aria-selected="false">2D</a>
+      <span class="mod-tab-indicator" aria-hidden="true"></span>
+    </div>
+  </nav>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       Aufmaß-App (Positionserfassung) – /app/aufmass
+       ══════════════════════════════════════════════════════════════════ -->
+  <section id="am-root" class="am-scope" aria-label="Aufmaß">
+
+    <!-- Startseite: Projektübersicht -->
+    <div id="homeScreen" class="screen">
+      <header class="app-header">
+        <div class="header-title">
+          <h1>Aufmaß</h1>
+        </div>
+        <button id="newProjectBtn" class="btn btn-primary">+ Neues Projekt</button>
+      </header>
+      <main class="screen-content">
+
+        <div class="project-view-switch hidden" id="projectViewSwitch" aria-label="Zeichnungsansicht">
+          <button type="button" class="project-view-btn active" id="myProjectsBtn">Meine Zeichnungen</button>
+          <button type="button" class="project-view-btn" id="allProjectsBtn">Alle Zeichnungen</button>
+        </div>
+
+        <div class="overview-toolbar">
+          <input type="search" id="searchInput" class="form-input overview-search" placeholder="Suche nach Name, Kunde, Adresse…" />
+          <select id="statusFilterSelect" class="form-input overview-select">
+            <option value="">Alle Status</option>
+            <option value="in_bearbeitung">In Bearbeitung</option>
+            <option value="abgeschlossen">Abgeschlossen</option>
+            <option value="archiviert">Archiviert</option>
+          </select>
+          <select id="sortSelect" class="form-input overview-select">
+            <option value="geaendert">Zuletzt geändert</option>
+            <option value="name">Alphabetisch</option>
+          </select>
+        </div>
+
+        <div class="folder-bar" id="folderBar"></div>
+
+        <div id="projectGrid" class="project-grid"></div>
+
+        <div id="emptyState" class="empty-state hidden">
+          <div class="empty-icon-box"></div>
+          <h2>Keine Projekte</h2>
+          <p>Tippen Sie auf &bdquo;+ Neues Projekt&ldquo; um zu beginnen.</p>
+        </div>
+        <div id="noResultsState" class="empty-state hidden">
+          <div class="empty-icon-box"></div>
+          <h2>Keine Treffer</h2>
+          <p>Keine Projekte für diese Suche/diesen Filter gefunden.</p>
+        </div>
+
+        <!-- Cloud-Abgleich und Gesamt-Sicherung der Projekte dieser App.
+             Früher in der Fußzeile des Startbildschirms – der kennt seit der
+             Trennung keine Daten mehr. -->
+        <footer class="am-fuss">
+          <button type="button" class="am-fuss-btn" id="cloudAktualisierenBtn">Cloud aktualisieren</button>
+          <span class="am-fuss-status" id="cloudStatus" aria-live="polite">Cloud wird verbunden …</span>
+          <span class="am-fuss-sep" aria-hidden="true">·</span>
+          <button type="button" class="am-fuss-btn" id="backupAlleBtn">Alle Projekte sichern</button>
+        </footer>
+      </main>
+    </div>
+
+    <!-- Projektansicht -->
+    <div id="projectScreen" class="screen hidden">
+      <header class="app-header">
+        <button id="backBtn" class="btn btn-ghost">&#8592; Zurück</button>
+        <h1 id="projectScreenTitle">Projekt</h1>
+        <button id="deleteProjectBtn" class="btn btn-danger-ghost">Löschen</button>
+      </header>
+      <main class="screen-content">
+
+        <!-- 0. Projekt (Name & Status) -->
+        <section class="card">
+          <h2 class="card-title">Projekt</h2>
+          <div class="form-group">
+            <label class="form-label">Projektname</label>
+            <input class="form-input" type="text" id="fieldProjektname" placeholder="z. B. Umbau Musterstraße 12" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <div class="type-selector" id="statusSelector">
+              <button class="status-btn type-btn active" data-status="in_bearbeitung">In Bearbeitung</button>
+              <button class="status-btn type-btn" data-status="abgeschlossen">Abgeschlossen</button>
+              <button class="status-btn type-btn" data-status="archiviert">Archiviert</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 1. Anschrift -->
+        <section class="card">
+          <h2 class="card-title">Anschrift</h2>
+          <div class="form-row">
+            <div class="form-group" style="flex: 3">
+              <label class="form-label">Straße</label>
+              <input class="form-input" type="text" id="fieldStrasse" placeholder="Musterstraße" autocomplete="street-address" />
+            </div>
+            <div class="form-group" style="flex: 1">
+              <label class="form-label">Nr.</label>
+              <input class="form-input" type="text" id="fieldNummer" placeholder="1a" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex: 1">
+              <label class="form-label">PLZ</label>
+              <input class="form-input" type="text" id="fieldPlz" placeholder="12345" inputmode="numeric" maxlength="5" />
+            </div>
+            <div class="form-group" style="flex: 2">
+              <label class="form-label">Ort</label>
+              <input class="form-input" type="text" id="fieldOrt" placeholder="Musterstadt" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex: 2">
+              <label class="form-label">Bauherr / Auftraggeber</label>
+              <input class="form-input" type="text" id="fieldBauherr" placeholder="Herr Muster GmbH" />
+            </div>
+            <div class="form-group" style="flex: 1">
+              <label class="form-label">Telefon</label>
+              <input class="form-input" type="tel" id="fieldTelefon" placeholder="0170 1234567" autocomplete="tel" inputmode="tel" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. Gerüsttyp -->
+        <section class="card">
+          <h2 class="card-title">Gerüsttyp</h2>
+          <div class="type-selector" id="geruesttypSelector">
+            <button class="type-btn active" data-type="fassade">Fassaden-Gerüst</button>
+            <button class="type-btn" data-type="dach">Dach-Gerüst</button>
+            <button class="type-btn" data-type="sonder">Sonder-Gerüst</button>
+          </div>
+          <div id="sonderNameRow" style="margin-top:10px; display:none;">
+            <input class="form-input" type="text" id="fieldSonderName" placeholder="Bezeichnung für Sonder-Gerüst" />
+          </div>
+        </section>
+
+        <!-- 3. Technik (DIN 18451) -->
+        <section class="card">
+          <h2 class="card-title">Technik (DIN 18451)</h2>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Lastklasse</label>
+              <select class="form-input" id="fieldLastklasse">
+                <option value="">– wählen –</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Breitenklasse</label>
+              <select class="form-input" id="fieldBreitenklasse">
+                <option value="">– wählen –</option>
+                <option value="W06">W06</option>
+                <option value="W09">W09</option>
+                <option value="W12">W12</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Verwendungszweck <span class="form-label-hint">(Mehrfachauswahl möglich)</span></label>
+            <div class="chip-selector" id="verwendungszweckSelector">
+              <button type="button" class="chip-btn" data-vz="Fenster">Fenster</button>
+              <button type="button" class="chip-btn" data-vz="Maler">Maler</button>
+              <button type="button" class="chip-btn" data-vz="Putz">Putz</button>
+              <button type="button" class="chip-btn" data-vz="Klempner">Klempner</button>
+              <button type="button" class="chip-btn" data-vz="Dach">Dach</button>
+              <button type="button" class="chip-btn" data-vz="WDVS">WDVS</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Verankerungsgrund</label>
+              <select class="form-input" id="fieldVerankerungsgrund">
+                <option value="">– wählen –</option>
+                <option value="Mauerwerk">Mauerwerk</option>
+                <option value="Beton">Beton</option>
+                <option value="WDVS">WDVS</option>
+                <option value="Denkmal">Denkmal</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ankeranzahl</label>
+            <input class="form-input" type="number" id="fieldAnkerAnzahl" placeholder="0" min="0" inputmode="numeric" style="max-width:160px;" />
+          </div>
+        </section>
+
+        <!-- 4. Logistik -->
+        <section class="card">
+          <h2 class="card-title">Baustelle / Logistik</h2>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label class="form-label">Anfahrt (km)</label>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input class="form-input" type="number" id="fieldAnfahrtKm" placeholder="0" min="0" inputmode="decimal" style="flex:1;min-width:0;" />
+                <button type="button" id="calcAnfahrtBtn" class="btn btn-ghost btn-sm" title="Entfernung zur MHP Arena Stuttgart automatisch berechnen">Auto</button>
+              </div>
+            </div>
+            <div class="form-group" style="flex:2">
+              <label class="form-label">Untergrund</label>
+              <select class="form-input" id="fieldUntergrund">
+                <option value="">– wählen –</option>
+                <option value="Asphalt">Asphalt</option>
+                <option value="Pflaster">Pflaster</option>
+                <option value="Rasen">Rasen</option>
+                <option value="Schotter">Schotter</option>
+                <option value="Beton">Beton</option>
+                <option value="Sonstiges">Sonstiges</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stellfläche-Notiz</label>
+            <input class="form-input" type="text" id="fieldStellflaecheNotiz" placeholder="z. B. Gehweg gesperrt" />
+          </div>
+          <div class="form-subhead">Transport zum Objekt</div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label class="form-label">LKW → Objekt (m)</label>
+              <input class="form-input" type="number" id="fieldTransportM" placeholder="0" min="0" inputmode="decimal" />
+            </div>
+            <div class="form-group" style="flex:1">
+              <label class="form-label">Höhenmeter (m)</label>
+              <input class="form-input" type="number" id="fieldHoehenmeter" placeholder="0" min="0" inputmode="decimal" />
+            </div>
+            <div class="form-group" style="flex:1">
+              <label class="form-label">Treppen / Stockwerke</label>
+              <input class="form-input" type="number" id="fieldTreppen" placeholder="0" min="0" inputmode="numeric" />
+            </div>
+          </div>
+          <div class="logistik-toggles">
+            <button type="button" class="logistik-toggle-btn" id="toggleOeffentlich" data-active="0">Öffentlicher Grund</button>
+            <button type="button" class="logistik-toggle-btn" id="toggleVerkehr" data-active="0">Verkehrssicherung</button>
+            <button type="button" class="logistik-toggle-btn" id="toggleGenehmigung" data-active="0">Genehmigung erforderlich</button>
+            <button type="button" class="logistik-toggle-btn" id="toggleParkplatz" data-active="0">Parkplatz</button>
+          </div>
+        </section>
+
+        <!-- 5. Hausseiten -->
+        <section class="card">
+          <div class="section-header">
+            <h2 class="card-title">Hausseiten</h2>
+            <button id="addSideBtn" class="btn btn-primary btn-sm">+ Seite</button>
+          </div>
+          <div class="ueberstand-setting">
+            <label class="form-label" for="fieldUeberstandWert">Standard-Zuschlag der &bdquo;+&ldquo;-Taste bei Maßen</label>
+            <div class="ueberstand-setting-row">
+              <span class="ueberstand-setting-sign">+</span>
+              <input class="form-input" type="number" id="fieldUeberstandWert" step="0.1" min="0.1" inputmode="decimal" value="2.00" />
+              <span class="ueberstand-setting-unit">m</span>
+            </div>
+            <p class="ueberstand-setting-hint">Vorschlagswert beim Aktivieren einer &bdquo;+&ldquo;-Taste. Jedes Maß-Feld kann danach einen eigenen, individuellen Zuschlag erhalten.</p>
+          </div>
+          <div id="seitenContainer"></div>
+          <div id="noSidesHint" class="no-sides-hint">
+            Noch keine Seiten erfasst. Tippen Sie auf &bdquo;+ Seite&ldquo;.
+          </div>
+          <button id="addSideBtnBottom" class="btn btn-primary btn-full add-side-bottom">+ Seite hinzufügen</button>
+        </section>
+
+        <!-- 6. Zusatzpositionen -->
+        <section class="card">
+          <div class="section-header">
+            <h2 class="card-title">Positionen</h2>
+            <button id="addZusatzBtn" class="btn btn-primary btn-sm">+ Position</button>
+          </div>
+          <div id="zusatzContainer"></div>
+          <div id="noZusatzHint" class="no-sides-hint">
+            Noch keine Zusatzpositionen erfasst.
+          </div>
+        </section>
+
+        <!-- 6b. Notizen -->
+        <section class="card">
+          <h2 class="card-title">Notizen / Allgemeine Informationen</h2>
+          <textarea class="form-input form-textarea" id="fieldNotizen" rows="4"
+            placeholder="Allgemeine Informationen zum Aufmaß – z. B. Absprachen mit dem Kunden, Besonderheiten vor Ort, Zufahrt, Termine …"></textarea>
+          <p class="ueberstand-setting-hint">Erscheint als eigener Abschnitt im PDF. Notizen zu einer einzelnen Hausseite oder zu einem einzelnen Abschnitt können direkt an der jeweiligen Seite bzw. am Abschnitt erfasst werden.</p>
+        </section>
+
+        <!-- 7. Zusammenfassung -->
+        <section class="card">
+          <h2 class="card-title">Zusammenfassung</h2>
+          <div id="summaryContent">
+            <p class="summary-empty">Noch keine Seiten erfasst.</p>
+          </div>
+        </section>
+
+        <!-- 9. Aktionen -->
+        <section class="card action-card">
+          <div class="action-buttons">
+            <button id="saveProjectBtn" class="btn btn-primary btn-full">Speichern</button>
+            <button id="exportPdfBtn" class="btn btn-secondary btn-full">PDF erstellen</button>
+          </div>
+          <div class="action-buttons-secondary">
+            <button id="exportJsonBtn" class="btn btn-ghost btn-sm">JSON exportieren</button>
+            <button id="importJsonBtn" class="btn btn-ghost btn-sm">JSON laden</button>
+          </div>
+          <input type="file" id="importFileInput" accept="application/json" style="display:none;" />
+        </section>
+
+      </main>
+    </div>
+  </section>
+
+
+  <div id="toastEl" class="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Einmalige Übernahme des früheren gemeinsamen Speichers – läuft vor
+       jedem App-Code (siehe shared/speicher-migration.js). -->
+  <script src="/app/shared/speicher-migration.js?v=20260928"></script>
+  <script src="/app/aufmass/basis.js?v=20260928"></script>
+  <script src="/app/aufmass/script.js?v=20260928"></script>
+  <script src="/app/aufmass/cloud.js?v=20260928"></script>
+</body>
+</html>

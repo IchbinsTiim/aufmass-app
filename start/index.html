@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="color-scheme" content="dark" />
+  <title>AufmaßX – Aufmaß &amp; 2D-Aufmaß</title>
+
+  <!-- Schriften werden asynchron nachgeladen: fehlt die Verbindung (Baustelle,
+       Funkloch), startet die Seite sofort mit den Systemschriften. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+
+  <link rel="stylesheet" href="/app/shared/tokens.css?v=20260928" />
+  <link rel="stylesheet" href="/app/start/start.css?v=20260928" />
+</head>
+<body data-modul="hub">
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       Startseite – /app
+       Verlinkt nur auf die beiden getrennten Anwendungen:
+         /app/aufmass      Aufmaß (Positionserfassung)
+         /app/aufmass-2d   2D-Aufmaß (Gerüst-Zeichnung)
+       Sie liest und schreibt keine Daten der Anwendungen.
+       ══════════════════════════════════════════════════════════════════ -->
+  <nav id="modSwitcher" class="mod-switcher" aria-label="Anwendung wählen">
+    <a href="/app" class="mod-switcher-home" id="modHomeBtn" title="Zum Startbildschirm" aria-label="Zum Startbildschirm">
+      <span class="mod-switcher-mark" aria-hidden="true"></span>
+    </a>
+    <div class="mod-switcher-tabs" role="tablist">
+      <a href="/app/aufmass" class="mod-tab" data-ziel="aufmass" role="tab" aria-selected="false">Aufmaß</a>
+      <a href="/app/aufmass-2d" class="mod-tab" data-ziel="2d" role="tab" aria-selected="false">2D</a>
+      <span class="mod-tab-indicator" aria-hidden="true"></span>
+    </div>
+  </nav>
+
+  <section id="hub-root" aria-label="Startbildschirm">
+    <div class="hub-wrap">
+      <header class="hub-head">
+        <p class="hub-eyebrow">Gerüstbau · Aufmaß-Suite</p>
+        <h1 class="hub-title">Womit arbeiten Sie<br />gerade?</h1>
+        <p class="hub-sub">Zwei getrennte Anwendungen mit eigenen Daten. Wählen Sie, womit Sie arbeiten möchten.</p>
+      </header>
+
+      <div class="hub-tiles">
+
+        <!-- Kachel 1: Aufmaß -->
+        <a class="hub-tile" data-ziel="aufmass" href="/app/aufmass">
+          <div class="hub-tile-glow" aria-hidden="true"></div>
+          <div class="hub-tile-body">
+            <div class="hub-tile-text">
+              <span class="hub-tile-kicker">Modul 1</span>
+              <h2 class="hub-tile-title">Aufmaß</h2>
+              <p class="hub-tile-desc">Positionen erfassen &amp; kalkulieren</p>
+              <span class="hub-tile-meta">Projekte · Hausseiten · Angebots-PDF</span>
+            </div>
+
+            <!-- Vorschau: eine Tabellenzeile, die sich Zelle für Zelle aufbaut -->
+            <div class="hub-preview hub-preview-table" aria-hidden="true">
+              <div class="pv-row pv-head">
+                <span class="pv-cell pv-c1">Position</span>
+                <span class="pv-cell pv-c2">L</span>
+                <span class="pv-cell pv-c3">H</span>
+                <span class="pv-cell pv-c4">m²</span>
+              </div>
+              <div class="pv-row pv-r1">
+                <span class="pv-cell pv-c1">Fassade Nord</span>
+                <span class="pv-cell pv-c2 pv-num">12,85</span>
+                <span class="pv-cell pv-c3 pv-num">10,20</span>
+                <span class="pv-cell pv-c4 pv-num">131,07</span>
+              </div>
+              <div class="pv-row pv-r2">
+                <span class="pv-cell pv-c1">Fassade Ost</span>
+                <span class="pv-cell pv-c2 pv-num">7,71</span>
+                <span class="pv-cell pv-c3 pv-num">8,20</span>
+                <span class="pv-cell pv-c4 pv-num">63,22</span>
+              </div>
+              <div class="pv-row pv-r3">
+                <span class="pv-cell pv-c1">Konsole 0,30</span>
+                <span class="pv-cell pv-c2 pv-num">12,85</span>
+                <span class="pv-cell pv-c3 pv-num">–</span>
+                <span class="pv-cell pv-c4 pv-num">12,85</span>
+              </div>
+            </div>
+          </div>
+          <span class="hub-tile-go" aria-hidden="true">Öffnen →</span>
+        </a>
+
+        <!-- Kachel 2: 2D-Aufmaß -->
+        <a class="hub-tile" data-ziel="2d" href="/app/aufmass-2d">
+          <div class="hub-tile-glow" aria-hidden="true"></div>
+          <div class="hub-tile-body">
+            <div class="hub-tile-text">
+              <span class="hub-tile-kicker">Modul 2</span>
+              <h2 class="hub-tile-title">2D-Aufmaß</h2>
+              <p class="hub-tile-desc">Gerüst zeichnen &amp; PDF erzeugen</p>
+              <span class="hub-tile-meta">Zeichnungen · Achsen · Plan-PDF</span>
+            </div>
+
+            <!-- Vorschau: Gerüstfelder, die sich Feld für Feld zeichnen -->
+            <div class="hub-preview hub-preview-plan" aria-hidden="true">
+              <svg viewBox="0 0 220 120" class="pv-svg" role="presentation">
+                <g class="pv-grid">
+                  <path d="M0 30H220M0 60H220M0 90H220M40 0V120M80 0V120M120 0V120M160 0V120" />
+                </g>
+                <g class="pv-scaffold">
+                  <rect class="pv-bay pv-b1" x="26"  y="34" width="38" height="16" rx="2" />
+                  <rect class="pv-bay pv-b2" x="64"  y="34" width="38" height="16" rx="2" />
+                  <rect class="pv-bay pv-b3" x="102" y="34" width="38" height="16" rx="2" />
+                  <rect class="pv-bay pv-b4" x="140" y="34" width="38" height="16" rx="2" />
+                  <rect class="pv-bay pv-b5" x="162" y="50" width="16" height="38" rx="2" />
+                  <rect class="pv-bay pv-b6" x="162" y="88" width="16" height="16" rx="2" />
+                </g>
+                <g class="pv-corner">
+                  <path class="pv-eck" d="M162 34h16v16h-16z" />
+                </g>
+                <g class="pv-dims">
+                  <path class="pv-dim pv-d1" d="M26 26h152" />
+                  <text class="pv-dim-txt" x="102" y="20" text-anchor="middle">10,28 m</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <span class="hub-tile-go" aria-hidden="true">Öffnen →</span>
+        </a>
+
+      </div>
+
+      <footer class="hub-foot">
+        <!-- Nur Verweise: Cloud-Abgleich und Sicherung liegen seit der
+             Trennung in der jeweiligen Anwendung. -->
+        <!-- Erscheint nur, wenn die Rolle des angemeldeten Benutzers das Recht
+             „Mitarbeiter ansehen" trägt (siehe start.js). Die Seite selbst
+             prüft es noch einmal – der ausgeblendete Link ist Bequemlichkeit,
+             keine Absicherung. -->
+        <a class="hub-foot-btn hidden" id="hubMitarbeiterBtn" href="/mitarbeiter">Mitarbeiter</a>
+        <span class="hub-foot-sep hidden" id="hubMitarbeiterSep">·</span>
+        <!-- Konto/Abmelden liegt bewusst hier und nicht im Umschalter: der
+             wird während der Arbeit dauernd angetippt, ein Abmelden-Knopf
+             daneben wäre ein Fehlgriff mit Folgen. -->
+        <a class="hub-foot-btn" id="hubKontoBtn" href="/konto">Konto &amp; Abmelden</a>
+      </footer>
+    </div>
+  </section>
+
+  <script src="/app/start/start.js?v=20260928"></script>
+</body>
+</html>

@@ -4,8 +4,26 @@ import { aktivitaetNotieren } from '@/lib/mitarbeiter/aktivitaet';
 import { hatRecht } from '@/lib/rollen';
 
 export type CloudRolle = 'lesen' | 'bearbeiten';
+
+/**
+ * Namensraum der Anwendung. Aufmaß und 2D-Aufmaß sind getrennte Anwendungen
+ * mit getrennten Daten: jede liest und schreibt nur ihre eigenen Datensätze
+ * (Spalte `app` in cloud_projekte und cloud_ordner). Ein Datensatz wechselt
+ * nie die Anwendung.
+ */
+export type CloudApp = 'aufmass' | '2d';
+export const CLOUD_APPS: readonly CloudApp[] = ['aufmass', '2d'];
+
+/** Liest den Namensraum aus einer Anfrage. Ohne Angabe gilt 'aufmass' –
+ *  so verhalten sich ältere Aufrufer wie bisher. */
+export function cloudApp(wert: unknown): CloudApp {
+  if (wert == null || wert === '') return 'aufmass';
+  if (wert === 'aufmass' || wert === '2d') return wert;
+  throw new CloudFehler(400, 'Unbekannte Anwendung.');
+}
 export type CloudProjekt = {
   id: string;
+  app: CloudApp;
   revision: number;
   ownerUserId: string;
   rolle: 'owner' | 'admin' | CloudRolle;
@@ -62,7 +80,8 @@ function zeileZuProjekt(zeile: Record<string, unknown>, userId: string, istAdmin
   const freigabe = zeile.freigabe === 'lesen' || zeile.freigabe === 'bearbeiten'
     ? zeile.freigabe : null;
   return {
-    id: String(zeile.id), revision: zahl(zeile.revision), ownerUserId: owner,
+    id: String(zeile.id), app: zeile.app === '2d' ? '2d' : 'aufmass',
+    revision: zahl(zeile.revision), ownerUserId: owner,
     rolle: istAdmin ? 'admin' : owner === userId ? 'owner' : freigabe!, inhalt: json(zeile.inhalt)
   };
 }
@@ -73,7 +92,7 @@ function zeileZuOrdner(zeile: Record<string, unknown>): CloudOrdner {
 
 async function projektHolen(id: string, userId: string, istAdmin: boolean): Promise<CloudProjekt | null> {
   const zeilen = await db()(
-    `SELECT p.id, p.owner_user_id, p.inhalt, p.revision, f.rolle AS freigabe
+    `SELECT p.id, p.app, p.owner_user_id, p.inhalt, p.revision, f.rolle AS freigabe
        FROM cloud_projekte p
        LEFT JOIN cloud_projekt_freigaben f ON f.projekt_id = p.id AND f.user_id = $2
       WHERE p.id = $1
@@ -83,20 +102,21 @@ async function projektHolen(id: string, userId: string, istAdmin: boolean): Prom
   return zeilen[0] ? zeileZuProjekt(zeilen[0], userId, istAdmin) : null;
 }
 
-export async function arbeitsbereichAuflisten(userId: string, istAdmin: boolean) {
+export async function arbeitsbereichAuflisten(userId: string, istAdmin: boolean, app: CloudApp = 'aufmass') {
   const verbindung = db();
   const [projektZeilen, ordnerZeilen] = await Promise.all([
     verbindung(
-      `SELECT p.id, p.owner_user_id, p.inhalt, p.revision, f.rolle AS freigabe
+      `SELECT p.id, p.app, p.owner_user_id, p.inhalt, p.revision, f.rolle AS freigabe
          FROM cloud_projekte p
          LEFT JOIN cloud_projekt_freigaben f ON f.projekt_id = p.id AND f.user_id = $1
-        WHERE $2::boolean OR p.owner_user_id = $1 OR f.user_id IS NOT NULL
+        WHERE p.app = $3
+          AND ($2::boolean OR p.owner_user_id = $1 OR f.user_id IS NOT NULL)
         ORDER BY p.geaendert_am DESC
-        LIMIT 500`, [userId, istAdmin]
+        LIMIT 500`, [userId, istAdmin, app]
     ),
     verbindung(
       `SELECT id, inhalt, revision FROM cloud_ordner
-        WHERE owner_user_id = $1 ORDER BY geaendert_am DESC LIMIT 200`, [userId]
+        WHERE owner_user_id = $1 AND app = $2 ORDER BY geaendert_am DESC LIMIT 200`, [userId, app]
     )
   ]);
   return {
@@ -108,13 +128,20 @@ export async function arbeitsbereichAuflisten(userId: string, istAdmin: boolean)
 export async function projektSpeichern(
   userId: string, istAdmin: boolean,
   eingabe: { id: unknown; inhalt: unknown; revision?: unknown },
-  rechte?: Set<string> | string[]
+  rechte?: Set<string> | string[],
+  app: CloudApp = 'aufmass'
 ): Promise<CloudProjekt> {
   const id = textId(eingabe.id, 'Projekt-ID');
   const inhalt = objekt(eingabe.inhalt, 'Projekt');
   const titel = String(inhalt.name ?? '').trim().slice(0, 240);
   const vorher = await projektHolen(id, userId, istAdmin);
   const verbindung = db();
+
+  // Ein Datensatz gehört genau einer Anwendung – die andere darf ihn weder
+  // überschreiben noch übernehmen.
+  if (vorher && vorher.app !== app) {
+    throw new CloudFehler(409, 'Dieser Datensatz gehört zur anderen Anwendung.');
+  }
 
   // Anlegen und Ändern sind zwei verschiedene Rechte. Welches von beiden
   // gebraucht wird, weiß erst diese Stelle – vorher ist nicht bekannt, ob es
@@ -131,11 +158,11 @@ export async function projektSpeichern(
 
   if (!vorher) {
     const neu = await verbindung(
-      `INSERT INTO cloud_projekte (id, owner_user_id, titel, inhalt, erstellt_von, geaendert_von)
-       VALUES ($1, $2, $3, $4::jsonb, $2, $2)
+      `INSERT INTO cloud_projekte (id, owner_user_id, titel, inhalt, erstellt_von, geaendert_von, app)
+       VALUES ($1, $2, $3, $4::jsonb, $2, $2, $5)
        ON CONFLICT (id) DO NOTHING
-       RETURNING id, owner_user_id, inhalt, revision, NULL::text AS freigabe`,
-      [id, userId, titel, JSON.stringify(inhalt)]
+       RETURNING id, app, owner_user_id, inhalt, revision, NULL::text AS freigabe`,
+      [id, userId, titel, JSON.stringify(inhalt), app]
     );
     if (neu[0]) {
       await aktivitaetNotieren(verbindung, {
@@ -146,6 +173,7 @@ export async function projektSpeichern(
     // Die ID gehört inzwischen einem anderen Konto; kein Projekt übernehmen.
     const inzwischen = await projektHolen(id, userId, istAdmin);
     if (!inzwischen) throw new CloudFehler(403, 'Für dieses Projekt fehlt die Berechtigung.');
+    if (inzwischen.app !== app) throw new CloudFehler(409, 'Dieser Datensatz gehört zur anderen Anwendung.');
     throw new CloudFehler(409, 'Das Projekt wurde inzwischen angelegt.', inzwischen);
   }
 
@@ -157,14 +185,14 @@ export async function projektSpeichern(
   const zeilen = await verbindung(
     `UPDATE cloud_projekte p SET titel = $1, inhalt = $2::jsonb,
        revision = p.revision + 1, geaendert_am = now(), geaendert_von = $5
-      WHERE p.id = $3 AND p.revision = $4
+      WHERE p.id = $3 AND p.revision = $4 AND p.app = $7
         AND ($6::boolean OR p.owner_user_id = $5 OR EXISTS (
           SELECT 1 FROM cloud_projekt_freigaben f
            WHERE f.projekt_id = p.id AND f.user_id = $5 AND f.rolle = 'bearbeiten'
         ))
-      RETURNING p.id, p.owner_user_id, p.inhalt, p.revision,
+      RETURNING p.id, p.app, p.owner_user_id, p.inhalt, p.revision,
         (SELECT rolle FROM cloud_projekt_freigaben WHERE projekt_id = p.id AND user_id = $5) AS freigabe`,
-    [titel, JSON.stringify(inhalt), id, revision, userId, istAdmin]
+    [titel, JSON.stringify(inhalt), id, revision, userId, istAdmin, app]
   );
   if (!zeilen[0]) {
     const aktuell = await projektHolen(id, userId, istAdmin);
@@ -175,11 +203,13 @@ export async function projektSpeichern(
 
 export async function projektLoeschen(
   userId: string, istAdmin: boolean, idWert: string, revisionWert: unknown,
-  rechte?: Set<string> | string[]
+  rechte?: Set<string> | string[],
+  app: CloudApp = 'aufmass'
 ) {
   const id = textId(idWert, 'Projekt-ID');
   const vorher = await projektHolen(id, userId, istAdmin);
-  if (!vorher) throw new CloudFehler(404, 'Projekt nicht gefunden.');
+  // Ein Datensatz der anderen Anwendung existiert aus Sicht dieser nicht.
+  if (!vorher || vorher.app !== app) throw new CloudFehler(404, 'Projekt nicht gefunden.');
   if (rechte && !hatRecht(rechte, 'projekte.loeschen')) {
     throw new CloudFehler(403, 'Ihre Rolle darf Projekte nicht löschen.');
   }
@@ -188,7 +218,7 @@ export async function projektLoeschen(
   if (!Number.isInteger(revision) || revision !== vorher.revision) {
     throw new CloudFehler(409, 'Das Projekt wurde auf einem anderen Gerät geändert.', vorher);
   }
-  const zeilen = await db()('DELETE FROM cloud_projekte WHERE id = $1 AND revision = $2 RETURNING titel', [id, revision]);
+  const zeilen = await db()('DELETE FROM cloud_projekte WHERE id = $1 AND revision = $2 AND app = $3 RETURNING titel', [id, revision, app]);
   if (!zeilen[0]) throw new CloudFehler(409, 'Das Projekt wurde gleichzeitig geändert.');
   await aktivitaetNotieren(db(), {
     userId, art: 'projekt.geloescht', objektId: id,
@@ -197,19 +227,23 @@ export async function projektLoeschen(
 }
 
 export async function ordnerSpeichern(
-  userId: string, eingabe: { id: unknown; inhalt: unknown; revision?: unknown }
+  userId: string, eingabe: { id: unknown; inhalt: unknown; revision?: unknown },
+  app: CloudApp = 'aufmass'
 ): Promise<CloudOrdner> {
   const id = textId(eingabe.id, 'Ordner-ID');
   const inhalt = objekt(eingabe.inhalt, 'Ordner');
   const verbindung = db();
   const vorher = await verbindung(
-    'SELECT id, inhalt, revision FROM cloud_ordner WHERE id = $1 AND owner_user_id = $2', [id, userId]
+    'SELECT id, inhalt, revision, app FROM cloud_ordner WHERE id = $1 AND owner_user_id = $2', [id, userId]
   );
+  if (vorher[0] && vorher[0].app !== app) {
+    throw new CloudFehler(409, 'Dieser Ordner gehört zur anderen Anwendung.');
+  }
   if (!vorher[0]) {
     const neu = await verbindung(
-      `INSERT INTO cloud_ordner (id, owner_user_id, inhalt, erstellt_von, geaendert_von)
-       VALUES ($1, $2, $3::jsonb, $2, $2)
-       ON CONFLICT (id) DO NOTHING RETURNING id, inhalt, revision`, [id, userId, JSON.stringify(inhalt)]
+      `INSERT INTO cloud_ordner (id, owner_user_id, inhalt, erstellt_von, geaendert_von, app)
+       VALUES ($1, $2, $3::jsonb, $2, $2, $4)
+       ON CONFLICT (id) DO NOTHING RETURNING id, inhalt, revision`, [id, userId, JSON.stringify(inhalt), app]
     );
     if (neu[0]) return zeileZuOrdner(neu[0]);
     throw new CloudFehler(409, 'Der Ordner wurde inzwischen angelegt.');
@@ -221,19 +255,21 @@ export async function ordnerSpeichern(
   const neu = await verbindung(
     `UPDATE cloud_ordner SET inhalt = $1::jsonb, revision = revision + 1, geaendert_am = now(),
        geaendert_von = $3
-      WHERE id = $2 AND owner_user_id = $3 AND revision = $4 RETURNING id, inhalt, revision`,
-    [JSON.stringify(inhalt), id, userId, revision]
+      WHERE id = $2 AND owner_user_id = $3 AND revision = $4 AND app = $5 RETURNING id, inhalt, revision`,
+    [JSON.stringify(inhalt), id, userId, revision, app]
   );
   if (!neu[0]) throw new CloudFehler(409, 'Der Ordner wurde gleichzeitig geändert.');
   return zeileZuOrdner(neu[0]);
 }
 
-export async function ordnerLoeschen(userId: string, idWert: string, revisionWert: unknown) {
+export async function ordnerLoeschen(
+  userId: string, idWert: string, revisionWert: unknown, app: CloudApp = 'aufmass'
+) {
   const id = textId(idWert, 'Ordner-ID');
   const revision = Number(revisionWert);
   const zeilen = await db()(
-    'DELETE FROM cloud_ordner WHERE id = $1 AND owner_user_id = $2 AND revision = $3 RETURNING id',
-    [id, userId, revision]
+    'DELETE FROM cloud_ordner WHERE id = $1 AND owner_user_id = $2 AND revision = $3 AND app = $4 RETURNING id',
+    [id, userId, revision, app]
   );
   if (!zeilen[0]) throw new CloudFehler(409, 'Der Ordner wurde auf einem anderen Gerät geändert.');
 }

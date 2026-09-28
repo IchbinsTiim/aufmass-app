@@ -16,7 +16,7 @@
      .tut-karte    die Erklärung: Fortschritt, Überschrift, zwei Sätze,
                    Zurück / Weiter / Beenden.
 
-   Farben, Radien und Bewegung kommen aus den Design-Tokens (core.css), damit
+   Farben, Radien und Bewegung kommen aus den Design-Tokens (shared/tokens.css), damit
    das Tutorial aussieht wie der Rest von AufmaßX und nicht wie ein Fremdkörper.
    =========================================================================== */
 

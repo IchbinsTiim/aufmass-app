@@ -1,16 +1,21 @@
 'use strict';
 
 // ============================================================================
-//  Cloud-Speicher
+//  Cloud-Speicher der 2D-Aufmaß-App
 // ============================================================================
-// Die Fachlogik bleibt in den beiden bestehenden Modulen. Dieser kleine
-// Adapter beobachtet nur deren gemeinsamen lokalen Projektspeicher, sichert
-// Änderungen in der Cloud und zieht sie auf einem zweiten Gerät wieder herein.
-// So bleibt die App bei schlechtem Empfang sofort bedienbar; ein fehlender
-// Funkkontakt bedeutet "später sichern", nicht "nicht arbeiten".
+// Die Fachlogik bleibt in viewer2d.js. Dieser kleine Adapter beobachtet nur
+// den lokalen Zeichnungsspeicher DIESER App, sichert Änderungen in der Cloud
+// und zieht sie auf einem zweiten Gerät wieder herein. So bleibt die App bei
+// schlechtem Empfang sofort bedienbar; ein fehlender Funkkontakt bedeutet
+// "später sichern", nicht "nicht arbeiten".
+//
+// Die Cloud trennt die beiden Anwendungen über den Namensraum `app`: diese
+// App liest und schreibt ausschließlich `app=2d`. Die Aufmaß-App hat einen
+// eigenen Adapter (aufmass/cloud.js) mit `app=aufmass`.
 
 const CloudSpeicher = (() => {
-  const STATUS_ID = 'hubCloudStatus';
+  const APP = '2d';
+  const STATUS_ID = 'cloudStatus';
   const META = '_cloud';
   let snapshotsProjekt = new Map();
   let snapshotsOrdner = new Map();
@@ -76,12 +81,13 @@ const CloudSpeicher = (() => {
     return body;
   }
 
-  function lokaleProjekte() { return lesen(GK.projekte, []); }
+  // Intern heißen die Datensätze weiter „Projekt" – für die Cloud ist eine
+  // Zeichnung ein Dokument wie jedes andere, nur im Namensraum `app=2d`.
+  function lokaleProjekte() { return lesen(GK.zeichnungen, []); }
   function lokaleOrdner() { return lesen(GK.ordner, []); }
 
   function aktualisiereOberflaeche() {
-    if (typeof AufmassModul !== 'undefined') AufmassModul.frischeDatenLaden?.();
-    if (typeof Shell !== 'undefined') Shell.aktualisiereHub?.();
+    // Die Zeichnungsübersicht hört auf dieses Ereignis und liest neu ein.
     document.dispatchEvent(new CustomEvent(GERUEST_DATEN_EVENT, { detail: { quelle: 'cloud' } }));
   }
 
@@ -101,6 +107,7 @@ const CloudSpeicher = (() => {
     const ordner = lokaleOrdner();
     let geaendert = false;
     projekte.forEach(projekt => {
+      if (wartetAufCloudKopie(projekt)) return;
       const meta = projekt[META] || (projekt[META] = { revision: null, rolle: 'owner', dirty: true });
       if (!meta.revision || snapshotsProjekt.get(projekt.id) !== fingerabdruck(projekt)) {
         meta.dirty = true;
@@ -116,27 +123,19 @@ const CloudSpeicher = (() => {
     });
     if (geaendert) {
       unterdrueckt = true;
-      schreiben(GK.projekte, projekte);
+      schreiben(GK.zeichnungen, projekte);
       schreiben(GK.ordner, ordner);
       unterdrueckt = false;
     }
   }
 
   /* Das angemeldete Konto samt Rechten kommt mit der Arbeitsbereich-Antwort
-     (siehe app/api/cloud/arbeitsbereich/route.ts). Gebraucht wird es für
-     genau eine Sache: den Zugang zur Mitarbeiterverwaltung in der Fußzeile
-     anzubieten – und nur dem, der ihn auch nutzen darf. Die Seite dahinter
-     prüft das Recht selbst noch einmal; hier geht es allein darum, niemandem
-     einen Link vor die Nase zu setzen, der ihn zu einer Absage führt. */
+     (siehe app/api/cloud/arbeitsbereich/route.ts). Die Route prüft jedes
+     Recht selbst noch einmal; hier geht es allein um die Anzeige. */
   let konto = null;
 
   function kontoUebernehmen(daten) {
     konto = daten && typeof daten === 'object' ? daten : null;
-    const rechte = Array.isArray(konto?.rechte) ? konto.rechte : [];
-    const darfMitarbeiter = rechte.includes('mitarbeiter.ansehen');
-    ['hubMitarbeiterBtn', 'hubMitarbeiterSep'].forEach(id => {
-      document.getElementById(id)?.classList.toggle('hidden', !darfMitarbeiter);
-    });
   }
 
   function arbeitsbereichEinspielen(cloud) {
@@ -173,7 +172,7 @@ const CloudSpeicher = (() => {
     remoteOrdner.forEach(remote => zusammenOrdner.push(mitMeta(remote.inhalt, remote)));
 
     unterdrueckt = true;
-    schreiben(GK.projekte, zusammenProjekte);
+    schreiben(GK.zeichnungen, zusammenProjekte);
     schreiben(GK.ordner, zusammenOrdner);
     unterdrueckt = false;
     // Lokale Altprojekte haben noch keine Cloud-Fassung und werden nach dem
@@ -200,7 +199,7 @@ const CloudSpeicher = (() => {
      der Mitarbeiter kann beide Fassungen vergleichen, statt in einer 409-
      Schleife festzuhängen. */
   function konfliktKopieId() {
-    return 'proj_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    return 'z2d_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   }
 
   function konfliktAufloesen(projekt, aktuell) {
@@ -208,7 +207,7 @@ const CloudSpeicher = (() => {
 
     const lokaleKopie = ohneMeta(projekt);
     lokaleKopie.id = konfliktKopieId();
-    const name = String(lokaleKopie.name || 'Projekt').trim() || 'Projekt';
+    const name = String(lokaleKopie.name || 'Zeichnung').trim() || 'Zeichnung';
     lokaleKopie.name = name + ' (lokale Konfliktkopie)';
     lokaleKopie.geaendert = new Date().toISOString().slice(0, 10);
     lokaleKopie[META] = {
@@ -222,7 +221,7 @@ const CloudSpeicher = (() => {
     projekte.push(lokaleKopie);
 
     unterdrueckt = true;
-    schreiben(GK.projekte, projekte);
+    schreiben(GK.zeichnungen, projekte);
     unterdrueckt = false;
     snapshotsProjekt.set(cloudProjekt.id, fingerabdruck(cloudProjekt));
     bekannteProjektIds.set(cloudProjekt.id, cloudProjekt[META].revision);
@@ -234,11 +233,21 @@ const CloudSpeicher = (() => {
     return true;
   }
 
+  /* Aus dem früheren gemeinsamen Projektspeicher übernommene Zeichnung eines
+     ANDEREN Mitarbeiters (freigegeben): ihre Cloud-Fassung legt die
+     Datenbank-Migration unter derselben Kennung an. Bis sie da ist, bleibt
+     die lokale Kopie lokal – sonst entstünde sie in der Cloud ein zweites
+     Mal, mit dem falschen Eigentümer. */
+  function wartetAufCloudKopie(projekt) {
+    const meta = projekt[META];
+    return !!(meta && meta.uebernommen && !meta.revision && meta.eigenes === false);
+  }
+
   async function projektSichern(projekt) {
     const revision = projekt[META]?.revision;
     let body;
     try {
-      body = await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id), {
+      body = await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id) + '?app=' + APP, {
         method: 'PUT', body: JSON.stringify({ inhalt: ohneMeta(projekt), revision })
       });
     } catch (fehler) {
@@ -258,7 +267,7 @@ const CloudSpeicher = (() => {
 
   async function ordnerSichern(ordner) {
     const revision = ordner[META]?.revision;
-    const body = await anfrage('/api/cloud/ordner/' + encodeURIComponent(ordner.id), {
+    const body = await anfrage('/api/cloud/ordner/' + encodeURIComponent(ordner.id) + '?app=' + APP, {
       method: 'PUT', body: JSON.stringify({ inhalt: ohneMeta(ordner), revision })
     });
     const cloud = body.ordner;
@@ -275,6 +284,7 @@ const CloudSpeicher = (() => {
       const projekte = lokaleProjekte();
       const ordner = lokaleOrdner();
       for (const projekt of projekte) {
+        if (wartetAufCloudKopie(projekt)) continue;
         if (projekt[META]?.dirty || !projekt[META]?.revision || snapshotsProjekt.get(projekt.id) !== fingerabdruck(projekt)) await projektSichern(projekt);
       }
       for (const ordnerEintrag of ordner) {
@@ -284,14 +294,14 @@ const CloudSpeicher = (() => {
       const ids = new Set(projekte.map(p => p.id));
       for (const [id, revision] of bekannteProjektIds) {
         if (!ids.has(id)) {
-          await anfrage('/api/cloud/projekte/' + encodeURIComponent(id) + '?revision=' + encodeURIComponent(revision), { method: 'DELETE' });
+          await anfrage('/api/cloud/projekte/' + encodeURIComponent(id) + '?app=' + APP + '&revision=' + encodeURIComponent(revision), { method: 'DELETE' });
           bekannteProjektIds.delete(id); snapshotsProjekt.delete(id);
         }
       }
       const ordnerIds = new Set(ordner.map(o => o.id));
       for (const [id, revision] of bekannteOrdnerIds) {
         if (!ordnerIds.has(id)) {
-          await anfrage('/api/cloud/ordner/' + encodeURIComponent(id) + '?revision=' + encodeURIComponent(revision), { method: 'DELETE' });
+          await anfrage('/api/cloud/ordner/' + encodeURIComponent(id) + '?app=' + APP + '&revision=' + encodeURIComponent(revision), { method: 'DELETE' });
           bekannteOrdnerIds.delete(id); snapshotsOrdner.delete(id);
         }
       }
@@ -302,15 +312,15 @@ const CloudSpeicher = (() => {
         if (!alt) return eintrag;
         return { ...eintrag, [META]: { ...alt[META], dirty: fingerabdruck(eintrag) !== fingerabdruck(alt) } };
       });
-      schreiben(GK.projekte, abgleichen(lokaleProjekte(), projekte));
+      schreiben(GK.zeichnungen, abgleichen(lokaleProjekte(), projekte));
       schreiben(GK.ordner, abgleichen(lokaleOrdner(), ordner));
       status('Cloud gespeichert', 'ok');
-      if (laut && typeof showToast === 'function') showToast('Cloud-Projekte sind aktuell');
+      if (laut && typeof showToast === 'function') showToast('Cloud-Zeichnungen sind aktuell');
     } catch (fehler) {
       if (fehler.status === 409 && konfliktAufloesen(fehler.projekt, fehler.aktuell)) {
         // konfliktAufloesen hat den aktuellen Cloud-Stand und eine lokale
         // Kopie geschrieben. Die finally-Klausel stößt deren Upload an.
-      } else if (fehler.status === 409) konflikt('Dieses Projekt wurde auf einem anderen Gerät geändert.');
+      } else if (fehler.status === 409) konflikt('Diese Zeichnung wurde auf einem anderen Gerät geändert.');
       else if (fehler.status === 403) {
         // Die Rolle darf den Vorgang nicht. „Nicht erreichbar" wäre hier die
         // falsche Auskunft – die Verbindung steht, die Berechtigung fehlt.
@@ -341,7 +351,7 @@ const CloudSpeicher = (() => {
   async function aktualisieren() {
     status('Cloud wird geladen …', 'laeuft');
     try {
-      const cloud = await anfrage('/api/cloud/arbeitsbereich');
+      const cloud = await anfrage('/api/cloud/arbeitsbereich?app=' + APP);
       arbeitsbereichEinspielen(cloud);
       bereit = true;
       status('Cloud aktuell', 'ok');
@@ -356,22 +366,22 @@ const CloudSpeicher = (() => {
   async function freigeben(projekt) {
     const meta = projekt?.[META];
     if (!projekt || !meta?.revision) {
-      if (typeof showToast === 'function') showToast('Bitte das Projekt zuerst in der Cloud sichern.');
+      if (typeof showToast === 'function') showToast('Bitte die Zeichnung zuerst in der Cloud sichern.');
       return;
     }
     if (meta.rolle === 'lesen' || meta.rolle === 'bearbeiten') {
       if (typeof showToast === 'function') showToast('Nur Eigentümer oder Administratoren dürfen freigeben.');
       return;
     }
-    const email = prompt('E-Mail-Adresse des Mitarbeiters, der dieses Projekt sehen soll:');
+    const email = prompt('E-Mail-Adresse des Mitarbeiters, der diese Zeichnung sehen soll:');
     if (email === null) return;
-    const rolle = confirm('Darf der Mitarbeiter das Projekt bearbeiten?\n\nOK = bearbeiten, Abbrechen = nur lesen')
+    const rolle = confirm('Darf der Mitarbeiter die Zeichnung bearbeiten?\n\nOK = bearbeiten, Abbrechen = nur lesen')
       ? 'bearbeiten' : 'lesen';
     try {
       await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id) + '/freigaben', {
         method: 'PUT', body: JSON.stringify({ email, rolle })
       });
-      if (typeof showToast === 'function') showToast('Projekt freigegeben');
+      if (typeof showToast === 'function') showToast('Zeichnung freigegeben');
     } catch (fehler) {
       if (typeof showToast === 'function') showToast(fehler.message || 'Freigabe nicht möglich');
     }
@@ -391,7 +401,7 @@ const CloudSpeicher = (() => {
     const revision = lokaleProjekte().find(p => p.id === projekt.id)?.[META]?.revision || meta.revision;
     try {
       await anfrage('/api/cloud/projekte/' + encodeURIComponent(projekt.id) +
-        '?revision=' + encodeURIComponent(revision), { method: 'DELETE' });
+        '?app=' + APP + '&revision=' + encodeURIComponent(revision), { method: 'DELETE' });
       bekannteProjektIds.delete(projekt.id);
       snapshotsProjekt.delete(projekt.id);
       return true;
@@ -403,7 +413,7 @@ const CloudSpeicher = (() => {
   }
 
   function start() {
-    const btn = document.getElementById('hubCloudBtn');
+    const btn = document.getElementById('cloudAktualisierenBtn');
     btn?.addEventListener('click', () => void aktualisieren());
     document.addEventListener(GERUEST_DATEN_EVENT, spaeterSichern);
     window.addEventListener('online', () => void aktualisieren());

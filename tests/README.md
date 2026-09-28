@@ -1,25 +1,25 @@
-# Tests zum 2D-Zeichner und zum Aufmaß-Programm
+# Tests zum 2D-Aufmaß und zum Aufmaß-Programm
 
-Browser-Tests gegen die zusammengeführte Anwendung `legacy-app/index.html`.
+Browser-Tests gegen die beiden **getrennten** Anwendungen und
+Datenbanktests gegen ein Postgres im Speicher (PGlite).
 
-> Seit der Umstellung auf Next.js + Clerk liegt die App in `legacy-app/` und
-> wird im Betrieb nur an angemeldete Benutzer ausgeliefert (`/app`). Die Tests
-> hier starten weiterhin einen eigenen statischen Server direkt auf diesem
-> Ordner – sie prüfen die Fachlogik, nicht die Anmeldung. Die Anmeldung selbst
-> prüft `r12-huelle-schutz.mjs`.
+> Die Anwendungen liegen in eigenen Ordnern (`aufmass/`, `aufmass-2d/`,
+> Startseite `start/`, gemeinsame Basics `shared/`, siehe `README.md`) und
+> werden im Betrieb nur an angemeldete Benutzer ausgeliefert (`/app/…`). Die
+> Tests starten einen eigenen statischen Server, der dieselben Adressen auf
+> dieselben Ordner abbildet (`harness.serve()`) – sie prüfen die Fachlogik,
+> nicht die Anmeldung. Die Anmeldung selbst prüft `r12-huelle-schutz.mjs`.
 
-Beide Programme leben seit der Zusammenführung in dieser einen Seite und werden
-über die Route angesteuert:
-
-| Route | Modul |
+| Adresse | Anwendung |
 |---|---|
-| `index.html#/` | Startbildschirm (Hub) |
-| `index.html#/aufmass` | Modul 1 – Aufmaß / Positionserfassung |
-| `index.html#/2d` | Modul 2 – 2D-Aufmaß / Gerüst-Zeichnung |
+| `/app` | Startseite (zwei Kacheln, nur Links) |
+| `/app/aufmass` | Aufmaß – Positionserfassung |
+| `/app/aufmass-2d#/projekte` | 2D-Aufmaß – Zeichnungsübersicht |
+| `/app/aufmass-2d#/zeichnung` | 2D-Aufmaß – Zeichnung |
 
-`harness.open()` öffnet `#/2d`, `harness.openAufmass()` öffnet `#/aufmass`.
-Die Tests starten einen kleinen statischen Server, öffnen die Seite in Chromium
-(Playwright) und prüfen Verhalten statt Implementierungsdetails.
+`harness.open()` öffnet `/app/aufmass-2d#/zeichnung`, `harness.openAufmass()`
+öffnet `/app/aufmass`. Die Tests öffnen die Seiten in Chromium (Playwright)
+und prüfen Verhalten statt Implementierungsdetails.
 
 ## Voraussetzungen
 
@@ -149,15 +149,16 @@ node tests/r6-blaetter-verbreiterung.mjs   # Blatteinteilung (so wenige Blätter
   (+ Gerüsttiefe je Seite); Bordbretter rund um ein Gerüst verteilen sich auf
   alle Achsen, ohne dass eine gemeinsame Kante doppelt zählt.
 
-Runde 7 (Shell der zusammengeführten App):
+Runde 7 (Trennung der Anwendungen – ersetzt den früheren Shell-Test):
 
 ```bash
-node tests/r7-shell-routing.mjs   # Hash-Routing, Deep-Link, Neuladen, Zurück-Button,
-                                  # Zustandserhalt beim Modulwechsel, Speicher-Migration,
-                                  # Namensraum-Sauberkeit, 44-px-Trefferflächen
+node tests/r7-app-trennung.mjs    # eigene Ordner, keine Querverweise zwischen den Apps,
+                                  # verlustfreie Übernahme des gemeinsamen Speichers,
+                                  # Startseite nur mit Links, alte Adressen, getrennte
+                                  # Globale und Daten, Navigation der 2D-App, 44 px
 ```
 
-Runde 8 (Zeichnungsübersicht des 2D-Moduls):
+Runde 8 (Zeichnungsübersicht der 2D-Aufmaß-App):
 
 ```bash
 node tests/r8-2d-projektliste.mjs   # Ordnerstruktur, Suche, Auswahl öffnet die
@@ -236,12 +237,20 @@ Aufmaßtabelle). Ein Vergleich könnte dort nur den gewollten Unterschied
 melden – geprüft werden sie in `r5-bordbretter.mjs` und `t3-pdf.mjs`.
 
 ```bash
-git worktree add /tmp/vorher <commit-vor-der-zusammenfuehrung>   # dort heißt der Ordner noch aufmass_final_app/
+git worktree add /tmp/vorher <commit>        # beliebiger älterer Stand
 node tests/ab-vergleich-2d.mjs      /tmp/vorher   # Aufmaßregeln ATV DIN 18451,
                                                   # Eckenkorrektur, Achsen, Positionen
 node tests/ab-vergleich-aufmass.mjs /tmp/vorher   # Flächen, Längen, 50-m-Hinweise,
                                                   # Zusammenfassung, Angebots-PDF
 ```
+
+Die Vergleiche erkennen selbst, welche Fassung in der Arbeitskopie liegt: zwei
+Seiten vor dem Zusammenführen (`aufmass_final_app/`), die Suite in einem
+Dokument (`legacy-app/`) oder die getrennten Anwendungen (heute). Für die
+Trennung der Anwendungen melden beide gegen den Stand davor „rechnerisch
+identisch"; gegen den Stand vor Runde 22 weicht nur der interne Sortierindex
+der Positionsarten ab (Plane steht jetzt hinter Netz) – Reihenfolge, Texte
+und Mengen sind gleich.
 
 Beide melden „rechnerisch identisch – keine einzige Abweichung", solange an der
 Fachlogik nichts geändert wurde. Genau das ist die Abnahmebedingung für jede
@@ -310,7 +319,7 @@ Runde 12 (Hülle: Zugangssperre der Next.js-Anwendung):
 ```bash
 node tests/r12-huelle-schutz.mjs   # nichts von der App ohne Anmeldung, alte
                                    # Adressen sind kein Schlupfloch, kein
-                                   # Pfad-Ausbruch aus legacy-app/, keine
+                                   # Pfad-Ausbruch aus den App-Ordnern, keine
                                    # Geheimnisse im Repository oder im
                                    # Browser-Bündel, keine offene Registrierung
 ```
@@ -434,3 +443,23 @@ node tests/alle.mjs        # oder: npm test
 ```
 
 Jede Datei bricht beim ersten fehlgeschlagenen Test mit `ASSERT FAILED` ab.
+
+Runde 22 (Plane und Stirnseite im Eckfeld):
+
+```bash
+node tests/r22-netz-plane-stirnseite.mjs   # Plane wie Netz (Rechnung, Eingabe, Plan,
+                                           # Feldliste, PDF) mit eigener Summenzeile – im
+                                           # 2D-Aufmaß und im Aufmaß-Programm; Stirnseite
+                                           # im Eckfeld: Standard aus, Wahl des Feldes,
+                                           # Gerüsttiefe × Feldhöhe, eigene Zeile je Achse
+```
+
+Runde 23 (Cloud: getrennte Namensräume):
+
+```bash
+node tests/r23-cloud-app-trennung.mjs      # SQL-Migration 20260928 gegen PGlite: Zeichnung,
+                                           # Ordner, Freigaben und Speicherstände wandern
+                                           # verlustfrei in den Namensraum 2d, zweiter Lauf
+                                           # ohne Wirkung; lib/projekte/cloud.ts weist jeden
+                                           # Zugriff auf die andere Anwendung ab
+```

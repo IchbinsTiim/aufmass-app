@@ -1,9 +1,10 @@
 /* ===========================================================================
-   Gemeinsame Basis: Design-Tokens
+   Gemeinsame Basis: Design-Tokens  (/shared – rein technische Basics)
    ---------------------------------------------------------------------------
    Wird als erstes Stylesheet geladen. Hier stehen nur Werte, keine Bauteile –
-   Farben, Schriften, Radien, Schatten, Bewegung. Beide Module und der Hub
-   greifen darauf zu; die Modul-Stylesheets bleiben davon unabhängig.
+   Farben, Schriften, Radien, Schatten, Bewegung. Beide Anwendungen und die
+   Startseite greifen darauf zu; ihre eigenen Stylesheets liegen getrennt in
+   /aufmass, /aufmass-2d und /start.
 
    Signatur der Suite: jedes Modul hat eine eigene Akzentfarbe, die sich vom
    Startbildschirm bis in jeden Button, jede aktive Zeile und jeden Fokusring

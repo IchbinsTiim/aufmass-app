@@ -37,7 +37,7 @@
 const Tutorial2D = (() => {
 
   // Ob das Tutorial schon einmal komplett durchlaufen wurde. Liegt im
-  // Namensraum der App (core.js), nicht als loser Schlüssel daneben.
+  // Namensraum der App (basis.js), nicht als loser Schlüssel daneben.
   const SPEICHER = (typeof GK === 'object' && GK && GK.tutorial2d) || 'geruest.2d.tutorial';
   const FASSUNG  = 1;
 
@@ -560,7 +560,6 @@ const Tutorial2D = (() => {
     window.addEventListener('orientationchange', aktualisiere);
     window.addEventListener('scroll', aktualisiere, { passive: true });
     window.addEventListener('hashchange', aufAnsichtswechsel);
-    document.addEventListener('shell:ansicht', aufAnsichtswechsel);
     document.addEventListener('keydown', aufTaste, true);
     takt = setInterval(aktualisiere, 220);
 
@@ -577,7 +576,6 @@ const Tutorial2D = (() => {
     window.removeEventListener('orientationchange', aktualisiere);
     window.removeEventListener('scroll', aktualisiere);
     window.removeEventListener('hashchange', aufAnsichtswechsel);
-    document.removeEventListener('shell:ansicht', aufAnsichtswechsel);
     document.removeEventListener('keydown', aufTaste, true);
 
     if (typeof letzteAufraeumung === 'function') { letzteAufraeumung(); letzteAufraeumung = null; }

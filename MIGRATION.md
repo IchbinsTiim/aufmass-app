@@ -1,5 +1,11 @@
 # AufmaßX – Next.js, Clerk und Einladungscodes
 
+> **Hinweis (2026-09-28):** Aufmaß und 2D-Aufmaß sind inzwischen wieder
+> getrennte Anwendungen in eigenen Ordnern (`aufmass/`, `aufmass-2d/`,
+> Startseite `start/`, gemeinsame Basics `shared/`) mit getrennten Daten.
+> Dieses Dokument beschreibt einen früheren Stand; die aktuelle Struktur steht
+> in der [README](README.md).
+
 Die Aufmaß-App ist unverändert. Was sich geändert hat, ist der Weg zu ihr:
 sie wird jetzt nur noch an angemeldete, freigeschaltete Benutzer ausgeliefert.
 

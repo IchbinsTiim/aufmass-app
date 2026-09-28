@@ -1,0 +1,207 @@
+/* ===========================================================================
+   2D-Aufmaß-App – Basis-Bauteile
+   ---------------------------------------------------------------------------
+   Die wenigen allgemeinen Bauteile, die die 2D-App braucht und die früher im
+   gemeinsamen Stylesheet der Suite (style.css) standen: Grundlage, leerer
+   Zustand, Aktionsmenü, Entfernen-Knopf, Toast. Bewusst eine eigene Kopie –
+   die Aufmaß-App behält ihr Stylesheet für sich, geteilt werden nur die
+   Design-Tokens (shared/tokens.css).
+   =========================================================================== */
+
+/* ============================================================
+   Reset & Base
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Kurznamen für die Design-Tokens (shared/tokens.css), wie sie die Bauteile
+   unten verwenden. */
+:root {
+  --color-primary:        var(--accent);
+  --color-primary-dark:   var(--accent);
+  --color-danger:         var(--gefahr);
+  --color-bg:             var(--bg-deep);
+  --color-card:           var(--surface);
+  --color-text:           var(--text);
+  --color-text-secondary: var(--muted);
+  --color-border:         var(--hairline);
+  --color-border-focus:   var(--accent);
+  --radius-sm:            var(--r-control);
+  --radius-md:            var(--r-karte-klein);
+  --shadow-sm:            var(--schatten-s);
+  --shadow-md:            var(--schatten-m);
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-text);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ============================================================
+   Empty state
+   ============================================================ */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-text-secondary);
+}
+
+.empty-icon-box {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--color-border);
+  margin: 0 auto 16px;
+}
+
+.empty-state h2 {
+  font-size: 1.15rem;
+  margin-bottom: 6px;
+  color: var(--color-text);
+}
+
+.empty-state p {
+  font-size: 0.9rem;
+}
+
+/* ============================================================
+   Empty state
+   ============================================================ */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-text-secondary);
+}
+
+.empty-icon-box {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--color-border);
+  margin: 0 auto 16px;
+}
+
+.empty-state h2 {
+  font-size: 1.15rem;
+  margin-bottom: 6px;
+  color: var(--color-text);
+}
+
+.empty-state p {
+  font-size: 0.9rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
+
+/* Schwebendes Aktionsmenü (Projekt-/Ordner-Aktionen) */
+.floating-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+.floating-menu {
+  position: fixed;
+  z-index: 41;
+  width: 240px;
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--color-border);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.floating-menu-item {
+  text-align: left;
+  padding: 12px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.floating-menu-item:active { background: var(--color-bg); }
+.floating-menu-item.active { color: var(--color-primary); }
+.floating-menu-item.danger { color: var(--color-danger); }
+.floating-menu-sep {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 6px;
+}
+
+
+/* Entfernen-Knopf (×) in Listen und Blättern */
+.meas-remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+.meas-remove-btn:hover {
+  background: #fee2e2;
+  color: var(--color-danger);
+}
+
+@media (min-width: 768px) {
+  .meas-remove-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.4rem;
+  }
+}
+
+   Toast notification
+   ============================================================ */
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: rgba(28, 28, 30, 0.85);
+  color: var(--accent-kontrast);
+  padding: 10px 22px;
+  border-radius: 22px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+

@@ -230,11 +230,11 @@ assert(/banUser/.test(verzeichnis) && /status: STATUS_DEAKTIVIERT/.test(verzeich
    Prüfung stellt sicher, dass sie auch GEFÜLLT werden – an den Stellen, an
    denen die Anwendung Projekte und Ordner schreibt. */
 const cloud = fs.readFileSync(path.join(WURZEL, 'lib/projekte/cloud.ts'), 'utf8');
-assert(/INSERT INTO cloud_projekte \(id, owner_user_id, titel, inhalt, erstellt_von, geaendert_von\)/.test(cloud),
+assert(/INSERT INTO cloud_projekte \(id, owner_user_id, titel, inhalt, erstellt_von, geaendert_von(, app)?\)/.test(cloud),
   'ein neues Projekt bekommt erstellt_von und geaendert_von mit');
 assert(/UPDATE cloud_projekte p SET[\s\S]*?geaendert_von = \$5/.test(cloud),
   'jede Änderung schreibt geaendert_von nach');
-assert(/INSERT INTO cloud_ordner \(id, owner_user_id, inhalt, erstellt_von, geaendert_von\)/.test(cloud),
+assert(/INSERT INTO cloud_ordner \(id, owner_user_id, inhalt, erstellt_von, geaendert_von(, app)?\)/.test(cloud),
   'auch Ordner tragen ihre Herkunft');
 
 /* ══ 7. Aktivitätsprotokoll ════════════════════════════════════════════════ */

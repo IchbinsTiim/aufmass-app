@@ -2,7 +2,7 @@
  * Hülle der Anwendung: Anmeldung, Startseite, Abmelden.
  *
  * Die Farben und Formen sind dieselben wie in der Aufmaß-App
- * (legacy-app/core.css) – bewusst hier noch einmal notiert und nicht von
+ * (shared/tokens.css) – bewusst hier noch einmal notiert und nicht von
  * dort importiert: die App-Stylesheets werden nur an angemeldete Benutzer
  * ausgeliefert, die Anmeldeseite braucht sie aber davor.
  */

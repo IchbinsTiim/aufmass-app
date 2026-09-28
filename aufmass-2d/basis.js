@@ -1,33 +1,30 @@
 'use strict';
 
 // ============================================================================
-//  Gemeinsame Basis beider Module (Aufmaß + 2D-Aufmaß)
+//  2D-Aufmaß-App – Basis
 // ============================================================================
-// Diese Datei wird VOR script.js und viewer2d.js geladen. Sie enthält nur das,
-// was sich beide Module wirklich teilen:
+// Wird VOR viewer2d.js geladen und enthält die technischen Bausteine dieser
+// App:
 //
-//   • Speicher-Schlüssel mit Namensraum  (geruest.aufmass.* / geruest.2d.* /
-//     geruest.app.*) samt einmaliger Migration der alten, unpräfixierten
-//     Schlüssel – bestehende Daten gehen dabei nicht verloren.
-//   • Toast-Meldungen (vorher doppelt in script.js und viewer2d.js).
-//   • Zahlenformat für Maße.
+//   • Speicher-Schlüssel der 2D-App (Namensraum geruest.2d.*). Die
+//     Zeichnungen liegen in einer EIGENEN Liste (geruest.2d.zeichnungen) mit
+//     eigenen Ordnern – nicht mehr in den Projekten der Aufmaß-App.
+//   • Toast-Meldungen, Aktionsmenü, Zahlenformat.
+//   • Die Meldung „Daten haben sich geändert" für den Cloud-Abgleich.
 //
-// Die Fachlogik der Module bleibt bewusst getrennt: hier steht nichts über
-// Positionen, Aufmaßregeln oder Zeichnungen.
+// Die Aufmaß-App hat ihre eigene, getrennte Basis (aufmass/basis.js).
+// Gemeinsam sind beiden nur die Design-Tokens (shared/tokens.css) und die
+// einmalige Speicher-Migration (shared/speicher-migration.js), die vor dieser
+// Datei läuft.
 // ============================================================================
 
 const GK = {
-  // App-weit (von beiden Modulen genutzt)
-  aktuellesProjekt:     'geruest.app.aktuellesProjekt',
+  // Die Zeichnungen und ihre Ordner.
+  zeichnungen:          'geruest.2d.zeichnungen',
+  ordner:               'geruest.2d.ordner',
+  // Zuletzt geöffnete Zeichnung – wird beim nächsten Start wieder geöffnet.
+  aktuelleZeichnung:    'geruest.2d.aktuelleZeichnung',
 
-  // Modul „Aufmaß"
-  projekte:             'geruest.aufmass.projekte',
-  ordner:               'geruest.aufmass.ordner',
-  ueberstandWert:       'geruest.aufmass.ueberstandWert',
-  letztesBackup:        'geruest.aufmass.letztesBackup',
-  backupErinnerungBis:  'geruest.aufmass.backupErinnerungBis',
-
-  // Modul „2D-Aufmaß"
   favoriten:            'geruest.2d.favoriten',
   einfuegenOptionen:    'geruest.2d.einfuegenOptionen',
   pdfDesign:            'geruest.2d.pdfDesign',
@@ -40,59 +37,21 @@ const GK = {
   // Werkzeug-Menü offen/zu – bleibt über Neuladen hinweg erhalten.
   werkzeugMenue:        'geruest.2d.werkzeugMenue',
   // Feldübersicht am linken Rand ein-/ausgeklappt – bleibt über Sitzung und
-  // Projektwechsel hinweg erhalten.
+  // Zeichnungswechsel hinweg erhalten.
   feldliste:            'geruest.2d.feldliste',
-  // Ob das geführte Tutorial der 2D-App schon einmal komplett durchlaufen
-  // wurde. Nur ein Hinweis-Punkt am „?"-Knopf hängt daran – das Tutorial
-  // selbst ist jederzeit über diesen Knopf erreichbar.
+  // Ob das geführte Tutorial schon einmal komplett durchlaufen wurde. Nur ein
+  // Hinweis-Punkt am „?"-Knopf hängt daran – das Tutorial selbst ist
+  // jederzeit über diesen Knopf erreichbar.
   tutorial2d:           'geruest.2d.tutorial'
 };
 
-// Alte Schlüssel → neue Schlüssel. Beim ersten Start nach dem Zusammenführen
-// werden vorhandene Daten umgehängt (kopieren, dann alten Schlüssel entfernen).
-// Fehlt ein alter Schlüssel, passiert nichts; ist der neue schon belegt, hat
-// der neue Vorrang – die Migration überschreibt nie neuere Daten.
-const GERUEST_MIGRATION = [
-  ['aufmass_projects_v2',                      GK.projekte],
-  ['aufmass_folders_v1',                       GK.ordner],
-  ['aufmass_current_project_id',               GK.aktuellesProjekt],
-  ['aufmass_ueberstand_wert',                  GK.ueberstandWert],
-  ['aufmass_last_backup_ts',                   GK.letztesBackup],
-  ['aufmass_backup_reminder_dismissed_until',  GK.backupErinnerungBis],
-  ['av_2d_favorites_v1',                       GK.favoriten],
-  ['av_2d_paste_opts_v1',                      GK.einfuegenOptionen],
-  ['av_2d_pdf_theme',                          GK.pdfDesign],
-  ['av_2d_pdf_include_hidden',                 GK.pdfMitAusgeblendeten],
-  ['av_deviceMode',                            GK.geraetemodus]
-];
+// Früherer Name des Schlüssels – viewer2d.js greift darüber zu. Er zeigt auf
+// die zuletzt geöffnete ZEICHNUNG dieser App.
+const CURRENT_PROJECT_STORAGE_KEY = GK.aktuelleZeichnung;
 
-// Beide Module haben diesen Schlüssel bisher jeweils selbst deklariert (mit
-// identischem Wert) – daraus wäre beim Zusammenführen ein doppelt deklarierter
-// Bezeichner geworden. Jetzt steht er genau einmal hier.
-const CURRENT_PROJECT_STORAGE_KEY = GK.aktuellesProjekt;
-
-function migriereSpeicher() {
-  let umgezogen = 0;
-  GERUEST_MIGRATION.forEach(([alt, neu]) => {
-    try {
-      const wert = localStorage.getItem(alt);
-      if (wert === null) return;
-      if (localStorage.getItem(neu) === null) {
-        localStorage.setItem(neu, wert);
-        umgezogen++;
-      }
-      localStorage.removeItem(alt);
-    } catch (_) { /* privater Modus / Speicher voll → still weiterarbeiten */ }
-  });
-  return umgezogen;
-}
-
-// Läuft sofort beim Laden – vor jedem Modul-Code, der Daten liest.
-migriereSpeicher();
-
-// ── Gemeinsamer Toast ───────────────────────────────────────────────────────
-// Beide Module riefen bisher ein eigenes, identisches showToast() auf. Jetzt
-// gibt es genau eines; das Ziel-Element (#toastEl) liegt in der Shell.
+// ── Toast ───────────────────────────────────────────────────────────────────
+// Kurzmeldungen am unteren Rand; das Ziel-Element (#toastEl) steht in der
+// index.html dieser App.
 
 let toastTimer  = null;
 // Ein Toast mit Aktion („Rückgängig") hält eine noch offene Aufräumarbeit
@@ -153,24 +112,21 @@ function showToast(msg, aktion) {
   toastTimer = setTimeout(() => { toastTimer = null; toastBeenden(true); }, dauer);
 }
 
-// ── Datenänderungen zwischen den Modulen bekannt machen ─────────────────────
-// Projektliste und Ordner liegen in localStorage, beide Module halten aber
-// zusätzlich eine Kopie im Speicher (script.js: `projects`/`folders`). Wer
-// schreibt, meldet das hier; das jeweils andere Modul liest neu ein, statt
-// später mit einem veralteten Stand darüberzuschreiben.
+// ── Datenänderungen bekannt machen ─────────────────────────────────────────
+// Wer Zeichnungen oder Ordner schreibt, meldet das hier. Der Cloud-Abgleich
+// (cloud.js) hört darauf und sichert die Änderung; die Zeichnungsübersicht
+// liest nach einem Cloud-Abgleich neu ein.
 
 const GERUEST_DATEN_EVENT = 'geruest:daten';
 
-/** @param {'aufmass'|'2d'} quelle – wer geschrieben hat. */
+/** @param {'2d'|'cloud'} quelle – wer geschrieben hat. */
 function meldeDatenAenderung(quelle) {
   document.dispatchEvent(new CustomEvent(GERUEST_DATEN_EVENT, { detail: { quelle } }));
 }
 
-// ── Gemeinsames Aktionsmenü ─────────────────────────────────────────────────
+// ── Aktionsmenü ─────────────────────────────────────────────────────────────
 // Kleines, an einem Knopf verankertes Popup (Aktionen, ggf. mit Untermenüs) –
-// touch-tauglich, ohne Abhängigkeit von Browser-Kontextmenüs. Stand früher in
-// script.js und war damit nur dem Aufmaß-Modul zugänglich; die Zeichnungsliste
-// des 2D-Moduls braucht dasselbe Menü.
+// touch-tauglich, ohne Abhängigkeit von Browser-Kontextmenüs.
 
 function closeFloatingMenu() {
   document.getElementById('floatingMenu')?.remove();

@@ -24,9 +24,9 @@ export const dynamic = 'force-dynamic';
  * gelöschte Projekte und Änderungen an fremden Datensätzen.
  *
  * „Aufmaß" ist in AufmaßX kein eigener Datensatz, sondern der Teil `seiten`
- * einer Projektakte. Deshalb steht es hier je Projekt und nicht als eigene
- * Kartei – alles andere wäre eine erfundene Struktur, die es in den Daten
- * nicht gibt. Siehe lib/mitarbeiter/daten.ts.
+ * einer Projektakte der Aufmaß-App. Deshalb steht es hier je Projekt und
+ * nicht als eigene Kartei. Zeichnungen gehören zur 2D-Aufmaß-App und sind
+ * eigene Datensätze. Siehe lib/mitarbeiter/daten.ts.
  */
 export default async function MitarbeiterDetail(
   { params }: { params: Promise<{ id: string }> }
@@ -46,8 +46,10 @@ export default async function MitarbeiterDetail(
     aktivitaetenLesen(abfrage, id)
   ]);
 
-  const mitAufmass = projekte.filter(p => p.seiten > 0);
-  const mitZeichnung = projekte.filter(p => p.felder2d > 0);
+  // Die beiden Anwendungen führen getrennte Datensätze (Spalte `app`).
+  const aufmassProjekte = projekte.filter(p => p.app === 'aufmass');
+  const mitAufmass = aufmassProjekte.filter(p => p.seiten > 0);
+  const mitZeichnung = projekte.filter(p => p.app === '2d');
   const selbst = person.id === zugang.userId;
 
   return (
@@ -107,7 +109,7 @@ export default async function MitarbeiterDetail(
         ) : null}
 
         <Abschnitt titel="Erstellte Projekte" leer="Dieser Mitarbeiter hat noch kein Projekt angelegt.">
-          {projekte.length ? (
+          {aufmassProjekte.length ? (
             <table className="admin-tabelle mv-tabelle">
               <thead>
                 <tr>
@@ -115,14 +117,14 @@ export default async function MitarbeiterDetail(
                 </tr>
               </thead>
               <tbody>
-                {projekte.map(p => (
+                {aufmassProjekte.map(p => (
                   <tr key={p.id}>
                     <td data-spalte="Projektname">{p.titel}</td>
                     <td data-spalte="Erstellt">{datum(p.erstelltAm)}</td>
                     <td data-spalte="Letzte Änderung">{datumZeit(p.geaendertAm)}</td>
                     <td data-spalte="Inhalt">
                       {p.seiten} Seite{p.seiten === 1 ? '' : 'n'} · {p.positionen} Position
-                      {p.positionen === 1 ? '' : 'en'} · {p.felder2d} Feld{p.felder2d === 1 ? '' : 'er'}
+                      {p.positionen === 1 ? '' : 'en'}
                     </td>
                   </tr>
                 ))}
@@ -173,16 +175,16 @@ export default async function MitarbeiterDetail(
                     </td>
                   </tr>
                 ))}
-                {/* Die laufende Zeichnung liegt im Projekt selbst und ist kein
-                    eigener Speicherstand – sie wird trotzdem ausgewiesen,
-                    sonst fehlte die Arbeit dessen, der nie „Speichern unter"
-                    benutzt hat. */}
+                {/* Die Zeichnungen der 2D-Aufmaß-App selbst – kein benannter
+                    Speicherstand, aber die eigentliche Arbeit. Sie werden
+                    ausgewiesen, sonst fehlte die Arbeit dessen, der nie
+                    „Speichern unter" benutzt hat. */}
                 {mitZeichnung.map(p => (
                   <tr key={'p-' + p.id}>
-                    <td data-spalte="Name">Zeichnung im Projekt ({p.felder2d} Felder)</td>
-                    <td data-spalte="Projekt">{p.titel}</td>
+                    <td data-spalte="Name">{p.titel} ({p.felder2d} Feld{p.felder2d === 1 ? '' : 'er'})</td>
+                    <td data-spalte="Projekt">2D-Aufmaß</td>
                     <td data-spalte="Erstellt">{datum(p.erstelltAm)}</td>
-                    <td data-spalte="Art">Laufende Zeichnung</td>
+                    <td data-spalte="Art">Zeichnung</td>
                   </tr>
                 ))}
               </tbody>

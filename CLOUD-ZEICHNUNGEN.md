@@ -1,5 +1,11 @@
 # Cloud-Zeichnungen – Umsetzung vom 11.09.2026
 
+> **Hinweis (2026-09-28):** Aufmaß und 2D-Aufmaß sind inzwischen wieder
+> getrennte Anwendungen in eigenen Ordnern (`aufmass/`, `aufmass-2d/`,
+> Startseite `start/`, gemeinsame Basics `shared/`) mit getrennten Daten.
+> Dieses Dokument beschreibt einen früheren Stand; die aktuelle Struktur steht
+> in der [README](README.md).
+
 Basis: aktueller GitHub-main d107f55; Arbeitszweig feat/cloud-zeichnungen.
 
 ## Ist-Zustand
