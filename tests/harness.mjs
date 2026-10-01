@@ -34,6 +34,14 @@ const MIME = {
 export async function serve() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    // Statische UI-Tests haben keinen Cloud-Bestand. Eine Löschung erhält
+    // die echte API-Form "Projekt nicht gefunden", niemals eine HTML-404.
+    // Cloud-/Race-Tests überschreiben diese Antwort gezielt per Browser-Route.
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/cloud/projekte/')) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Projekt nicht gefunden.' }));
+      return;
+    }
     // Die Anwendungen verweisen auf ihre Dateien unter `/app/…` – so liefert
     // sie der geschützte Route Handler der Next.js-Hülle aus. Der Testserver
     // bildet dieselben Adressen auf dieselben Ordner ab.

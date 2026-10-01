@@ -14,9 +14,11 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { assert } from './harness.mjs';
 
 const WURZEL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const NEXT = createRequire(import.meta.url).resolve('next/dist/bin/next');
 
 // Platzhalter im Format, das Clerk erwartet – echte Schlüssel gehören weder
 // ins Repository noch in einen Testlauf. Zum Prüfen der Sperre genügt das:
@@ -70,13 +72,13 @@ assert(!verfolgt.some(d => d === '.github/workflows/pages.yml' || d === 'CNAME')
 
 // ── 2. Anwendung bauen und starten ──────────────────────────────────────────
 if (!fs.existsSync(path.join(WURZEL, '.next', 'BUILD_ID'))) {
-  console.log('  … kein Build vorhanden, npx next build läuft');
-  const bau = spawnSync('npx', ['next', 'build'], { cwd: WURZEL, env: UMGEBUNG, stdio: 'inherit' });
+  console.log('  … kein Build vorhanden, Next.js-Build läuft');
+  const bau = spawnSync(process.execPath, [NEXT, 'build', '--webpack'], { cwd: WURZEL, env: UMGEBUNG, stdio: 'inherit' });
   if (bau.status !== 0) throw new Error('next build fehlgeschlagen');
 }
 
 const port = await freierPort();
-const server = spawn('npx', ['next', 'start', '-p', String(port)], {
+const server = spawn(process.execPath, [NEXT, 'start', '-p', String(port)], {
   cwd: WURZEL, env: UMGEBUNG, stdio: ['ignore', 'pipe', 'pipe']
 });
 let serverAusgabe = '';

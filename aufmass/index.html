@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="/app/shared/tokens.css?v=20260928" />
   <link rel="stylesheet" href="/app/aufmass/style.css?v=20260928" />
   <link rel="stylesheet" href="/app/aufmass/oberflaeche.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass/auswahl.css?v=20261001" />
 </head>
 <body data-modul="aufmass">
 
@@ -71,6 +72,14 @@
 
         <div class="folder-bar" id="folderBar"></div>
 
+        <div id="projectBulkBar" class="project-bulk-bar hidden" role="region" aria-label="Aktionen für ausgewählte Projekte">
+          <span id="projectBulkInfo" role="status"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="projectBulkAll">Alle sichtbaren auswählen</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="projectBulkMove">Verschieben…</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="projectBulkStatus">Status ändern…</button>
+          <button type="button" class="btn btn-danger-ghost btn-sm" id="projectBulkDelete">Ausgewählte löschen</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="projectBulkClear">Auswahl aufheben</button>
+        </div>
         <div id="projectGrid" class="project-grid"></div>
 
         <div id="emptyState" class="empty-state hidden">
@@ -92,6 +101,7 @@
           <span class="am-fuss-status" id="cloudStatus" aria-live="polite">Cloud wird verbunden …</span>
           <span class="am-fuss-sep" aria-hidden="true">·</span>
           <button type="button" class="am-fuss-btn" id="backupAlleBtn">Alle Projekte sichern</button>
+          <button type="button" class="am-fuss-btn" id="cloudSicherungenBtn">Lokale Sicherungen</button>
         </footer>
       </main>
     </div>
@@ -351,7 +361,7 @@
        jedem App-Code (siehe shared/speicher-migration.js). -->
   <script src="/app/shared/speicher-migration.js?v=20260928"></script>
   <script src="/app/aufmass/basis.js?v=20260928"></script>
-  <script src="/app/aufmass/script.js?v=20260928"></script>
-  <script src="/app/aufmass/cloud.js?v=20260928"></script>
+  <script src="/app/aufmass/script.js?v=20261001"></script>
+  <script src="/app/aufmass/cloud.js?v=20261001"></script>
 </body>
 </html>

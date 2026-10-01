@@ -135,6 +135,29 @@ Standardmäßig ist die Option aus.
 
 ## Entwickeln und Testen
 
+### Reparatur vom 01.10.2026
+
+Checkboxen in beiden Projektübersichten erlauben eine Mehrfachauswahl;
+Umschalt-Klick wählt einen Bereich, Strg-Klick (Mac: Cmd) einzelne Karten.
+Die Aktionsleiste bietet Verschieben und bestätigtes Löschen, im Aufmaß auch
+eine gemeinsame Statusänderung. Fehlgeschlagene Löschungen bleiben sichtbar
+und ausgewählt.
+
+Die Gerüsttiefe akzeptiert Dezimalkomma sowie Meter/Zentimeter. Stirnseiten
+von Netz und Plane bleiben auch bei mehreren Ecken am selben Feld getrennte
+Rechenzeilen. Details, Ursachen und Dateiliste:
+[Änderungsbericht](AENDERUNGEN-2026-10-01.md).
+
+Vor Veröffentlichung die neue Migration
+`db/migrations/20261001_cloud_loeschschutz.sql` ausführen (siehe
+[Datenbank](db/README.md)). Sie bewahrt nur gelöschte IDs als Sperrvermerk,
+keine Projektinhalte. Der Cloud-Abgleich bestätigt jede Speicherung einzeln;
+Löschen wartet auf die Serverantwort. Veraltete Geräte können gelöschte IDs
+nicht neu anlegen. Bewusstes „Rückgängig“ erzeugt eine neue ID.
+Noch ungesicherte Änderungen eines inzwischen entfernten Projekts werden
+unter „Lokale Sicherungen“ als JSON-Notfallsicherung exportierbar gehalten.
+Echte Bearbeitungskonflikte erzeugen eine deutlich benannte lokale Kopie.
+
 ```bash
 npm install
 npm run dev            # Next.js-Hülle mit Anmeldung (siehe .env.example, MIGRATION.md)

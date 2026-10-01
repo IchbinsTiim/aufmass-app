@@ -204,11 +204,12 @@ await zurListe();
 
 await page.click('#tdAuswahlBtn');
 await page.waitForTimeout(200);
-assert(await page.isVisible('#tdBulkBar'), 'die Auswahlleiste erscheint');
+assert(!await page.isVisible('#tdBulkBar'), 'ohne ausgewählte Zeichnung bleibt die Aktionsleiste verborgen');
 await page.click('#tdProjectGrid .td-project-card:has-text("Sammel A")');
 await page.click('#tdProjectGrid .td-project-card:has-text("Sammel B")');
 await page.waitForTimeout(200);
 assert((await page.textContent('#tdBulkInfo')).startsWith('2 '), 'zwei Zeichnungen sind ausgewählt');
+assert(await page.isVisible('#tdBulkBar'), 'mit Auswahl erscheint die Aktionsleiste');
 await page.click('#tdBulkLoeschen');
 await page.waitForSelector('#tdLoeschOverlay:not(.hidden)');
 const namenImDialog = await page.$$eval('#tdLoeschListe li', els => els.map(e => e.textContent));

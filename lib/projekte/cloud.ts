@@ -111,15 +111,15 @@ export async function arbeitsbereichAuflisten(userId: string, istAdmin: boolean,
          LEFT JOIN cloud_projekt_freigaben f ON f.projekt_id = p.id AND f.user_id = $1
         WHERE p.app = $3
           AND ($2::boolean OR p.owner_user_id = $1 OR f.user_id IS NOT NULL)
-        ORDER BY p.geaendert_am DESC
-        LIMIT 500`, [userId, istAdmin, app]
+        ORDER BY p.geaendert_am DESC`, [userId, istAdmin, app]
     ),
     verbindung(
       `SELECT id, inhalt, revision FROM cloud_ordner
-        WHERE owner_user_id = $1 AND app = $2 ORDER BY geaendert_am DESC LIMIT 200`, [userId, app]
+        WHERE owner_user_id = $1 AND app = $2 ORDER BY geaendert_am DESC`, [userId, app]
     )
   ]);
   return {
+    vollstaendig: true,
     projects: projektZeilen.map(z => zeileZuProjekt(z, userId, istAdmin)),
     folders: ordnerZeilen.map(zeileZuOrdner)
   };
@@ -157,6 +157,13 @@ export async function projektSpeichern(
   }
 
   if (!vorher) {
+    // Eine bekannte Revision bedeutet ÄNDERN, niemals erneutes Anlegen.
+    // Das gilt auch für Löschungen aus der Zeit vor dem Löschvermerk.
+    if (eingabe.revision != null) {
+      const vorhanden = await verbindung('SELECT id FROM cloud_projekte WHERE id = $1', [id]);
+      if (vorhanden.length) throw new CloudFehler(403, 'Für dieses Projekt fehlt die Berechtigung.');
+      throw new CloudFehler(410, 'Dieses Projekt wurde bereits gelöscht.');
+    }
     const neu = await verbindung(
       `INSERT INTO cloud_projekte (id, owner_user_id, titel, inhalt, erstellt_von, geaendert_von, app)
        VALUES ($1, $2, $3, $4::jsonb, $2, $2, $5)
@@ -209,7 +216,15 @@ export async function projektLoeschen(
   const id = textId(idWert, 'Projekt-ID');
   const vorher = await projektHolen(id, userId, istAdmin);
   // Ein Datensatz der anderen Anwendung existiert aus Sicht dieser nicht.
-  if (!vorher || vorher.app !== app) throw new CloudFehler(404, 'Projekt nicht gefunden.');
+  if (!vorher) {
+    const geloescht = await db()(
+      'SELECT id FROM cloud_geloeschte_projekte WHERE id = $1 AND app = $2 AND (owner_user_id = $3 OR $4::boolean)',
+      [id, app, userId, istAdmin]
+    );
+    if (geloescht.length) return; // Wiederholung nach verlorener HTTP-Antwort.
+    throw new CloudFehler(404, 'Projekt nicht gefunden.');
+  }
+  if (vorher.app !== app) throw new CloudFehler(404, 'Projekt nicht gefunden.');
   if (rechte && !hatRecht(rechte, 'projekte.loeschen')) {
     throw new CloudFehler(403, 'Ihre Rolle darf Projekte nicht löschen.');
   }

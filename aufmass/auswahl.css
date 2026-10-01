@@ -1,0 +1,15 @@
+.am-scope .project-bulk-bar {
+  position: sticky; top: 64px; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 12px; margin-bottom: 16px; border: 1px solid var(--accent-rand);
+  border-radius: 12px; background: var(--surface, #1b222b);
+  box-shadow: 0 6px 20px #0003;
+}
+.am-scope .project-bulk-bar.hidden { display: none; }
+.am-scope #projectBulkInfo { flex: 1 1 180px; font-weight: 600; }
+.am-scope .project-card2.selected { outline: 2px solid var(--accent, #b5d394); outline-offset: 2px; }
+.am-scope .project-select { width: 28px; height: 28px; margin: 8px 4px 8px 0; cursor: pointer; accent-color: #b5d394; }
+.am-scope .project-card2[aria-busy="true"] { opacity: .65; pointer-events: none; }
+.am-scope .project-delete-status { padding-top: 8px; font-weight: 600; }
+.am-scope .project-card2:focus-visible { outline: 2px solid #b5d394; outline-offset: 4px; }
+.am-scope .project-bulk-bar button { min-height: 44px; }
