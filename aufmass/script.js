@@ -28,6 +28,9 @@ const PROJECT_STATUS_LABEL = {
 let projects = [];
 let folders = [];
 let currentProjectId = null;
+const projektAuswahl = new Set();
+let projektAuswahlAnker = null;
+let projektAktionLaeuft = false;
 
 // Aktueller Filter-/Sortier-/Suchzustand der Projektübersicht (nur UI-Zustand,
 // nicht persistiert).
@@ -159,6 +162,7 @@ function loadProjects() {
 }
 
 function saveProjects() {
+  projects = projects.filter(p => !window.CloudSpeicher?.istGeloescht(p.id));
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
   // Der Cloud-Abgleich sichert die Änderung (siehe cloud.js).
   meldeDatenAenderung('aufmass');
@@ -776,6 +780,7 @@ function renameProjectPrompt(proj) {
 
 function duplicateProject(proj) {
   const copy = JSON.parse(JSON.stringify(proj));
+  delete copy._cloud;
   copy.id = genId('proj');
   copy.name = (getProjectName(proj) + ' (Kopie)').trim();
   const today = new Date().toISOString().slice(0, 10);
@@ -791,6 +796,7 @@ function duplicateProject(proj) {
 function deleteProjectFromOverview(proj) {
   if (!confirm(`Projekt "${getProjectName(proj)}" wirklich löschen?`)) return;
   void deleteProjectNachCloudFreigabe(proj, () => {
+  loadProjects();
   const id = proj.id;
   projects = projects.filter(p => p.id !== id);
   saveProjects();
@@ -805,6 +811,65 @@ function deleteProjectFromOverview(proj) {
 async function deleteProjectNachCloudFreigabe(proj, fortsetzen) {
   if (window.CloudSpeicher && !(await window.CloudSpeicher.loeschen(proj))) return;
   fortsetzen();
+}
+
+function projektAuswahlAendern(id, erweitert) {
+  if (projektAktionLaeuft) return;
+  const ids = getFilteredSortedProjects().map(p => p.id);
+  const start = ids.indexOf(projektAuswahlAnker), ende = ids.indexOf(id);
+  if (erweitert && start >= 0 && ende >= 0) {
+    ids.slice(Math.min(start, ende), Math.max(start, ende) + 1).forEach(i => projektAuswahl.add(i));
+  } else {
+    if (projektAuswahl.has(id)) projektAuswahl.delete(id); else projektAuswahl.add(id);
+    projektAuswahlAnker = id;
+  }
+  renderProjectOverview();
+}
+
+function projektAuswahlLeiste() {
+  const sichtbar = new Set(getFilteredSortedProjects().map(p => p.id));
+  Array.from(projektAuswahl).forEach(id => { if (!sichtbar.has(id)) projektAuswahl.delete(id); });
+  const bar = document.getElementById('projectBulkBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !projektAuswahl.size);
+  document.getElementById('projectBulkInfo').textContent = projektAktionLaeuft
+    ? 'Löschung wird bestätigt …' : projektAuswahl.size + ' Projekt(e) ausgewählt';
+  bar.querySelectorAll('button').forEach(b => { b.disabled = projektAktionLaeuft; });
+}
+
+function ausgewaehlteProjekteAendern(patch) {
+  loadProjects();
+  let anzahl = 0;
+  projects.forEach(p => {
+    if (!projektAuswahl.has(p.id) || p._cloud?.rolle === 'lesen') return;
+    Object.assign(p, patch, { geaendert: new Date().toISOString().slice(0, 10) });
+    anzahl++;
+  });
+  saveProjects(); renderProjectOverview();
+  showToast(anzahl + ' Projekt(e) geändert – Cloud-Sicherung läuft');
+}
+
+async function ausgewaehlteProjekteLoeschen() {
+  if (projektAktionLaeuft || !projektAuswahl.size) return;
+  const ziel = projects.filter(p => projektAuswahl.has(p.id));
+  if (!confirm(ziel.length + ' ausgewählte Projekte wirklich löschen?\n\n' + ziel.map(getProjectName).join('\n'))) return;
+  projektAktionLaeuft = true;
+  renderProjectOverview();
+  let anzahl = 0;
+  try {
+    for (const p of ziel) {
+      if (window.CloudSpeicher && !(await window.CloudSpeicher.loeschen(p))) continue;
+      loadProjects(); // während des Wartens eingegangene Stände erhalten
+      const nochLokal = projects.some(x => x.id === p.id);
+      projects = projects.filter(x => x.id !== p.id);
+      projektAuswahl.delete(p.id);
+      if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === p.id) localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+      if (nochLokal) saveProjects();
+      anzahl++;
+    }
+  } finally { projektAktionLaeuft = false; renderProjectOverview(); }
+  showToast(anzahl + ' von ' + ziel.length + ' Projekten gelöscht' +
+    (anzahl < ziel.length ? '. Nicht gelöschte bleiben ausgewählt.' : '.'));
 }
 
 function openProjectActionMenu(proj, anchorEl) {
@@ -824,6 +889,12 @@ function openProjectActionMenu(proj, anchorEl) {
 function createProjectCard(proj) {
   const card = document.createElement('div');
   card.className = 'project-card2';
+  card.dataset.id = proj.id;
+  card.classList.toggle('selected', projektAuswahl.has(proj.id));
+  const laeuft = window.CloudSpeicher?.wirdGeloescht(proj.id) === true;
+  card.setAttribute('aria-busy', String(laeuft));
+  card.tabIndex = 0;
+  card.setAttribute('role', 'group');
   const typ = proj.geruesttyp || 'fassade';
   const seitenAnzahl = (proj.seiten || []).length;
   const bauherr = proj.anschrift?.bauherr || '';
@@ -837,6 +908,8 @@ function createProjectCard(proj) {
 
   card.innerHTML = `
     <div class="project-card2-top">
+      <input type="checkbox" class="project-select" aria-label="Projekt auswählen"
+        ${projektAuswahl.has(proj.id) ? 'checked' : ''} ${laeuft || projektAktionLaeuft ? 'disabled' : ''} />
       <span class="project-card2-badge ${typ}">${getTypeBadge(typ)}</span>
       <span class="project-card2-status status-${proj.status}">${PROJECT_STATUS_LABEL[proj.status] || ''}</span>
       <button type="button" class="project-card2-menu-btn" aria-label="Aktionen">⋯</button>
@@ -851,11 +924,34 @@ function createProjectCard(proj) {
     ${ersteller ? `<div class="project-card2-owner">Erstellt von: ${ersteller}</div>` : ''}
   `;
 
+  const checkbox = card.querySelector('.project-select');
+  checkbox.setAttribute('aria-label', getProjectName(proj) + ' auswählen');
+  checkbox.addEventListener('click', ev => {
+    ev.stopPropagation(); projektAuswahlAendern(proj.id, ev.shiftKey);
+  });
+  if (laeuft) {
+    const hinweis = document.createElement('div');
+    hinweis.className = 'project-delete-status';
+    hinweis.textContent = 'Wird gelöscht …';
+    card.appendChild(hinweis);
+  }
   card.querySelector('.project-card2-menu-btn').addEventListener('click', ev => {
     ev.stopPropagation();
     openProjectActionMenu(proj, ev.currentTarget);
   });
-  card.addEventListener('click', () => requestOpenProject(proj));
+  card.addEventListener('click', ev => {
+    if (laeuft || projektAktionLaeuft) return;
+    if (ev.ctrlKey || ev.metaKey || ev.shiftKey || projektAuswahl.size) {
+      projektAuswahlAendern(proj.id, ev.shiftKey); return;
+    }
+    requestOpenProject(proj);
+  });
+  card.addEventListener('keydown', ev => {
+    if (ev.target !== card || !['Enter', ' '].includes(ev.key)) return;
+    ev.preventDefault();
+    if (ev.key === ' ' || ev.ctrlKey || ev.metaKey || ev.shiftKey) projektAuswahlAendern(proj.id, ev.shiftKey);
+    else if (!laeuft && !projektAktionLaeuft) requestOpenProject(proj);
+  });
   return card;
 }
 
@@ -866,6 +962,7 @@ function renderProjectOverview() {
   if (!gridEl) return;
 
   aktualisiereAnsichtsUmschalter();
+  projektAuswahlLeiste();
   renderFolderBar();
   renderBackupReminder();
 
@@ -1269,9 +1366,10 @@ function deleteCurrentProject() {
   const projekt = getCurrentProject();
   if (!projekt) return;
   void deleteProjectNachCloudFreigabe(projekt, () => {
-  projects = projects.filter(p => p.id !== currentProjectId);
+  loadProjects();
+  projects = projects.filter(p => p.id !== projekt.id);
   saveProjects();
-  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === currentProjectId) {
+  if (localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY) === projekt.id) {
     localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
   }
   currentProjectId = null;
@@ -3347,7 +3445,7 @@ function renderBackupReminder() {
     ? 'Noch kein Backup erstellt.'
     : `Seit ${days} Tagen kein Backup.`;
   banner.innerHTML = `
-    <span class="backup-reminder-text">💾 ${msg} Alle Projekte liegen nur auf diesem Gerät.</span>
+    <span class="backup-reminder-text">💾 ${msg} Ein zusätzlicher Export sichert Ihre Projekte als Datei.</span>
     <span class="backup-reminder-actions">
       <button type="button" class="backup-reminder-export" id="backupReminderExportBtn">Jetzt exportieren</button>
       <button type="button" class="backup-reminder-dismiss" id="backupReminderDismissBtn" aria-label="Später erinnern">×</button>
@@ -3388,6 +3486,7 @@ function handleImportFile(e) {
         projects[existing] = data;
       } else {
         data.id = genId('proj');
+        delete data._cloud;
         projects.push(data);
       }
       saveProjects();
@@ -3451,6 +3550,22 @@ function initApp() {
   }
 
   document.getElementById('newProjectBtn')?.addEventListener('click', createNewProject);
+  document.getElementById('projectBulkClear')?.addEventListener('click', () => {
+    projektAuswahl.clear(); projektAuswahlAnker = null; renderProjectOverview();
+  });
+  document.getElementById('projectBulkAll')?.addEventListener('click', () => {
+    getFilteredSortedProjects().forEach(p => projektAuswahl.add(p.id)); renderProjectOverview();
+  });
+  document.getElementById('projectBulkDelete')?.addEventListener('click', ausgewaehlteProjekteLoeschen);
+  document.getElementById('projectBulkMove')?.addEventListener('click', e => {
+    openFloatingMenu(e.currentTarget, [{ label: 'Ohne Ordner', onClick: () => ausgewaehlteProjekteAendern({ folderId: null }) },
+      ...folders.map(f => ({ label: f.name, onClick: () => ausgewaehlteProjekteAendern({ folderId: f.id }) }))]);
+  });
+  document.getElementById('projectBulkStatus')?.addEventListener('click', e => {
+    openFloatingMenu(e.currentTarget, PROJECT_STATUS.map(s => ({
+      label: PROJECT_STATUS_LABEL[s], onClick: () => ausgewaehlteProjekteAendern({ status: s })
+    })));
+  });
   // Gesamt-Sicherung aller Projekte (JSON) – stand früher zusätzlich in der
   // Fußzeile des Startbildschirms, der seit der Trennung keine Daten kennt.
   document.getElementById('backupAlleBtn')?.addEventListener('click', exportAllProjectsBackup);
@@ -3584,8 +3699,20 @@ const AufmassModul = (() => {
      *  eingespielt hat. */
     frischeDatenLaden() {
       if (!gemountet) return;
+      const vorher = getCurrentProject();
+      const offen = this.imProjekt();
       loadProjects();
       loadFolders();
+      const nachher = getCurrentProject();
+      if (offen && vorher && !nachher) {
+        clearTimeout(autosaveTimer); autosaveTimer = null;
+        currentProjectId = null;
+        localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+        showScreen('homeScreen');
+      } else if (offen && nachher && !autosaveTimer &&
+          JSON.stringify({ ...vorher, _cloud: undefined }) !== JSON.stringify({ ...nachher, _cloud: undefined })) {
+        openProject(nachher.id, { keepScreen: true });
+      }
       renderProjectOverview();
       renderBackupReminder();
     },

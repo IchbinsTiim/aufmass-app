@@ -463,3 +463,21 @@ node tests/r23-cloud-app-trennung.mjs      # SQL-Migration 20260928 gegen PGlite
                                            # ohne Wirkung; lib/projekte/cloud.ts weist jeden
                                            # Zugriff auf die andere Anwendung ab
 ```
+# Ergänzungen vom 01.10.2026
+
+- `r24-stirn-breiten.mjs`: Netz/Plane an zwei Ecken desselben Feldes;
+  50, 73, 73,5, 81, 97, 109 und 123 cm, feldweise Höhen, Rechenzeilen im
+  PDF-Testdouble, Dezimalkomma und Einheitenwahl.
+- `r25-cloud-loeschen.mjs`: beide produktiven Cloud-Adapter mit verzögerten
+  Antworten, einzelnen Speicherfehlern, Timeout, Authentifizierungsfehlern,
+  Konflikten, Reload und Schlüsselreihenfolge aus Postgres.
+- `r26-cloud-loeschschutz-db.mjs`: echte SQL-Anweisungen und Trigger mit
+  PGlite; Löschung einschließlich Unterdaten, Wiederholung, gesperrte IDs,
+  neue Kopien und Transaktions-Rollback.
+- `r27-projekt-mehrfachauswahl.mjs`: beide Browseroberflächen mit kontrollierter
+  Cloud-API; Checkboxen, Strg/Cmd/Umschalt, gemeinsames Verschieben,
+  serverbestätigte Sammellöschung mit Teilfehler, Reload und iPad-Layout.
+
+Alle vier laufen mit `node tests/alle.mjs`. Die Browser-Cloud ist dabei
+kontrolliert simuliert; der separate SQL-Test verwendet die produktiven
+Serverfunktionen. Produktionsprojekte werden von Tests nicht gelöscht.

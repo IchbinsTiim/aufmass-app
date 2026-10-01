@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="/app/aufmass-2d/basis.css?v=20260928" />
   <link rel="stylesheet" href="/app/aufmass-2d/viewer2d.css?v=20260928" />
   <link rel="stylesheet" href="/app/aufmass-2d/oberflaeche.css?v=20260928" />
+  <link rel="stylesheet" href="/app/aufmass-2d/auswahl.css?v=20261001" />
   <link rel="stylesheet" href="/app/aufmass-2d/zeichnungen.css?v=20260928" />
   <link rel="stylesheet" href="/app/aufmass-2d/tutorial.css?v=20260928" />
 </head>
@@ -72,10 +73,12 @@
                 title="Mehrere Zeichnungen auswählen und löschen">Auswählen</button>
       </div>
 
-      <div id="tdBulkBar" class="td-bulk-bar hidden">
-        <span id="tdBulkInfo" class="td-bulk-info">0 Zeichnungen ausgewählt</span>
+      <div id="tdBulkBar" class="td-bulk-bar hidden" role="region" aria-label="Aktionen für ausgewählte Zeichnungen">
+        <span id="tdBulkInfo" class="td-bulk-info" role="status">0 Zeichnungen ausgewählt</span>
         <button type="button" id="tdBulkAlle" class="td-leiste-btn">Alle</button>
-        <button type="button" id="tdBulkLoeschen" class="td-leiste-btn gefahr" disabled>Löschen</button>
+        <button type="button" id="tdBulkVerschieben" class="td-leiste-btn">Verschieben…</button>
+        <button type="button" id="tdBulkLoeschen" class="td-leiste-btn gefahr" disabled>Ausgewählte löschen</button>
+        <button type="button" id="tdBulkAufheben" class="td-leiste-btn">Auswahl aufheben</button>
       </div>
 
       <div id="tdFolderBar" class="td-folder-bar"></div>
@@ -102,6 +105,7 @@
       <footer class="td-fuss">
         <button type="button" class="td-leiste-btn" id="cloudAktualisierenBtn">Cloud aktualisieren</button>
         <span class="td-fuss-status" id="cloudStatus" aria-live="polite">Cloud wird verbunden …</span>
+        <button type="button" class="td-leiste-btn" id="cloudSicherungenBtn">Lokale Sicherungen</button>
       </footer>
     </div>
 
@@ -385,8 +389,8 @@
        jedem App-Code (siehe shared/speicher-migration.js). -->
   <script src="/app/shared/speicher-migration.js?v=20260928"></script>
   <script src="/app/aufmass-2d/basis.js?v=20260928"></script>
-  <script src="/app/aufmass-2d/viewer2d.js?v=20260928"></script>
-  <script src="/app/aufmass-2d/cloud.js?v=20260928"></script>
+  <script src="/app/aufmass-2d/viewer2d.js?v=20261001"></script>
+  <script src="/app/aufmass-2d/cloud.js?v=20261001"></script>
   <script src="/app/aufmass-2d/zeichnungen.js?v=20260928"></script>
   <!-- Das Tutorial liegt bewusst NACH viewer2d.js: es ruft dessen Funktionen
        (closeSheet, openAddSheet, setWerkzeugPanel) auf, statt sie nachzubauen. -->

@@ -74,6 +74,23 @@ Speicherstände aus `cloud_zeichnungen`. Erst danach verliert das
 Aufmaß-Projekt das Feld `zeichnung2d`; seine Revision bleibt. Wiederholbar,
 ein zweiter Lauf ändert nichts – geprüft in `tests/r23-cloud-app-trennung.mjs`.
 
+### Löschschutz (2026-10-01)
+
+```bash
+psql "$DATABASE_URL" -f db/migrations/20261001_cloud_loeschschutz.sql
+```
+
+Vor dem App-Update ausführen. Voraussetzung ist die App-Trennung vom 28.09.
+Die wiederholbare Transaktion ergänzt `cloud_geloeschte_projekte` und zwei
+Trigger. Beim DELETE entsteht atomar ein kleiner Sperrvermerk (ID, App,
+Eigentümer und Löschzeit), während Projektinhalt, Freigaben und benannte
+Speicherstände wirklich entfernt werden. INSERT prüft auch nach dem Warten
+auf eine gleichzeitige Löschung, ob eine alte ID gesperrt ist.
+Bestehende Projekte werden bei der Migration weder verändert noch gelöscht.
+Die Vermerke nicht unabhängig vom Projektbestand zurücksetzen: Sie schützen
+gegen alte Geräte und noch offene Tabs. Ein bewusster Restore verwendet eine
+neue ID. Tests: `tests/r26-cloud-loeschschutz-db.mjs`.
+
 ## Was hier bewusst NICHT enthalten ist
 
 Benutzerstammdaten. Name, E-Mail, Registrierungsdatum, letzter Login und die

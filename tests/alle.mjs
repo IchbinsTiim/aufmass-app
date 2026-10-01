@@ -41,7 +41,11 @@ const DATEIEN = [
   'r20-pdf-beschriftung.mjs',
   'r21-zeichnung-navigation.mjs',
   'r22-netz-plane-stirnseite.mjs',
-  'r23-cloud-app-trennung.mjs'
+  'r23-cloud-app-trennung.mjs',
+  'r24-stirn-breiten.mjs',
+  'r25-cloud-loeschen.mjs',
+  'r26-cloud-loeschschutz-db.mjs',
+  'r27-projekt-mehrfachauswahl.mjs'
 ];
 
 const fehlgeschlagen = [];

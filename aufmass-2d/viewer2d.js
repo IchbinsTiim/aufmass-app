@@ -20,6 +20,15 @@ const FIELD_PRESETS = [0.73, 1.09, 1.57, 2.07, 2.57, 3.07];
 // Gängige Systembreiten – die Gerüsttiefe ist damit ein Tipp statt einer Eingabe.
 const TIEFE_PRESETS = [0.73, 1.09];
 
+// Maße bleiben intern Meter. Freie Eingaben akzeptieren Dezimalkomma und
+// ausdrücklich angegebene Zentimeter; keine automatische Größen-Schätzung.
+function leseGeruesttiefe(wert, einheit = 'm') {
+  const m = /^\s*(\d+(?:[.,]\d+)?|[.,]\d+)\s*(cm|m)?\s*$/i.exec(String(wert));
+  if (!m) return null;
+  const n = Number(m[1].replace(',', '.')) / ((m[2] || einheit).toLowerCase() === 'cm' ? 100 : 1);
+  return Number.isFinite(n) && n >= 0.1 ? Math.round(n * 10000) / 10000 : null;
+}
+
 // ── Positionen pro Feld ─────────────────────────────────────────────────────
 // Jedes Feld ist ein Gerüst-Feld (Länge + Höhen). Zusätzlich kann ein Feld
 // mehrere Positionen besitzen (Konsole, Innengeländer, Netz, Dachfang …).
@@ -850,6 +859,7 @@ function loadLinkedProjects() {
  */
 function schreibeLinkedProjects(list) {
   try {
+    list = list.filter(p => !window.CloudSpeicher?.istGeloescht(p.id));
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
   } catch (err) {
     // Kein stilles Verschlucken: voller Speicher oder privater Modus müssen
@@ -924,6 +934,8 @@ function aktuelleZeichnungsDaten() {
 /** Schreibt die aktuelle Zeichnung in das verknüpfte Projekt (ohne Verzögerung). */
 function writeToLinkedProject() {
   if (!linkedProjectId) return;
+  if (window.CloudSpeicher?.wirdGeloescht(linkedProjectId)) return;
+  if (dokumentBasis !== null && !hatUngespeicherteAenderungen()) return;
   const list = loadLinkedProjects();
   const idx = list.findIndex(p => p.id === linkedProjectId);
   // Das Projekt ist zwischenzeitlich gelöscht worden – dann gibt es nichts
@@ -5802,10 +5814,13 @@ function openProjektSheet() {
       ).join('')}
     </div>
     <div class="sheet-adj-row">
-      <input type="number" class="sheet-inp" id="scaffDepth"
-             min="0.10" step="0.01" inputmode="decimal" aria-label="Gerüsttiefe in Metern" />
-      <span class="sheet-unit">m</span>
+      <input type="text" class="sheet-inp" id="scaffDepth"
+             inputmode="decimal" aria-label="Gerüsttiefe" aria-describedby="scaffDepthHint" />
+      <select id="scaffDepthUnit" class="sheet-inp" aria-label="Einheit der Gerüsttiefe">
+        <option value="m">m</option><option value="cm">cm</option>
+      </select>
     </div>
+    <p class="pdf-sheet-note" id="scaffDepthHint">Zum Beispiel 0,73 m oder 73 cm.</p>
 
     <div class="sheet-section-label">Vorlage (ersetzt die Zeichnung)</div>
     <div class="sheet-std-btns">
@@ -5835,6 +5850,7 @@ function openProjektSheet() {
   document.body.appendChild(sheet);
 
   const depthInp = sheet.querySelector('#scaffDepth');
+  const depthUnit = sheet.querySelector('#scaffDepthUnit');
   const markiereTiefe = () => sheet.querySelectorAll('[data-depth]').forEach(b =>
     b.classList.toggle('active', Math.abs(parseFloat(b.dataset.depth) - state.depth) < 0.005));
 
@@ -5844,7 +5860,9 @@ function openProjektSheet() {
   const setzeTiefe = v => {
     if (!(v > 0)) return;
     state.depth = v;
-    depthInp.value = v;
+    depthInp.value = String(depthUnit.value === 'cm' ? +(v * 100).toFixed(2) : v).replace('.', ',');
+    depthInp.setCustomValidity('');
+    depthInp.removeAttribute('aria-invalid');
     markiereTiefe();
     invalidateEckenCache();
     renderAll();
@@ -5853,7 +5871,17 @@ function openProjektSheet() {
 
   sheet.querySelectorAll('[data-depth]').forEach(b =>
     b.addEventListener('click', () => setzeTiefe(parseFloat(b.dataset.depth))));
-  depthInp.addEventListener('input', e => setzeTiefe(parseFloat(e.target.value)));
+  depthInp.addEventListener('change', () => {
+    const v = leseGeruesttiefe(depthInp.value, depthUnit.value);
+    if (v == null) {
+      depthInp.setCustomValidity('Bitte eine Gerüsttiefe ab 10 cm eingeben.');
+      depthInp.setAttribute('aria-invalid', 'true');
+      depthInp.reportValidity();
+      return;
+    }
+    setzeTiefe(v);
+  });
+  depthUnit.addEventListener('change', () => setzeTiefe(state.depth));
 
   // Eine Vorlage ersetzt die vorhandene Zeichnung. Statt vorher zu fragen –
   // ein Klick mehr bei jedem gewollten Fall – wird sie eingesetzt und lässt
@@ -6974,7 +7002,7 @@ function renderWzMasse() {
   tRow.className = 'wz-preset-row';
   const setzeTiefe = v => {
     if (!(v > 0)) return;
-    state.depth = +v.toFixed(2);
+    state.depth = v;
     invalidateEckenCache();
     renderAll(); scheduleAutosave2d();
   };
@@ -6991,10 +7019,15 @@ function renderWzMasse() {
   const tFrei = document.createElement('div');
   tFrei.className = 'wz-eingabe-row';
   const tInp = document.createElement('input');
-  tInp.type = 'number'; tInp.className = 'wz-eingabe';
-  tInp.min = '0.10'; tInp.step = '0.01'; tInp.inputMode = 'decimal';
+  tInp.type = 'text'; tInp.className = 'wz-eingabe';
+  tInp.inputMode = 'decimal'; tInp.setAttribute('aria-label', 'Gerüsttiefe in Metern oder mit cm');
   tInp.value = state.depth;
-  tInp.addEventListener('change', () => setzeTiefe(parseFloat(tInp.value)));
+  tInp.addEventListener('change', () => {
+    const v = leseGeruesttiefe(tInp.value);
+    tInp.setCustomValidity(v == null ? 'Bitte z. B. 0,73 m oder 73 cm eingeben.' : '');
+    if (v == null) { tInp.reportValidity(); return; }
+    setzeTiefe(v);
+  });
   const tUnit = document.createElement('span');
   tUnit.className = 'wz-eingabe-unit'; tUnit.textContent = 'm';
   tFrei.appendChild(tInp); tFrei.appendChild(tUnit);
@@ -8569,7 +8602,7 @@ function aggregatePositions(bays) {
   stirnseitenListe().forEach(st => {
     if (!inMenge.has(st.bay.id)) return;
     const p = POS_BY_KEY[st.cat];
-    const key = st.cat + '|stirnseite|' + st.bay.id;
+    const key = st.cat + '|stirnseite|' + st.key + '|' + st.bay.id;
     const a = agg[key] || (agg[key] = {
       color: p.color,
       label: `${p.label} · Stirnseite ${bayName(st.bay)}`,
@@ -9771,7 +9804,8 @@ function stirnMasse(bay) {
 /** Rechenweg einer Stirnseite, z. B. „0,73 × 10,00 m = 7,30 m²". */
 function stirnText(m) {
   const h = m.hoehe != null ? m.hoehe.toFixed(2).replace('.', ',') : '?';
-  const b = m.breite.toFixed(2).replace('.', ',');
+  const b = (Number.isInteger(m.breite * 100) ? m.breite.toFixed(2)
+    : String(+m.breite.toFixed(4))).replace('.', ',');
   return `${b} × ${h} m` + (m.flaeche != null ? ` = ${fmtQty(m.flaeche)} m²` : '');
 }
 
@@ -12639,6 +12673,13 @@ function init() {
     setzeAuswahlModus(!tdAuswahlModus);
   });
   document.getElementById('tdBulkAlle')?.addEventListener('click', waehleAlleSichtbaren);
+  document.getElementById('tdBulkAufheben')?.addEventListener('click', () => setzeAuswahlModus(false));
+  document.getElementById('tdBulkVerschieben')?.addEventListener('click', e => {
+    openFloatingMenu(e.currentTarget, [
+      { label: 'Ohne Ordner', onClick: () => verschiebeAusgewaehlteZeichnungen(null) },
+      ...loadLinkedFolders().map(o => ({ label: o.name, onClick: () => verschiebeAusgewaehlteZeichnungen(o.id) }))
+    ]);
+  });
   document.getElementById('tdBulkLoeschen')?.addEventListener('click', () => {
     if (!tdAuswahl.size) return;
     frageZeichnungenLoeschen(Array.from(tdAuswahl));
@@ -12650,6 +12691,21 @@ function init() {
   // einzulesen, zeigte die Liste hier einen veralteten Stand.
   document.addEventListener(GERUEST_DATEN_EVENT, e => {
     if (e.detail && e.detail.quelle === '2d') return;
+    if (linkedProjectId && !loadLinkedProjects().some(p => p.id === linkedProjectId)) schliesseZeichnung();
+    else if (linkedProjectId && !hatUngespeicherteAenderungen()) {
+      // Ein sauberer, geöffneter Editor muss den neuen Cloud-Stand ebenfalls
+      // laden. Sonst überschreibt sein nächster Strich den Stand des Kollegen.
+      const vorher = serializeUndoState();
+      loadFromLinkedProject();
+      const nachher = serializeUndoState();
+      if (nachher !== vorher) {
+        schliesseOffeneOberflaechen();
+        selectedSi = null; selectedBi = null; bulkSelected.clear();
+        undoStack = []; redoStack = [];
+        uebernehmeDokumentInOberflaeche();
+        invalidateEckenCache(); invalidateViewCaches(); renderAll();
+      }
+    }
     if (Navigation2d.istUebersicht()) renderProjektListe();
   });
 
@@ -12959,6 +13015,8 @@ let tdSuche       = '';
 let tdOrdnerId    = '';       // '' = alle, '__ohne__' = ohne Ordner, sonst Ordner-ID
 let tdAuswahlModus = false;   // Mehrfachauswahl zum Löschen
 const tdAuswahl    = new Set();
+let tdAuswahlAnker = null;
+let tdLoeschLaeuft = false;
 
 function loadLinkedFolders() {
   try {
@@ -13083,6 +13141,8 @@ function tdProjektKarte(proj, ordner) {
   karte.setAttribute('role', 'button');
   karte.tabIndex = 0;
   karte.dataset.id = proj.id;
+  const loeschend = window.CloudSpeicher?.wirdGeloescht(proj.id) === true;
+  karte.setAttribute('aria-busy', String(loeschend));
   if (proj.id === linkedProjectId) karte.classList.add('aktuell');
   if (tdAuswahlModus) {
     karte.classList.add('auswahl');
@@ -13092,11 +13152,18 @@ function tdProjektKarte(proj, ordner) {
   const kopf = document.createElement('div');
   kopf.className = 'td-project-kopf';
 
-  if (tdAuswahlModus) {
-    const haken = document.createElement('span');
+  {
+    const haken = document.createElement('input');
+    haken.type = 'checkbox';
     haken.className = 'td-project-haken';
-    haken.textContent = tdAuswahl.has(proj.id) ? '✓' : '';
-    haken.setAttribute('aria-hidden', 'true');
+    haken.checked = tdAuswahl.has(proj.id);
+    haken.disabled = loeschend || tdLoeschLaeuft;
+    haken.setAttribute('aria-label', tdProjektName(proj) + ' auswählen');
+    haken.addEventListener('click', ev => {
+      ev.stopPropagation();
+      setzeAuswahlModus(true, true);
+      schalteAuswahl(proj.id, ev.shiftKey);
+    });
     kopf.appendChild(haken);
   }
 
@@ -13152,14 +13219,23 @@ function tdProjektKarte(proj, ordner) {
     ? `${stats.felder} Feld${stats.felder === 1 ? '' : 'er'} · ${geruestFmtNum(stats.flaeche)} m²`
     : 'Noch nichts gezeichnet';
   karte.appendChild(fuss);
+  if (loeschend) {
+    const hinweis = document.createElement('span');
+    hinweis.textContent = 'Wird gelöscht …';
+    hinweis.className = 'td-delete-status';
+    karte.appendChild(hinweis);
+  }
 
-  const aktiviere = () => {
-    if (tdAuswahlModus) { schalteAuswahl(proj.id); return; }
+  const aktiviere = (ev = {}) => {
+    if (loeschend || tdLoeschLaeuft) return;
+    if (tdAuswahlModus || ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+      setzeAuswahlModus(true, true); schalteAuswahl(proj.id, ev.shiftKey); return;
+    }
     oeffneProjektZumZeichnen(proj.id);
   };
   karte.addEventListener('click', aktiviere);
   karte.addEventListener('keydown', ev => {
-    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); aktiviere(); }
+    if (ev.target === karte && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); aktiviere(ev); }
   });
   // Rechtsklick (Desktop) öffnet dasselbe Menü wie der ⋯-Knopf.
   karte.addEventListener('contextmenu', ev => {
@@ -13179,7 +13255,7 @@ function renderProjektListe() {
   const ordner   = loadLinkedFolders();
 
   // Auswahl aufräumen: gelöschte Einträge dürfen nicht ausgewählt bleiben.
-  const vorhanden = new Set(projekte.map(p => p.id));
+  const vorhanden = new Set(tdGefilterteProjekte().map(p => p.id));
   Array.from(tdAuswahl).forEach(id => { if (!vorhanden.has(id)) tdAuswahl.delete(id); });
 
   tdRenderOrdnerLeiste();
@@ -13221,20 +13297,42 @@ function setzeAuswahlModus(an, ohneRender) {
   if (!ohneRender) renderProjektListe();
 }
 
-function schalteAuswahl(id) {
-  if (tdAuswahl.has(id)) tdAuswahl.delete(id); else tdAuswahl.add(id);
+function schalteAuswahl(id, erweitert = false) {
+  if (tdLoeschLaeuft) return;
+  const ids = tdGefilterteProjekte().map(p => p.id);
+  const start = ids.indexOf(tdAuswahlAnker), ende = ids.indexOf(id);
+  if (erweitert && start >= 0 && ende >= 0) {
+    ids.slice(Math.min(start, ende), Math.max(start, ende) + 1).forEach(i => tdAuswahl.add(i));
+  } else {
+    if (tdAuswahl.has(id)) tdAuswahl.delete(id); else tdAuswahl.add(id);
+    tdAuswahlAnker = id;
+  }
   renderProjektListe();
 }
 
 function aktualisiereAuswahlLeiste() {
   const bar = document.getElementById('tdBulkBar');
   if (!bar) return;
-  bar.classList.toggle('hidden', !tdAuswahlModus);
+  bar.classList.toggle('hidden', !tdAuswahl.size);
   const info = document.getElementById('tdBulkInfo');
   const n = tdAuswahl.size;
-  if (info) info.textContent = n === 1 ? '1 Zeichnung ausgewählt' : `${n} Zeichnungen ausgewählt`;
+  if (info) info.textContent = tdLoeschLaeuft ? 'Löschung wird bestätigt …'
+    : n === 1 ? '1 Zeichnung ausgewählt' : `${n} Zeichnungen ausgewählt`;
+  bar.querySelectorAll('button').forEach(b => { b.disabled = tdLoeschLaeuft; });
   const del = document.getElementById('tdBulkLoeschen');
-  if (del) del.disabled = n === 0;
+  if (del) del.disabled = n === 0 || tdLoeschLaeuft;
+}
+
+function verschiebeAusgewaehlteZeichnungen(folderId) {
+  const liste = loadLinkedProjects();
+  let n = 0;
+  liste.forEach(p => {
+    if (!tdAuswahl.has(p.id) || p._cloud?.rolle === 'lesen') return;
+    p.folderId = folderId; n++;
+  });
+  if (schreibeLinkedProjects(liste)) {
+    renderProjektListe(); showToast(n + ' Zeichnung(en) verschoben – Cloud-Sicherung läuft');
+  }
 }
 
 function waehleAlleSichtbaren() {
@@ -13351,15 +13449,23 @@ function legeZeichnungAn(name, folderId) {
 
 /** Entfernt Zeichnungen aus dem Speicher. @returns die entfernten Datensätze. */
 async function loescheZeichnungen(ids) {
+  if (tdLoeschLaeuft) return [];
+  flushAutosave2d();
   const liste   = loadLinkedProjects();
   const ziel = liste.filter(p => ids.indexOf(p.id) >= 0);
   const entfernt = [];
-  for (const projekt of ziel) {
-    if (!window.CloudSpeicher || await window.CloudSpeicher.loeschen(projekt)) entfernt.push(projekt);
-  }
+  tdLoeschLaeuft = true;
+  renderProjektListe();
+  try {
+    for (const projekt of ziel) {
+      if (!window.CloudSpeicher || await window.CloudSpeicher.loeschen(projekt)) entfernt.push(projekt);
+    }
+  } finally { tdLoeschLaeuft = false; renderProjektListe(); }
   if (!entfernt.length) return [];
   const geloescht = new Set(entfernt.map(projekt => projekt.id));
-  if (!schreibeLinkedProjects(liste.filter(p => !geloescht.has(p.id)))) return [];
+  const aktuellGespeichert = loadLinkedProjects();
+  if (aktuellGespeichert.some(p => geloescht.has(p.id)) &&
+      !schreibeLinkedProjects(aktuellGespeichert.filter(p => !geloescht.has(p.id)))) return [];
 
   // Der Zeiger auf „zuletzt geöffnet" darf nicht auf einen gelöschten
   // Datensatz zeigen – sonst sucht der nächste Start ein Projekt, das es
@@ -13372,12 +13478,33 @@ async function loescheZeichnungen(ids) {
 }
 
 /** „Rückgängig" nach dem Löschen. */
-function stelleZeichnungenWiederHer(records) {
+async function stelleZeichnungenWiederHer(records) {
   if (!records || !records.length) return;
-  const liste   = loadLinkedProjects();
-  const bekannt = new Set(liste.map(p => p.id));
-  records.forEach(r => { if (!bekannt.has(r.id)) liste.push(r); });
-  schreibeLinkedProjects(liste);
+  const wiederhergestellt = [];
+  const bekannt = new Set(loadLinkedProjects().map(p => p.id));
+  for (const r of records) {
+    if (bekannt.has(r.id)) continue;
+    const kopie = JSON.parse(JSON.stringify(r));
+    // Eine bewusste Wiederherstellung erhält eine neue ID. Ein alter Tab
+    // darf die gelöschte ID dagegen niemals still wiederbeleben.
+    if (window.CloudSpeicher?.istGeloescht(r.id)) {
+      kopie.id = tdGenId('z2d');
+      delete kopie._cloud;
+      const db = await openPhotosDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+        const req = tx.objectStore(PHOTOS_STORE).index('projectId').openCursor(IDBKeyRange.only(r.id));
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (cursor) { cursor.update({ ...cursor.value, projectId: kopie.id }); cursor.continue(); }
+        };
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+    }
+    wiederhergestellt.push(kopie);
+  }
+  const aktuell = loadLinkedProjects();
+  return schreibeLinkedProjects(aktuell.concat(wiederhergestellt.filter(p => !aktuell.some(x => x.id === p.id))));
 }
 
 /** Löschen mit Sicherheitsabfrage, Toast und Rückgängig-Frist. */
@@ -13388,17 +13515,24 @@ function frageZeichnungenLoeschen(ids) {
   zeigeLoeschDialog(ziel, async () => {
     const entfernt = await loescheZeichnungen(ziel.map(p => p.id));
     if (!entfernt.length) return;
-    setzeAuswahlModus(false, true);
+    entfernt.forEach(p => tdAuswahl.delete(p.id));
+    if (!tdAuswahl.size) setzeAuswahlModus(false, true);
     renderProjektListe();
 
     showToast(
-      entfernt.length === 1 ? `„${tdProjektName(entfernt[0])}" gelöscht`
+      entfernt.length < ziel.length ? `${entfernt.length} von ${ziel.length} gelöscht. Die übrigen bleiben ausgewählt.`
+      : entfernt.length === 1 ? `„${tdProjektName(entfernt[0])}" gelöscht`
                             : `${entfernt.length} Zeichnungen gelöscht`,
       {
         label: 'Rückgängig',
         dauer: 7000,
-        onClick: () => {
-          stelleZeichnungenWiederHer(entfernt);
+        onClick: async () => {
+          try {
+            if (!await stelleZeichnungenWiederHer(entfernt)) return;
+          } catch (_) {
+            showToast('Wiederherstellung fehlgeschlagen. Bitte die lokale Speicherung prüfen.');
+            return;
+          }
           renderProjektListe();
           showToast(entfernt.length === 1 ? 'Wiederhergestellt'
                                           : `${entfernt.length} Zeichnungen wiederhergestellt`);
@@ -13438,6 +13572,7 @@ function dupliziereZeichnung(proj) {
   if (!rec) return;
   const heute = new Date().toISOString().slice(0, 10);
   const kopie = JSON.parse(JSON.stringify(rec));
+  delete kopie._cloud;
   kopie.id        = tdGenId('z2d');
   delete kopie.ausAufmass;        // Herkunftsvermerk gehört nur zum Original
   kopie.name      = (tdProjektName(rec) + ' (Kopie)').trim();
@@ -13625,6 +13760,7 @@ function zeigeLoeschDialog(ziel, onJa) {
 }
 
 function schliesseLoeschDialog() {
+  if (tdLoeschLaeuft) return;
   tdLoeschCb = null;
   tdOverlay('tdLoeschOverlay', false);
 }
@@ -13698,10 +13834,18 @@ function verknuepfeZeichnungsDialoge() {
   });
 
   document.getElementById('tdLoeschAbbrechen')?.addEventListener('click', schliesseLoeschDialog);
-  document.getElementById('tdLoeschBestaetigen')?.addEventListener('click', () => {
+  document.getElementById('tdLoeschBestaetigen')?.addEventListener('click', async () => {
     const cb = tdLoeschCb;
-    schliesseLoeschDialog();
-    if (cb) cb();
+    if (!cb || tdLoeschLaeuft) return;
+    const btn = document.getElementById('tdLoeschBestaetigen');
+    btn.disabled = true; btn.textContent = 'Wird gelöscht …';
+    document.getElementById('tdLoeschAbbrechen').disabled = true;
+    try { await cb(); }
+    finally {
+      btn.disabled = false; btn.textContent = 'Löschen';
+      document.getElementById('tdLoeschAbbrechen').disabled = false;
+      schliesseLoeschDialog();
+    }
   });
   document.getElementById('tdLoeschOverlay')?.addEventListener('click', e => {
     if (e.target.id === 'tdLoeschOverlay') schliesseLoeschDialog();

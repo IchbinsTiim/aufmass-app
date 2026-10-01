@@ -16,6 +16,7 @@ async function pruefe(datei, gk, app) {
   let finish, sending;
   const started = new Promise(r => sending = r);
   const context = {
+    AbortController, console,
     localStorage: { getItem: k => values.get(k), setItem: (k, v) => values.set(k, v) },
     GK: gk, GERUEST_DATEN_EVENT: 'data',
     navigator: { onLine: true }, CustomEvent: class {},

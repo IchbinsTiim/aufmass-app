@@ -64,6 +64,10 @@ async function erstellerErgaenzen<T extends { ownerUserId: string }>(
 }
 
 export function antwortFehler(fehler: unknown) {
+  if (fehler && typeof fehler === 'object' && 'constraint' in fehler &&
+      fehler.constraint === 'cloud_projekt_geloescht') {
+    return NextResponse.json({ error: 'Dieses Projekt wurde bereits gelöscht.' }, { status: 410 });
+  }
   if (fehler instanceof CloudFehler) {
     return NextResponse.json({ error: fehler.message, aktuell: fehler.aktuell ?? null }, { status: fehler.status });
   }

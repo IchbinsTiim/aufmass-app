@@ -1,0 +1,7 @@
+body[data-modul="2d"] .td-project-haken { width: 28px; height: 28px; margin: 8px 0; cursor: pointer; accent-color: var(--accent-2d); }
+body[data-modul="2d"] .td-bulk-bar { position: sticky; top: 64px; z-index: 5; background: var(--surface); box-shadow: 0 6px 20px #0003; }
+body[data-modul="2d"] .td-bulk-bar button { min-height: 44px; }
+body[data-modul="2d"] .td-project-card[aria-busy="true"] { opacity: .65; pointer-events: none; }
+body[data-modul="2d"] .td-delete-status { padding-top: 8px; font-weight: 600; }
+body[data-modul="2d"] #scaffDepthUnit { width: auto; flex: 0 0 80px; }
+body[data-modul="2d"] #scaffDepth[aria-invalid="true"] { outline: 2px solid #ef7373; }
